@@ -16,7 +16,7 @@ use rustc::ty::layout::{self, Align, LayoutOf, TyLayout};
 use base;
 use common::{CodegenCx, C_undef, C_usize};
 use builder::{Builder, MemFlags};
-use value::Value;
+use value::{Value, ValueTrait};
 use type_of::LayoutLlvmExt;
 use type_::Type;
 use glue;
@@ -60,14 +60,14 @@ pub struct OperandRef<'tcx, V> {
     pub layout: TyLayout<'tcx>,
 }
 
-impl fmt::Debug for OperandRef<'tcx, &'ll Value> {
+impl<Value : ?Sized> fmt::Debug for OperandRef<'tcx, &'ll Value> where Value : ValueTrait {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "OperandRef({:?} @ {:?})", self.val, self.layout)
     }
 }
 
 impl OperandRef<'tcx, &'ll Value> {
-    pub fn new_zst(cx: &CodegenCx<'ll, 'tcx>,
+    pub fn new_zst(cx: &CodegenCx<'ll, 'tcx, &'ll Value>,
                    layout: TyLayout<'tcx>) -> OperandRef<'tcx, &'ll Value> {
         assert!(layout.is_zst());
         OperandRef {
@@ -76,7 +76,7 @@ impl OperandRef<'tcx, &'ll Value> {
         }
     }
 
-    pub fn from_const(bx: &Builder<'a, 'll, 'tcx>,
+    pub fn from_const(bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
                       val: &'tcx ty::Const<'tcx>)
                       -> Result<OperandRef<'tcx, &'ll Value>, ErrorHandled> {
         let layout = bx.cx.layout_of(val.ty);
@@ -140,7 +140,7 @@ impl OperandRef<'tcx, &'ll Value> {
         }
     }
 
-    pub fn deref(self, cx: &CodegenCx<'ll, 'tcx>) -> PlaceRef<'tcx, &'ll Value> {
+    pub fn deref(self, cx: &CodegenCx<'ll, 'tcx, &'ll Value>) -> PlaceRef<'tcx, &'ll Value> {
         let projected_ty = self.layout.ty.builtin_deref(true)
             .unwrap_or_else(|| bug!("deref of non-pointer {:?}", self)).ty;
         let (llptr, llextra) = match self.val {
@@ -159,7 +159,7 @@ impl OperandRef<'tcx, &'ll Value> {
 
     /// If this operand is a `Pair`, we return an aggregate with the two values.
     /// For other cases, see `immediate`.
-    pub fn immediate_or_packed_pair(self, bx: &Builder<'a, 'll, 'tcx>) -> &'ll Value {
+    pub fn immediate_or_packed_pair(self, bx: &Builder<'a, 'll, 'tcx, &'ll Value>) -> &'ll Value {
         if let OperandValue::Pair(a, b) = self.val {
             let llty = self.layout.llvm_type(bx.cx);
             debug!("Operand::immediate_or_packed_pair: packing {:?} into {:?}",
@@ -175,7 +175,7 @@ impl OperandRef<'tcx, &'ll Value> {
     }
 
     /// If the type is a pair, we return a `Pair`, otherwise, an `Immediate`.
-    pub fn from_immediate_or_packed_pair(bx: &Builder<'a, 'll, 'tcx>,
+    pub fn from_immediate_or_packed_pair(bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
                                          llval: &'ll Value,
                                          layout: TyLayout<'tcx>)
                                          -> OperandRef<'tcx, &'ll Value> {
@@ -193,7 +193,10 @@ impl OperandRef<'tcx, &'ll Value> {
         OperandRef { val, layout }
     }
 
-    pub fn extract_field(&self, bx: &Builder<'a, 'll, 'tcx>, i: usize) -> OperandRef<'tcx, &'ll Value> {
+    pub fn extract_field(
+        &self, bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
+        i: usize
+    ) -> OperandRef<'tcx, &'ll Value> {
         let field = self.layout.field(bx.cx, i);
         let offset = self.layout.fields.offset(i);
 
@@ -252,25 +255,29 @@ impl OperandRef<'tcx, &'ll Value> {
 }
 
 impl OperandValue<&'ll Value> {
-    pub fn store(self, bx: &Builder<'a, 'll, 'tcx>, dest: PlaceRef<'tcx, &'ll Value>) {
+    pub fn store(self, bx: &Builder<'a, 'll, 'tcx, &'ll Value>, dest: PlaceRef<'tcx, &'ll Value>) {
         self.store_with_flags(bx, dest, MemFlags::empty());
     }
 
-    pub fn volatile_store(self, bx: &Builder<'a, 'll, 'tcx>, dest: PlaceRef<'tcx, &'ll Value>) {
+    pub fn volatile_store(self, bx: &Builder<'a, 'll, 'tcx, &'ll Value>, dest: PlaceRef<'tcx, &'ll Value>) {
         self.store_with_flags(bx, dest, MemFlags::VOLATILE);
     }
 
-    pub fn unaligned_volatile_store(self, bx: &Builder<'a, 'll, 'tcx>, dest: PlaceRef<'tcx, &'ll Value>) {
+    pub fn unaligned_volatile_store(
+        self,
+        bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
+        dest: PlaceRef<'tcx, &'ll Value>
+    ) {
         self.store_with_flags(bx, dest, MemFlags::VOLATILE | MemFlags::UNALIGNED);
     }
 
-    pub fn nontemporal_store(self, bx: &Builder<'a, 'll, 'tcx>, dest: PlaceRef<'tcx, &'ll Value>) {
+    pub fn nontemporal_store(self, bx: &Builder<'a, 'll, 'tcx, &'ll Value>, dest: PlaceRef<'tcx, &'ll Value>) {
         self.store_with_flags(bx, dest, MemFlags::NONTEMPORAL);
     }
 
     fn store_with_flags(
         self,
-        bx: &Builder<'a, 'll, 'tcx>,
+        bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
         dest: PlaceRef<'tcx, &'ll Value>,
         flags: MemFlags,
     ) {
@@ -332,9 +339,9 @@ impl OperandValue<&'ll Value> {
     }
 }
 
-impl FunctionCx<'a, 'll, 'tcx> {
+impl FunctionCx<'a, 'll, 'tcx, &'ll Value> {
     fn maybe_codegen_consume_direct(&mut self,
-                                  bx: &Builder<'a, 'll, 'tcx>,
+                                  bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
                                   place: &mir::Place<'tcx>)
                                    -> Option<OperandRef<'tcx, &'ll Value>>
     {
@@ -382,7 +389,7 @@ impl FunctionCx<'a, 'll, 'tcx> {
     }
 
     pub fn codegen_consume(&mut self,
-                         bx: &Builder<'a, 'll, 'tcx>,
+                         bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
                          place: &mir::Place<'tcx>)
                          -> OperandRef<'tcx, &'ll Value>
     {
@@ -406,7 +413,7 @@ impl FunctionCx<'a, 'll, 'tcx> {
     }
 
     pub fn codegen_operand(&mut self,
-                         bx: &Builder<'a, 'll, 'tcx>,
+                         bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
                          operand: &mir::Operand<'tcx>)
                          -> OperandRef<'tcx, &'ll Value>
     {

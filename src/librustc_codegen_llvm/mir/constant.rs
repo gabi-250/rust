@@ -31,7 +31,7 @@ use super::super::callee;
 use super::FunctionCx;
 
 pub fn scalar_to_llvm(
-    cx: &CodegenCx<'ll, '_>,
+    cx: &CodegenCx<'ll, '_, &'ll Value>,
     cv: Scalar,
     layout: &layout::Scalar,
     llty: &'ll Type,
@@ -85,7 +85,7 @@ pub fn scalar_to_llvm(
     }
 }
 
-pub fn const_alloc_to_llvm(cx: &CodegenCx<'ll, '_>, alloc: &Allocation) -> &'ll Value {
+pub fn const_alloc_to_llvm(cx: &CodegenCx<'ll, '_, &'ll Value>, alloc: &Allocation) -> &'ll Value {
     let mut llvals = Vec::with_capacity(alloc.relocations.len() + 1);
     let dl = cx.data_layout();
     let pointer_size = dl.pointer_size.bytes() as usize;
@@ -121,7 +121,7 @@ pub fn const_alloc_to_llvm(cx: &CodegenCx<'ll, '_>, alloc: &Allocation) -> &'ll 
 }
 
 pub fn codegen_static_initializer(
-    cx: &CodegenCx<'ll, 'tcx>,
+    cx: &CodegenCx<'ll, 'tcx, &'ll Value>,
     def_id: DefId,
 ) -> Result<(&'ll Value, &'tcx Allocation), ErrorHandled> {
     let instance = ty::Instance::mono(cx.tcx, def_id);
@@ -139,10 +139,10 @@ pub fn codegen_static_initializer(
     Ok((const_alloc_to_llvm(cx, alloc), alloc))
 }
 
-impl FunctionCx<'a, 'll, 'tcx> {
+impl FunctionCx<'a, 'll, 'tcx, &'ll Value> {
     fn fully_evaluate(
         &mut self,
-        bx: &Builder<'a, 'll, 'tcx>,
+        bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
         constant: &'tcx ty::Const<'tcx>,
     ) -> Result<&'tcx ty::Const<'tcx>, ErrorHandled> {
         match constant.val {
@@ -162,7 +162,7 @@ impl FunctionCx<'a, 'll, 'tcx> {
 
     pub fn eval_mir_constant(
         &mut self,
-        bx: &Builder<'a, 'll, 'tcx>,
+        bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
         constant: &mir::Constant<'tcx>,
     ) -> Result<&'tcx ty::Const<'tcx>, ErrorHandled> {
         let c = self.monomorphize(&constant.literal);
@@ -172,7 +172,7 @@ impl FunctionCx<'a, 'll, 'tcx> {
     /// process constant containing SIMD shuffle indices
     pub fn simd_shuffle_indices(
         &mut self,
-        bx: &Builder<'a, 'll, 'tcx>,
+        bx: &Builder<'a, 'll, 'tcx, &'ll Value>,
         span: Span,
         ty: Ty<'tcx>,
         constant: Result<&'tcx ty::Const<'tcx>, ErrorHandled>,
