@@ -75,6 +75,7 @@ use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_data_structures::sync::Lrc;
 
 use traits::BuilderMethods;
+use llvm::BasicBlock;
 
 use std::any::Any;
 use std::cmp;
@@ -391,7 +392,7 @@ pub fn call_assume(bx: &Builder<'_, 'll, '_, &'ll Value>, val: &'ll Value) {
 
 pub fn from_immediate<'a, 'll: 'a, 'tcx: 'll,
     Value : ?Sized,
-    Builder: BuilderMethods<'a, 'll, 'tcx, Value>>(
+    Builder: BuilderMethods<'a, 'll, 'tcx, Value, BasicBlock>>(
     bx: &Builder,
     val: &'ll Value
 ) -> &'ll Value where Value : ValueTrait {
@@ -426,7 +427,7 @@ pub fn to_immediate_scalar(
 
 pub fn call_memcpy<'a, 'll: 'a, 'tcx: 'll,
     Value : ?Sized,
-    Builder: BuilderMethods<'a, 'll, 'tcx, Value>>(
+    Builder: BuilderMethods<'a, 'll, 'tcx, Value, BasicBlock>>(
     bx: &Builder,
     dst: &'ll Value,
     src: &'ll Value,
@@ -455,7 +456,7 @@ pub fn call_memcpy<'a, 'll: 'a, 'tcx: 'll,
 
 pub fn memcpy_ty<'a, 'll: 'a, 'tcx: 'll,
     Value : ?Sized,
-    Builder: BuilderMethods<'a, 'll, 'tcx, Value>>(
+    Builder: BuilderMethods<'a, 'll, 'tcx, Value, BasicBlock>>(
     bx: &Builder,
     dst: &'ll Value,
     src: &'ll Value,
