@@ -119,7 +119,7 @@ impl LlvmType for Reg {
                 }
             }
             RegKind::Vector => {
-                Type::vector::<Value>(Type::i8(cx), self.size.bytes())
+                Type::vector(Type::i8(cx), self.size.bytes())
             }
         }
     }
@@ -143,7 +143,7 @@ impl LlvmType for CastTarget {
 
             // Simplify to array when all chunks are the same size and type
             if rem_bytes == 0 {
-                return Type::array::<Value>(rest_ll_unit, rest_count);
+                return Type::array(rest_ll_unit, rest_count);
             }
         }
 
@@ -670,9 +670,9 @@ impl<'tcx> FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
         }
 
         if self.variadic {
-            Type::variadic_func::<Value>(&llargument_tys, llreturn_ty)
+            Type::variadic_func(&llargument_tys, llreturn_ty)
         } else {
-            Type::func::<Value>(&llargument_tys, llreturn_ty)
+            Type::func(&llargument_tys, llreturn_ty)
         }
     }
 
