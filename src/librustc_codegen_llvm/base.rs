@@ -55,7 +55,7 @@ use builder::{Builder, MemFlags};
 use callee;
 use common::{C_bool, C_bytes_in_context, C_i32, C_usize};
 use rustc_mir::monomorphize::item::DefPathBasedNames;
-use common::{C_struct_in_context, C_array, val_ty};
+use common::{C_struct_in_context, C_array, val_ty, IntPredicate, RealPredicate};
 use consts;
 use context::CodegenCx;
 use debuginfo;
@@ -74,7 +74,7 @@ use CrateInfo;
 use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_data_structures::sync::Lrc;
 
-use traits::{IntPredicate, RealPredicate, BuilderMethods};
+use interfaces::BuilderMethods;
 
 use std::any::Any;
 use std::cmp;

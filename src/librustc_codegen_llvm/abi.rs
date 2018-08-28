@@ -19,6 +19,8 @@ use type_::Type;
 use type_of::{LayoutLlvmExt, PointerKind};
 use value::Value;
 
+use interfaces::BuilderMethods;
+
 use rustc_target::abi::{LayoutOf, Size, TyLayout, Abi as LayoutAbi};
 use rustc::ty::{self, Ty};
 use rustc::ty::layout;
