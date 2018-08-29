@@ -84,7 +84,7 @@ pub fn get_fn(
         // This can occur on either a crate-local or crate-external
         // reference. It also occurs when testing libcore and in some
         // other weird situations. Annoying.
-        if CodegenCx::val_ty(llfn) != llptrty {
+        if cx.val_ty(llfn) != llptrty {
             debug!("get_fn: casting {:?} to {:?}", llfn, llptrty);
             consts::ptrcast(llfn, llptrty)
         } else {
