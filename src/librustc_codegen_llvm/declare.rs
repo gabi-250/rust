@@ -95,7 +95,7 @@ fn declare_raw_fn(
     llfn
 }
 
-impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
+impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
 
     /// Declare a global value.
     ///
