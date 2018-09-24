@@ -141,6 +141,13 @@ impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
         let sig = self.tcx.normalize_erasing_late_bound_regions(ty::ParamEnv::reveal_all(), &sig);
         debug!("declare_rust_fn (after region erasure) sig={:?}", sig);
 
+        let fty = FnType::new(self, sig, &[]);
+        let llfn = declare_raw_fn(self, name, fty.llvm_cconv(), fty.llvm_type(self));
+
+        if self.layout_of(sig.output()).abi.is_uninhabited() {
+            llvm::Attribute::NoReturn.apply_llfn(Function, llfn);
+        }
+
         if sig.abi != Abi::Rust && sig.abi != Abi::RustCall {
             attributes::unwind(llfn, false);
         }
