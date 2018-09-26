@@ -27,6 +27,7 @@ use super::ModuleLlvm;
 use super::ModuleCodegen;
 use super::ModuleKind;
 use super::CachedModuleCodegen;
+use super::LlvmCodegenBackend;
 
 use abi;
 use back::write;
@@ -54,8 +55,6 @@ use callee;
 use rustc_mir::monomorphize::collector::{self, MonoItemCollectionMode};
 use rustc_mir::monomorphize::item::DefPathBasedNames;
 use common::{self, IntPredicate, RealPredicate, TypeKind};
-use context::CodegenCx;
-use debuginfo;
 use meth;
 use mir;
 use monomorphize::Instance;
@@ -720,9 +719,9 @@ fn determine_cgu_reuse<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
     }
 }
 
-pub fn codegen_crate<'a, 'tcx, B : BackendMethods>(
+pub fn codegen_crate<'a, 'll: 'a, 'tcx: 'll, B : BackendMethods<'a, 'll, 'tcx>>(
     backend: B,
-    tcx: TyCtxt<'a, 'tcx, 'tcx>,
+    tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     rx: mpsc::Receiver<Box<dyn Any + Send>>
 ) -> B::OngoingCodegen {
 
@@ -941,6 +940,7 @@ pub fn codegen_crate<'a, 'tcx, B : BackendMethods>(
     ongoing_codegen.into_inner()
 }
 
+=======
 /// A curious wrapper structure whose only purpose is to call `codegen_aborted`
 /// when it's dropped abnormally.
 ///
@@ -968,6 +968,83 @@ impl AbortCodegenOnDrop {
 
 impl Deref for AbortCodegenOnDrop {
     type Target = OngoingCodegen;
+}
+
+fn assert_and_save_dep_graph<'ll, 'tcx>(tcx: TyCtxt<'ll, 'tcx, 'tcx>) {
+    time(tcx.sess,
+         "assert dep graph",
+         || rustc_incremental::assert_dep_graph(tcx));
+
+    time(tcx.sess,
+         "serialize dep graph",
+         || rustc_incremental::save_dep_graph(tcx));
+}
+
+fn collect_and_partition_mono_items<'ll, 'tcx>(
+    tcx: TyCtxt<'ll, 'tcx, 'tcx>,
+    cnum: CrateNum,
+) -> (Arc<DefIdSet>, Arc<Vec<Arc<CodegenUnit<'tcx>>>>)
+{
+    assert_eq!(cnum, LOCAL_CRATE);
+
+    let collection_mode = match tcx.sess.opts.debugging_opts.print_mono_items {
+        Some(ref s) => {
+            let mode_string = s.to_lowercase();
+            let mode_string = mode_string.trim();
+            if mode_string == "eager" {
+                MonoItemCollectionMode::Eager
+            } else {
+                if mode_string != "lazy" {
+                    let message = format!("Unknown codegen-item collection mode '{}'. \
+                                           Falling back to 'lazy' mode.",
+                                          mode_string);
+                    tcx.sess.warn(&message);
+                }
+
+                MonoItemCollectionMode::Lazy
+            }
+        }
+        None => {
+            if tcx.sess.opts.cg.link_dead_code {
+                MonoItemCollectionMode::Eager
+            } else {
+                MonoItemCollectionMode::Lazy
+            }
+        }
+    };
+
+    let (items, inlining_map) =
+        time(tcx.sess, "monomorphization collection", || {
+            collector::collect_crate_mono_items(tcx, collection_mode)
+    });
+
+    tcx.sess.abort_if_errors();
+
+    ::rustc_mir::monomorphize::assert_symbols_are_distinct(tcx, items.iter());
+
+    let strategy = if tcx.sess.opts.incremental.is_some() {
+        PartitioningStrategy::PerModule
+    } else {
+        PartitioningStrategy::FixedUnitCount(tcx.sess.codegen_units())
+    };
+
+    let codegen_units = time(tcx.sess, "codegen unit partitioning", || {
+        partitioning::partition(tcx,
+                                items.iter().cloned(),
+                                strategy,
+                                &inlining_map)
+            .into_iter()
+            .map(Arc::new)
+            .collect::<Vec<_>>()
+    });
+
+    let mono_items: DefIdSet = items.iter().filter_map(|mono_item| {
+        match *mono_item {
+            MonoItem::Fn(ref instance) => Some(instance.def_id()),
+            MonoItem::Static(def_id) => Some(def_id),
+            _ => None,
+        }
+    }).collect();
 
     fn deref(&self) -> &OngoingCodegen {
         self.0.as_ref().unwrap()
@@ -1087,7 +1164,13 @@ impl CrateInfo {
     }
 }
 
-fn compile_codegen_unit<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
+fn is_codegened_item(tcx: TyCtxt, id: DefId) -> bool {
+    let (all_mono_items, _) =
+        tcx.collect_and_partition_mono_items(LOCAL_CRATE);
+    all_mono_items.contains(&id)
+}
+
+fn compile_codegen_unit<'ll, 'tcx>(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
                                   cgu_name: InternedString)
                                   -> Stats {
     let start_time = Instant::now();
@@ -1109,26 +1192,26 @@ fn compile_codegen_unit<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                                            cost);
     return stats;
 
-    fn module_codegen<'a, 'tcx>(
-        tcx: TyCtxt<'a, 'tcx, 'tcx>,
+    fn module_codegen<'ll, 'tcx>(
+        tcx: TyCtxt<'ll, 'tcx, 'tcx>,
         cgu_name: InternedString)
         -> (Stats, ModuleCodegen<ModuleLlvm>)
     {
+        let backend = LlvmCodegenBackend(());
         let cgu = tcx.codegen_unit(cgu_name);
-
         // Instantiate monomorphizations without filling out definitions yet...
-        let llvm_module = ModuleLlvm::new(tcx.sess, &cgu_name.as_str());
+        let llvm_module = backend.new_metadata(tcx.sess, &cgu_name.as_str());
         let stats = {
-            let cx = CodegenCx::new(tcx, cgu, &llvm_module);
+            let cx = backend.new_codegen_context(tcx, cgu, &llvm_module);
             let mono_items = cx.codegen_unit
                                .items_in_deterministic_order(cx.tcx);
             for &(mono_item, (linkage, visibility)) in &mono_items {
-                mono_item.predefine(&cx, linkage, visibility);
+                mono_item.predefine::<Builder<&Value>>(&cx, linkage, visibility);
             }
 
             // ... and now that we have everything pre-defined, fill out those definitions.
             for &(mono_item, _) in &mono_items {
-                mono_item.define(&cx);
+                mono_item.define::<Builder<&Value>>(&cx);
             }
 
             // If this codegen unit contains the main function, also create the
@@ -1136,40 +1219,22 @@ fn compile_codegen_unit<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
             maybe_create_entry_wrapper::<Builder<&Value>>(&cx);
 
             // Run replace-all-uses-with for statics that need it
-            for &(old_g, new_g) in cx.statics_to_rauw.borrow().iter() {
-                unsafe {
-                    let bitcast = llvm::LLVMConstPointerCast(new_g, cx.val_ty(old_g));
-                    llvm::LLVMReplaceAllUsesWith(old_g, bitcast);
-                    llvm::LLVMDeleteGlobal(old_g);
-                }
+            for &(old_g, new_g) in cx.statics_to_rauw().borrow().iter() {
+                cx.static_replace_all_uses(old_g, new_g)
             }
 
             // Create the llvm.used variable
             // This variable has type [N x i8*] and is stored in the llvm.metadata section
-            if !cx.used_statics.borrow().is_empty() {
-                let name = const_cstr!("llvm.used");
-                let section = const_cstr!("llvm.metadata");
-                let array = cx.const_array(
-                    &cx.type_ptr_to(cx.type_i8()),
-                    &*cx.used_statics.borrow()
-                );
-
-                unsafe {
-                    let g = llvm::LLVMAddGlobal(cx.llmod,
-                                                cx.val_ty(array),
-                                                name.as_ptr());
-                    llvm::LLVMSetInitializer(g, array);
-                    llvm::LLVMRustSetLinkage(g, llvm::Linkage::AppendingLinkage);
-                    llvm::LLVMSetSection(g, section.as_ptr());
-                }
+            if !cx.used_statics().borrow().is_empty() {
+                cx.create_used_variable()
             }
 
             // Finalize debuginfo
             if cx.sess().opts.debuginfo != DebugInfo::None {
-                debuginfo::finalize(&cx);
+                cx.debuginfo_finalize();
             }
 
-            cx.stats.into_inner()
+            cx.consume_stats().into_inner()
         };
 
         (stats, ModuleCodegen {
