@@ -101,9 +101,9 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: CodegenMethods<'ll, 'tcx>>
                 });
 
                 if input_vals.len() == inputs.len() {
-                    let res = asm::codegen_inline_asm(&bx, asm, outputs, input_vals);
+                    let res = bx.codegen_inline_asm(asm, outputs, input_vals);
                     if !res {
-                        span_err!(bx.cx.sess(), statement.source_info.span, E0668,
+                        span_err!(bx.cx().sess(), statement.source_info.span, E0668,
                                   "malformed inline assembly");
                     }
                 }
