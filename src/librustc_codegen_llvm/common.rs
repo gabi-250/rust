@@ -65,19 +65,6 @@ impl<V> OperandBundleDef<'ll, V> {
     }
 }
 
-pub enum IntPredicate {
-    IntEQ,
-    IntNE,
-    IntUGT,
-    IntUGE,
-    IntULT,
-    IntULE,
-    IntSGT,
-    IntSGE,
-    IntSLT,
-    IntSLE
-}
-
 #[allow(dead_code)]
 pub enum RealPredicate {
     RealPredicateFalse,
