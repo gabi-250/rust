@@ -10,8 +10,9 @@
 
 use llvm::{AtomicRmwBinOp, AtomicOrdering, SynchronizationScope, AsmDialect};
 use llvm::{self, False, OperandBundleDef, BasicBlock};
-use common::{self, *};
-use rustc_codegen_utils::common::IntPredicate;
+use common;
+use rustc_codegen_utils::common::{IntPredicate, TypeKind, RealPredicate};
+use rustc_codegen_utils;
 use context::CodegenCx;
 use type_::Type;
 use type_of::LayoutLlvmExt;
@@ -514,7 +515,7 @@ impl BuilderMethods<'a, 'll, 'tcx>
     fn atomic_load(
         &self,
         ptr: &'ll Value,
-        order: common::AtomicOrdering,
+        order: rustc_codegen_utils::common::AtomicOrdering,
         align: Align
     ) -> &'ll Value {
         self.count_insn("load.atomic");
@@ -634,7 +635,7 @@ impl BuilderMethods<'a, 'll, 'tcx>
     }
 
     fn atomic_store(&self, val: &'ll Value, ptr: &'ll Value,
-                        order: common::AtomicOrdering, align: Align) {
+                        order: rustc_codegen_utils::common::AtomicOrdering, align: Align) {
         debug!("Store {:?} -> {:?}", val, ptr);
         self.count_insn("store.atomic");
         let ptr = self.check_store(val, ptr);
@@ -1165,8 +1166,8 @@ impl BuilderMethods<'a, 'll, 'tcx>
         dst: &'ll Value,
         cmp: &'ll Value,
         src: &'ll Value,
-        order: common::AtomicOrdering,
-        failure_order: common::AtomicOrdering,
+        order: rustc_codegen_utils::common::AtomicOrdering,
+        failure_order: rustc_codegen_utils::common::AtomicOrdering,
         weak: bool,
     ) -> &'ll Value {
         let weak = if weak { llvm::True } else { llvm::False };
@@ -1184,10 +1185,10 @@ impl BuilderMethods<'a, 'll, 'tcx>
     }
     fn atomic_rmw(
         &self,
-        op: common::AtomicRmwBinOp,
+        op: rustc_codegen_utils::common::AtomicRmwBinOp,
         dst: &'ll Value,
         src: &'ll Value,
-        order: common::AtomicOrdering,
+        order: rustc_codegen_utils::common::AtomicOrdering,
     ) -> &'ll Value {
         unsafe {
             llvm::LLVMBuildAtomicRMW(
@@ -1200,7 +1201,11 @@ impl BuilderMethods<'a, 'll, 'tcx>
         }
     }
 
-    fn atomic_fence(&self, order: common::AtomicOrdering, scope: common::SynchronizationScope) {
+    fn atomic_fence(
+        &self,
+        order: rustc_codegen_utils::common::AtomicOrdering,
+        scope: rustc_codegen_utils::common::SynchronizationScope
+    ) {
         unsafe {
             llvm::LLVMRustBuildAtomicFence(
                 self.llbuilder,
