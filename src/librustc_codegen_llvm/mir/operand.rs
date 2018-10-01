@@ -10,8 +10,9 @@
 
 use rustc::mir::interpret::{ConstValue, ErrorHandled};
 use rustc::mir;
-use rustc::ty;
-use rustc::ty::layout::{self, Align, LayoutOf, TyLayout};
+use rustc::ty::{self, Ty};
+use rustc::ty::layout::{self, Align, LayoutOf, TyLayout, HasTyCtxt};
+use rustc_data_structures::sync::Lrc;
 
 use base;
 use builder::{Builder, MemFlags};
@@ -114,8 +115,7 @@ impl<'a, 'll: 'a, 'tcx: 'll, V : 'll + CodegenObject> OperandRef<'tcx, V> {
                     bx.cx().scalar_pair_element_backend_type(&layout, 0, true),
                 );
                 let b_layout = bx.cx().scalar_pair_element_backend_type(&layout, 1, true);
-                let b_llval = scalar_to_llvm(
-                    bx.cx(),
+                let b_llval = bx.cx().scalar_to_backend(
                     b,
                     b_scalar,
                     b_layout,
