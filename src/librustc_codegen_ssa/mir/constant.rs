@@ -8,17 +8,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc::mir::interpret::{ConstEvalErr, read_target_uint};
+use rustc::mir::interpret::ConstEvalErr;
 use rustc_mir::const_eval::const_field;
-use rustc::hir::def_id::DefId;
 use rustc::mir;
 use rustc_data_structures::indexed_vec::Idx;
 use rustc::mir::interpret::{GlobalId, Pointer, Scalar, Allocation, ConstValue, AllocType};
 use rustc::ty::{self, Ty};
-use rustc::ty::layout::{self, HasDataLayout, LayoutOf, Size, TyLayout, HasTyCtxt};
-use common::CodegenCx;
+use rustc::ty::layout::{self, LayoutOf, TyLayout, HasTyCtxt};
 use syntax::source_map::Span;
-use value::Value;
 use interfaces::*;
 
 use super::FunctionCx;
