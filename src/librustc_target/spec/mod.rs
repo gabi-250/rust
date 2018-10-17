@@ -761,7 +761,8 @@ impl Default for TargetOptions {
             singlethread: false,
             no_builtins: false,
             i128_lowering: false,
-            codegen_backend: "llvm".to_string(),
+            codegen_backend: option_env!("CFG_CODEGEN_BACKEND")
+                .map_or("llvm".to_string(), |s| s.to_string()),
             default_hidden_visibility: false,
             embed_bitcode: false,
             emit_debug_gdb_scripts: true,
