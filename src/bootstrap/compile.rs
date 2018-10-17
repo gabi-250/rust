@@ -528,6 +528,7 @@ pub fn rustc_cargo_env(builder: &Builder, cargo: &mut Command) {
          .env("CFG_RELEASE_CHANNEL", &builder.config.channel)
          .env("CFG_VERSION", builder.rust_version())
          .env("CFG_PREFIX", builder.config.prefix.clone().unwrap_or_default())
+         .env("CFG_CODEGEN_BACKEND", &builder.config.rust_codegen_backends[0])
          .env("CFG_CODEGEN_BACKENDS_DIR", &builder.config.rust_codegen_backends_dir);
 
     let libdir_relative = builder.config.libdir_relative().unwrap_or(Path::new("lib"));
@@ -646,11 +647,12 @@ impl Step for CodegenBackend {
         let out_dir = builder.cargo_out(compiler, Mode::Codegen, target);
 
         let mut cargo = builder.cargo(compiler, Mode::Codegen, target, "rustc");
-        cargo.arg("--manifest-path")
-            .arg(builder.src.join("src/librustc_codegen_llvm/Cargo.toml"));
+        cargo.arg("--manifest-path").arg(
+            builder.src.join(format!("src/librustc_codegen_{}/Cargo.toml", backend)));
         rustc_cargo_env(builder, &mut cargo);
 
-        let features = build_codegen_backend(&builder, &mut cargo, &compiler, target, backend);
+        let features = build_codegen_backend(
+            &builder, &mut cargo, &compiler, target, backend);
 
         let mut cargo_tails_args = vec![];
 
@@ -682,7 +684,8 @@ impl Step for CodegenBackend {
 
         let tmp_stamp = out_dir.join(".tmp.stamp");
 
-        let _folder = builder.fold_output(|| format!("stage{}-rustc_codegen_llvm", compiler.stage));
+        let _folder = builder.fold_output(
+            || format!("stage{}-rustc_codegen_{}", compiler.stage, backend));
         let files = run_cargo(builder,
                               cargo.arg("--features").arg(features),
                               cargo_tails_args,
@@ -691,10 +694,11 @@ impl Step for CodegenBackend {
         if builder.config.dry_run {
             return;
         }
+        let backend_identifier = &format!("rustc_codegen_{}-", backend)[..];
         let mut files = files.into_iter()
             .filter(|f| {
                 let filename = f.file_name().unwrap().to_str().unwrap();
-                is_dylib(filename) && filename.contains("rustc_codegen_llvm-")
+                is_dylib(filename) && filename.contains(backend_identifier)
             });
         let codegen_backend = match files.next() {
             Some(f) => f,
@@ -761,6 +765,9 @@ pub fn build_codegen_backend(builder: &Builder,
             if builder.config.llvm_link_shared {
                 cargo.env("LLVM_LINK_SHARED", "1");
             }
+        }
+        "ironox" => {
+            cargo.arg("--verbose");
         }
         _ => panic!("unknown backend: {}", backend),
     }

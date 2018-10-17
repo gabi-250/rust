@@ -353,7 +353,11 @@ fn get_codegen_sysroot(backend_name: &str) -> fn() -> Box<dyn CodegenBackend> {
 
     let mut file: Option<PathBuf> = None;
 
-    let expected_name = format!("rustc_codegen_llvm-{}", backend_name);
+    let expected_name = if backend_name == "ironox" {
+        format!("rustc_codegen_{}-{}", backend_name, backend_name)
+    } else {
+        format!("rustc_codegen_llvm-{}", backend_name)
+    };
     for entry in d.filter_map(|e| e.ok()) {
         let path = entry.path();
         let filename = match path.file_name().and_then(|s| s.to_str()) {
@@ -1146,7 +1150,9 @@ pub fn version(binary: &str, matches: &getopts::Matches) {
         println!("commit-date: {}", unw(commit_date_str()));
         println!("host: {}", config::host_triple());
         println!("release: {}", unw(release_str()));
-        get_codegen_sysroot("llvm")().print_version();
+        let backend = option_env!("CFG_CODEGEN_BACKEND")
+            .map_or("llvm".to_string(), |s| s.to_string());
+        get_codegen_sysroot(&backend)().print_version();
     }
 }
 
@@ -1444,7 +1450,9 @@ pub fn handle_options(args: &[String]) -> Option<getopts::Matches> {
     }
 
     if cg_flags.iter().any(|x| *x == "passes=list") {
-        get_codegen_sysroot("llvm")().print_passes();
+        let backend = &option_env!("CFG_CODEGEN_BACKEND")
+            .map_or("llvm".to_string(), |s| s.to_string())[..];
+        get_codegen_sysroot(backend)().print_passes();
         return None;
     }
 
