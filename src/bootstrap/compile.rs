@@ -522,13 +522,15 @@ pub fn rustc_cargo(builder: &Builder, cargo: &mut Command) {
 }
 
 pub fn rustc_cargo_env(builder: &Builder, cargo: &mut Command) {
+    let backend = builder.config.rust_codegen_backends.get(0).cloned()
+        .unwrap_or(INTERNER.intern_str("llvm"));
     // Set some configuration variables picked up by build scripts and
     // the compiler alike
     cargo.env("CFG_RELEASE", builder.rust_release())
          .env("CFG_RELEASE_CHANNEL", &builder.config.channel)
          .env("CFG_VERSION", builder.rust_version())
          .env("CFG_PREFIX", builder.config.prefix.clone().unwrap_or_default())
-         .env("CFG_CODEGEN_BACKEND", &builder.config.rust_codegen_backends[0])
+         .env("CFG_CODEGEN_BACKEND", backend)
          .env("CFG_CODEGEN_BACKENDS_DIR", &builder.config.rust_codegen_backends_dir);
 
     let libdir_relative = builder.config.libdir_relative().unwrap_or(Path::new("lib"));
