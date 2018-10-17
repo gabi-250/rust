@@ -40,6 +40,8 @@ use rustc_data_structures::sync::{self, MetadataRef, Lrc};
 
 pub use self::NativeLibraryKind::*;
 
+pub const METADATA_FILENAME: &str = "rust.metadata.bin";
+
 // lonely orphan structs and enums looking for a better home
 
 /// Where a crate came from on the local filesystem. One of these three options
