@@ -21,8 +21,7 @@ use std::slice;
 use rustc_fs_util::path2cstr;
 
 pub use rustc_data_structures::sync::MetadataRef;
-
-pub const METADATA_FILENAME: &str = "rust.metadata.bin";
+pub use rustc::middle::cstore::METADATA_FILENAME;
 
 pub struct LlvmMetadataLoader;
 
