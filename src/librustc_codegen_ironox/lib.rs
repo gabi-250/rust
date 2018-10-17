@@ -104,10 +104,6 @@ impl CodegenBackend for IronOxCodegenBackend {
                     for bb in mir.basic_blocks() {
                         eprintln!("Statements: {:?}", bb.statements);
                     }
-                    if def_id.is_local() {
-                        let _ = inst.def.is_inline(tcx);
-                        let _ = tcx.codegen_fn_attrs(def_id);
-                    }
                 }
                 _ => {}
             }
