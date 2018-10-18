@@ -39,13 +39,17 @@ extern crate syntax;
 extern crate syntax_pos;
 #[macro_use] extern crate rustc_data_structures;
 extern crate rustc_metadata_utils;
+extern crate rustc_allocator;
 
 use rustc::ty::TyCtxt;
+use rustc_mir::monomorphize;
 
 pub mod link;
 pub mod codegen_backend;
 pub mod symbol_names;
 pub mod symbol_names_test;
+pub mod target_features;
+pub mod symbol_export;
 
 /// check for the #[rustc_error] annotation, which forces an
 /// error in codegen. This is used to write compile-fail tests

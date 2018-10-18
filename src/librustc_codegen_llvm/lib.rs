@@ -94,13 +94,13 @@ mod diagnostics;
 
 mod back {
     pub use rustc_codegen_utils::symbol_names;
+    pub use rustc_codegen_utils::symbol_export;
     mod archive;
     pub mod bytecode;
     mod command;
     pub mod linker;
     pub mod link;
     pub mod lto;
-    pub mod symbol_export;
     pub mod write;
     mod rpath;
     pub mod wasm;
