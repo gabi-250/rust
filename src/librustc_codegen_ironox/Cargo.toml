@@ -1,0 +1,13 @@
+[package]
+authors = ["Gabriela Alexandra Moldovan <gabi_250@live.com>"]
+name = "rustc_codegen_ironox"
+version = "0.0.0"
+
+[lib]
+name = "rustc_codegen_ironox"
+path = "lib.rs"
+crate-type = ["dylib"]
+test = false
+
+[dependencies]
+ar = "0.6.0"
