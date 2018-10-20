@@ -348,12 +348,14 @@ pub fn run_core(search_paths: SearchPaths,
     let intra_link_resolution_failure_name = lint::builtin::INTRA_DOC_LINK_RESOLUTION_FAILURE.name;
     let warnings_lint_name = lint::builtin::WARNINGS.name;
     let missing_docs = rustc_lint::builtin::MISSING_DOCS.name;
+    let missing_doc_example = rustc_lint::builtin::MISSING_DOC_CODE_EXAMPLES.name;
 
     // In addition to those specific lints, we also need to whitelist those given through
     // command line, otherwise they'll get ignored and we don't want that.
     let mut whitelisted_lints = vec![warnings_lint_name.to_owned(),
                                      intra_link_resolution_failure_name.to_owned(),
-                                     missing_docs.to_owned()];
+                                     missing_docs.to_owned(),
+                                     missing_doc_example.to_owned()];
 
     whitelisted_lints.extend(cmd_lints.iter().map(|(lint, _)| lint).cloned());
 
@@ -474,6 +476,7 @@ pub fn run_core(search_paths: SearchPaths,
             trait_map: resolver.trait_map.clone(),
             maybe_unused_trait_imports: resolver.maybe_unused_trait_imports.clone(),
             maybe_unused_extern_crates: resolver.maybe_unused_extern_crates.clone(),
+            extern_prelude: resolver.extern_prelude.clone(),
         };
         let analysis = ty::CrateAnalysis {
             access_levels: Lrc::new(AccessLevels::default()),
@@ -536,9 +539,9 @@ pub fn run_core(search_paths: SearchPaths,
                 lt_substs: Default::default(),
                 impl_trait_bounds: Default::default(),
                 send_trait: send_trait,
-                fake_def_ids: RefCell::new(FxHashMap()),
-                all_fake_def_ids: RefCell::new(FxHashSet()),
-                generated_synthetics: RefCell::new(FxHashSet()),
+                fake_def_ids: Default::default(),
+                all_fake_def_ids: Default::default(),
+                generated_synthetics: Default::default(),
                 all_traits: tcx.all_traits(LOCAL_CRATE).to_vec(),
             };
             debug!("crate: {:?}", tcx.hir.krate());

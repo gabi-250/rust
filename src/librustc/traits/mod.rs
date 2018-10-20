@@ -48,7 +48,7 @@ pub use self::on_unimplemented::{OnUnimplementedDirective, OnUnimplementedNote};
 pub use self::select::{EvaluationCache, SelectionContext, SelectionCache};
 pub use self::select::{EvaluationResult, IntercrateAmbiguityCause, OverflowError};
 pub use self::specialize::{OverlapError, specialization_graph, translate_substs};
-pub use self::specialize::{SpecializesCache, find_associated_item};
+pub use self::specialize::find_associated_item;
 pub use self::engine::{TraitEngine, TraitEngineExt};
 pub use self::util::elaborate_predicates;
 pub use self::util::supertraits;
@@ -278,6 +278,8 @@ pub type TraitObligations<'tcx> = Vec<TraitObligation<'tcx>>;
 /// * `DomainGoal`
 /// * `Goal`
 /// * `Clause`
+/// * `Environment`
+/// * `InEnvironment`
 /// are used for representing the trait system in the form of
 /// logic programming clauses. They are part of the interface
 /// for the chalk SLG solver.
@@ -318,31 +320,41 @@ pub enum QuantifierKind {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Goal<'tcx> {
-    Implies(Clauses<'tcx>, &'tcx Goal<'tcx>),
-    And(&'tcx Goal<'tcx>, &'tcx Goal<'tcx>),
-    Not(&'tcx Goal<'tcx>),
+pub enum GoalKind<'tcx> {
+    Implies(Clauses<'tcx>, Goal<'tcx>),
+    And(Goal<'tcx>, Goal<'tcx>),
+    Not(Goal<'tcx>),
     DomainGoal(DomainGoal<'tcx>),
-    Quantified(QuantifierKind, ty::Binder<&'tcx Goal<'tcx>>),
+    Quantified(QuantifierKind, ty::Binder<Goal<'tcx>>),
     CannotProve,
 }
+
+pub type Goal<'tcx> = &'tcx GoalKind<'tcx>;
 
 pub type Goals<'tcx> = &'tcx List<Goal<'tcx>>;
 
 impl<'tcx> DomainGoal<'tcx> {
-    pub fn into_goal(self) -> Goal<'tcx> {
-        Goal::DomainGoal(self)
+    pub fn into_goal(self) -> GoalKind<'tcx> {
+        GoalKind::DomainGoal(self)
+    }
+
+    pub fn into_program_clause(self) -> ProgramClause<'tcx> {
+        ProgramClause {
+            goal: self,
+            hypotheses: ty::List::empty(),
+            category: ProgramClauseCategory::Other,
+        }
     }
 }
 
-impl<'tcx> Goal<'tcx> {
+impl<'tcx> GoalKind<'tcx> {
     pub fn from_poly_domain_goal<'a>(
         domain_goal: PolyDomainGoal<'tcx>,
         tcx: TyCtxt<'a, 'tcx, 'tcx>,
-    ) -> Goal<'tcx> {
+    ) -> GoalKind<'tcx> {
         match domain_goal.no_late_bound_regions() {
             Some(p) => p.into_goal(),
-            None => Goal::Quantified(
+            None => GoalKind::Quantified(
                 QuantifierKind::Universal,
                 domain_goal.map_bound(|p| tcx.mk_goal(p.into_goal()))
             ),
@@ -356,6 +368,15 @@ impl<'tcx> Goal<'tcx> {
 pub enum Clause<'tcx> {
     Implies(ProgramClause<'tcx>),
     ForAll(ty::Binder<ProgramClause<'tcx>>),
+}
+
+impl Clause<'tcx> {
+    pub fn category(self) -> ProgramClauseCategory {
+        match self {
+            Clause::Implies(clause) => clause.category,
+            Clause::ForAll(clause) => clause.skip_binder().category,
+        }
+    }
 }
 
 /// Multiple clauses.
@@ -374,6 +395,38 @@ pub struct ProgramClause<'tcx> {
 
     /// ...if we can prove these hypotheses (there may be no hypotheses at all):
     pub hypotheses: Goals<'tcx>,
+
+    /// Useful for filtering clauses.
+    pub category: ProgramClauseCategory,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ProgramClauseCategory {
+    ImpliedBound,
+    WellFormed,
+    Other,
+}
+
+/// A set of clauses that we assume to be true.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Environment<'tcx> {
+    pub clauses: Clauses<'tcx>,
+}
+
+impl Environment<'tcx> {
+    pub fn with<G>(self, goal: G) -> InEnvironment<'tcx, G> {
+        InEnvironment {
+            environment: self,
+            goal,
+        }
+    }
+}
+
+/// Something (usually a goal), along with an environment.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct InEnvironment<'tcx, G> {
+    pub environment: Environment<'tcx>,
+    pub goal: G,
 }
 
 pub type Selection<'tcx> = Vtable<'tcx, PredicateObligation<'tcx>>;

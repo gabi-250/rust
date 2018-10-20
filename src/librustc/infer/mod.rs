@@ -20,6 +20,7 @@ pub use ty::IntVarValue;
 use arena::SyncDroplessArena;
 use errors::DiagnosticBuilder;
 use hir::def_id::DefId;
+use infer::canonical::{Canonical, CanonicalVarValues};
 use middle::free_region::RegionRelations;
 use middle::lang_items;
 use middle::region;
@@ -49,7 +50,6 @@ use self::region_constraints::{RegionConstraintCollector, RegionSnapshot};
 use self::type_variable::TypeVariableOrigin;
 use self::unify_key::ToType;
 
-pub mod opaque_types;
 pub mod at;
 pub mod canonical;
 mod combine;
@@ -62,6 +62,8 @@ mod higher_ranked;
 pub mod lattice;
 mod lexical_region_resolve;
 mod lub;
+pub mod nll_relate;
+pub mod opaque_types;
 pub mod outlives;
 pub mod region_constraints;
 pub mod resolve;
@@ -86,7 +88,7 @@ pub type FixupResult<T> = Result<T, FixupError>; // "fixup result"
 /// NLL borrow checker will also do -- it might be set to true.
 #[derive(Copy, Clone, Default, Debug)]
 pub struct SuppressRegionErrors {
-    suppressed: bool
+    suppressed: bool,
 }
 
 impl SuppressRegionErrors {
@@ -100,15 +102,11 @@ impl SuppressRegionErrors {
     pub fn when_nll_is_enabled(tcx: TyCtxt<'_, '_, '_>) -> Self {
         match tcx.borrowck_mode() {
             // If we're on AST or Migrate mode, report AST region errors
-            BorrowckMode::Ast | BorrowckMode::Migrate => SuppressRegionErrors {
-                suppressed: false
-            },
+            BorrowckMode::Ast | BorrowckMode::Migrate => SuppressRegionErrors { suppressed: false },
 
             // If we're on MIR or Compare mode, don't report AST region errors as they should
             // be reported by NLL
-            BorrowckMode::Compare | BorrowckMode::Mir => SuppressRegionErrors {
-                suppressed: true
-            },
+            BorrowckMode::Compare | BorrowckMode::Mir => SuppressRegionErrors { suppressed: true },
         }
     }
 }
@@ -480,7 +478,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'gcx> {
     pub fn infer_ctxt(self) -> InferCtxtBuilder<'a, 'gcx, 'tcx> {
         InferCtxtBuilder {
             global_tcx: self,
-            arena: SyncDroplessArena::new(),
+            arena: SyncDroplessArena::default(),
             fresh_tables: None,
         }
     }
@@ -494,10 +492,30 @@ impl<'a, 'gcx, 'tcx> InferCtxtBuilder<'a, 'gcx, 'tcx> {
         self
     }
 
-    pub fn enter<F, R>(&'tcx mut self, f: F) -> R
+    /// Given a canonical value `C` as a starting point, create an
+    /// inference context that contains each of the bound values
+    /// within instantiated as a fresh variable. The `f` closure is
+    /// invoked with the new infcx, along with the instantiated value
+    /// `V` and a substitution `S`.  This substitution `S` maps from
+    /// the bound values in `C` to their instantiated values in `V`
+    /// (in other words, `S(C) = V`).
+    pub fn enter_with_canonical<T, R>(
+        &'tcx mut self,
+        span: Span,
+        canonical: &Canonical<'tcx, T>,
+        f: impl for<'b> FnOnce(InferCtxt<'b, 'gcx, 'tcx>, T, CanonicalVarValues<'tcx>) -> R,
+    ) -> R
     where
-        F: for<'b> FnOnce(InferCtxt<'b, 'gcx, 'tcx>) -> R,
+        T: TypeFoldable<'tcx>,
     {
+        self.enter(|infcx| {
+            let (value, subst) =
+                infcx.instantiate_canonical_with_fresh_inference_vars(span, canonical);
+            f(infcx, value, subst)
+        })
+    }
+
+    pub fn enter<R>(&'tcx mut self, f: impl for<'b> FnOnce(InferCtxt<'b, 'gcx, 'tcx>) -> R) -> R {
         let InferCtxtBuilder {
             global_tcx,
             ref arena,
@@ -508,15 +526,15 @@ impl<'a, 'gcx, 'tcx> InferCtxtBuilder<'a, 'gcx, 'tcx> {
             f(InferCtxt {
                 tcx,
                 in_progress_tables,
-                projection_cache: RefCell::new(traits::ProjectionCache::new()),
+                projection_cache: Default::default(),
                 type_variables: RefCell::new(type_variable::TypeVariableTable::new()),
                 int_unification_table: RefCell::new(ut::UnificationTable::new()),
                 float_unification_table: RefCell::new(ut::UnificationTable::new()),
                 region_constraints: RefCell::new(Some(RegionConstraintCollector::new())),
                 lexical_region_resolutions: RefCell::new(None),
-                selection_cache: traits::SelectionCache::new(),
-                evaluation_cache: traits::EvaluationCache::new(),
-                reported_trait_errors: RefCell::new(FxHashMap()),
+                selection_cache: Default::default(),
+                evaluation_cache: Default::default(),
+                reported_trait_errors: Default::default(),
                 tainted_by_errors_flag: Cell::new(false),
                 err_count_on_creation: tcx.sess.err_count(),
                 in_snapshot: Cell::new(false),
@@ -1472,13 +1490,10 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         self.universe.get()
     }
 
-    /// Create and return a new subunivese of the current universe;
-    /// update `self.universe` to that new subuniverse. At present,
-    /// used only in the NLL subtyping code, which uses the new
-    /// universe-based scheme instead of the more limited leak-check
-    /// scheme.
-    pub fn create_subuniverse(&self) -> ty::UniverseIndex {
-        let u = self.universe.get().subuniverse();
+    /// Create and return a fresh universe that extends all previous
+    /// universes. Updates `self.universe` to that new universe.
+    pub fn create_next_universe(&self) -> ty::UniverseIndex {
+        let u = self.universe.get().next_universe();
         self.universe.set(u);
         u
     }

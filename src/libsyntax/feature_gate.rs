@@ -433,9 +433,6 @@ declare_features! (
     // #[doc(alias = "...")]
     (active, doc_alias, "1.27.0", Some(50146), None),
 
-    // Scoped lints
-    (active, tool_lints, "1.28.0", Some(44690), None),
-
     // Allows irrefutable patterns in if-let and while-let statements (RFC 2086)
     (active, irrefutable_let_patterns, "1.27.0", Some(44495), None),
 
@@ -499,6 +496,12 @@ declare_features! (
 
     // Allows `impl Trait` in bindings (`let`, `const`, `static`)
     (active, impl_trait_in_bindings, "1.30.0", Some(34511), None),
+
+    // #[cfg_attr(predicate, multiple, attributes, here)]
+    (active, cfg_attr_multi, "1.31.0", Some(54881), None),
+
+    // Allows `const _: TYPE = VALUE`
+    (active, underscore_const_names, "1.31.0", Some(54912), None),
 );
 
 declare_features! (
@@ -679,6 +682,8 @@ declare_features! (
     (accepted, pattern_parentheses, "1.31.0", Some(51087), None),
     // Allows the definition of `const fn` functions.
     (accepted, min_const_fn, "1.31.0", Some(53555), None),
+    // Scoped lints
+    (accepted, tool_lints, "1.31.0", Some(44690), None),
 );
 
 // If you change this, please modify src/doc/unstable-book as well. You must
@@ -1581,6 +1586,13 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
                 }
             }
 
+            ast::ItemKind::Const(_,_) => {
+                if i.ident.name == "_" {
+                    gate_feature_post!(&self, underscore_const_names, i.span,
+                                        "naming constants with `_` is unstable");
+                }
+            }
+
             ast::ItemKind::ForeignMod(ref foreign_module) => {
                 self.check_abi(foreign_module.abi, i.span);
             }
@@ -1918,7 +1930,7 @@ pub fn get_features(span_handler: &Handler, krate_attrs: &[ast::Attribute],
     let incomplete_features = ["generic_associated_types"];
 
     let mut features = Features::new();
-    let mut edition_enabled_features = FxHashMap();
+    let mut edition_enabled_features = FxHashMap::default();
 
     for &edition in ALL_EDITIONS {
         if edition <= crate_edition {

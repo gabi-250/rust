@@ -122,6 +122,7 @@ pub enum Attribute {
     SanitizeThread  = 20,
     SanitizeAddress = 21,
     SanitizeMemory  = 22,
+    NonLazyBind     = 23,
 }
 
 /// LLVMIntPredicate
@@ -481,6 +482,8 @@ pub mod debuginfo {
 extern { pub type ModuleBuffer; }
 
 extern "C" {
+    pub fn LLVMRustInstallFatalErrorHandler();
+
     // Create and destroy contexts.
     pub fn LLVMRustContextCreate(shouldDiscardNames: bool) -> &'static mut Context;
     pub fn LLVMContextDispose(C: &'static mut Context);
@@ -1209,8 +1212,8 @@ extern "C" {
                              Dialect: AsmDialect)
                              -> &Value;
     pub fn LLVMRustInlineAsmVerify(Ty: &Type,
-                             Constraints: *const c_char)
-                             -> Bool;
+                                   Constraints: *const c_char)
+                                   -> bool;
 
     pub fn LLVMRustDebugMetadataVersion() -> u32;
     pub fn LLVMRustVersionMajor() -> u32;

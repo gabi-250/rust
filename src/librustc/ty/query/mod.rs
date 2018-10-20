@@ -369,16 +369,16 @@ define_queries! { <'tcx>
             -> Lrc<specialization_graph::Graph>,
         [] fn is_object_safe: ObjectSafety(DefId) -> bool,
 
-        // Get the ParameterEnvironment for a given item; this environment
-        // will be in "user-facing" mode, meaning that it is suitabe for
-        // type-checking etc, and it does not normalize specializable
-        // associated types. This is almost always what you want,
-        // unless you are doing MIR optimizations, in which case you
-        // might want to use `reveal_all()` method to change modes.
+        /// Get the ParameterEnvironment for a given item; this environment
+        /// will be in "user-facing" mode, meaning that it is suitabe for
+        /// type-checking etc, and it does not normalize specializable
+        /// associated types. This is almost always what you want,
+        /// unless you are doing MIR optimizations, in which case you
+        /// might want to use `reveal_all()` method to change modes.
         [] fn param_env: ParamEnv(DefId) -> ty::ParamEnv<'tcx>,
 
-        // Trait selection queries. These are best used by invoking `ty.moves_by_default()`,
-        // `ty.is_copy()`, etc, since that will prune the environment where possible.
+        /// Trait selection queries. These are best used by invoking `ty.moves_by_default()`,
+        /// `ty.is_copy()`, etc, since that will prune the environment where possible.
         [] fn is_copy_raw: is_copy_dep_node(ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool,
         [] fn is_sized_raw: is_sized_dep_node(ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool,
         [] fn is_freeze_raw: is_freeze_dep_node(ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool,
@@ -559,7 +559,7 @@ define_queries! { <'tcx>
         [] fn normalize_projection_ty: NormalizeProjectionTy(
             CanonicalProjectionGoal<'tcx>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, NormalizationResult<'tcx>>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, NormalizationResult<'tcx>>>>,
             NoSolution,
         >,
 
@@ -571,7 +571,7 @@ define_queries! { <'tcx>
         [] fn implied_outlives_bounds: ImpliedOutlivesBounds(
             CanonicalTyGoal<'tcx>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, Vec<OutlivesBound<'tcx>>>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, Vec<OutlivesBound<'tcx>>>>>,
             NoSolution,
         >,
 
@@ -579,7 +579,7 @@ define_queries! { <'tcx>
         [] fn dropck_outlives: DropckOutlives(
             CanonicalTyGoal<'tcx>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, DropckOutlivesResult<'tcx>>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, DropckOutlivesResult<'tcx>>>>,
             NoSolution,
         >,
 
@@ -593,7 +593,7 @@ define_queries! { <'tcx>
         [] fn type_op_eq: TypeOpEq(
             CanonicalTypeOpEqGoal<'tcx>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, ()>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, ()>>>,
             NoSolution,
         >,
 
@@ -601,7 +601,7 @@ define_queries! { <'tcx>
         [] fn type_op_subtype: TypeOpSubtype(
             CanonicalTypeOpSubtypeGoal<'tcx>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, ()>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, ()>>>,
             NoSolution,
         >,
 
@@ -609,7 +609,7 @@ define_queries! { <'tcx>
         [] fn type_op_prove_predicate: TypeOpProvePredicate(
             CanonicalTypeOpProvePredicateGoal<'tcx>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, ()>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, ()>>>,
             NoSolution,
         >,
 
@@ -617,7 +617,7 @@ define_queries! { <'tcx>
         [] fn type_op_normalize_ty: TypeOpNormalizeTy(
             CanonicalTypeOpNormalizeGoal<'tcx, Ty<'tcx>>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, Ty<'tcx>>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, Ty<'tcx>>>>,
             NoSolution,
         >,
 
@@ -625,7 +625,7 @@ define_queries! { <'tcx>
         [] fn type_op_normalize_predicate: TypeOpNormalizePredicate(
             CanonicalTypeOpNormalizeGoal<'tcx, ty::Predicate<'tcx>>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, ty::Predicate<'tcx>>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, ty::Predicate<'tcx>>>>,
             NoSolution,
         >,
 
@@ -633,7 +633,7 @@ define_queries! { <'tcx>
         [] fn type_op_normalize_poly_fn_sig: TypeOpNormalizePolyFnSig(
             CanonicalTypeOpNormalizeGoal<'tcx, ty::PolyFnSig<'tcx>>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, ty::PolyFnSig<'tcx>>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, ty::PolyFnSig<'tcx>>>>,
             NoSolution,
         >,
 
@@ -641,7 +641,7 @@ define_queries! { <'tcx>
         [] fn type_op_normalize_fn_sig: TypeOpNormalizeFnSig(
             CanonicalTypeOpNormalizeGoal<'tcx, ty::FnSig<'tcx>>
         ) -> Result<
-            Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, ty::FnSig<'tcx>>>>,
+            Lrc<Canonical<'tcx, canonical::QueryResponse<'tcx, ty::FnSig<'tcx>>>>,
             NoSolution,
         >,
 
@@ -664,8 +664,11 @@ define_queries! { <'tcx>
         [] fn program_clauses_for: ProgramClausesFor(DefId) -> Clauses<'tcx>,
 
         [] fn program_clauses_for_env: ProgramClausesForEnv(
-            ty::ParamEnv<'tcx>
+            traits::Environment<'tcx>
         ) -> Clauses<'tcx>,
+
+        // Get the chalk-style environment of the given item.
+        [] fn environment: Environment(DefId) -> traits::Environment<'tcx>,
     },
 
     Linking {

@@ -1540,7 +1540,7 @@ fn start_executing_work(tcx: TyCtxt,
 
     // Compute the set of symbols we need to retain when doing LTO (if we need to)
     let exported_symbols = {
-        let mut exported_symbols = FxHashMap();
+        let mut exported_symbols = FxHashMap::default();
 
         let copy_symbols = |cnum| {
             let symbols = tcx.exported_symbols(cnum)
@@ -2031,9 +2031,7 @@ fn start_executing_work(tcx: TyCtxt,
                     main_thread_worker_state = MainThreadWorkerState::Idle;
                 }
                 Message::Done { result: Err(()), worker_id: _ } => {
-                    shared_emitter.fatal("aborting due to worker thread failure");
-                    // Exit the coordinator thread
-                    return Err(())
+                    bug!("worker thread panicked");
                 }
                 Message::CodegenItem => {
                     bug!("the coordinator should not receive codegen requests")
@@ -2392,7 +2390,7 @@ impl OngoingCodegen {
                 panic!("expected abort due to worker thread errors")
             },
             Err(_) => {
-                sess.fatal("Error during codegen/LLVM phase.");
+                bug!("panic during codegen/LLVM phase");
             }
         };
 

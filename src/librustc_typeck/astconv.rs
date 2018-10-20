@@ -30,7 +30,7 @@ use std::slice;
 use require_c_abi_if_variadic;
 use util::common::ErrorReported;
 use util::nodemap::FxHashMap;
-use errors::{FatalError, DiagnosticId};
+use errors::{Applicability, FatalError, DiagnosticId};
 use lint;
 
 use std::iter;
@@ -1092,11 +1092,12 @@ impl<'o, 'gcx: 'tcx, 'tcx> dyn AstConv<'gcx, 'tcx>+'o {
                                         trait_str: &str,
                                         name: &str) {
         struct_span_err!(self.tcx().sess, span, E0223, "ambiguous associated type")
-            .span_label(span, "ambiguous associated type")
-            .note(&format!("specify the type using the syntax `<{} as {}>::{}`",
-                           type_str, trait_str, name))
-            .emit();
-
+            .span_suggestion_with_applicability(
+                span,
+                "use fully-qualified syntax",
+                format!("<{} as {}>::{}", type_str, trait_str, name),
+                Applicability::HasPlaceholders
+            ).emit();
     }
 
     // Search for a bound on a type parameter which includes the associated item
@@ -1591,8 +1592,8 @@ impl<'o, 'gcx: 'tcx, 'tcx> dyn AstConv<'gcx, 'tcx>+'o {
         debug!("ty_of_fn");
 
         let tcx = self.tcx();
-        let input_tys: Vec<Ty> =
-            decl.inputs.iter().map(|a| self.ty_of_arg(a, None)).collect();
+        let input_tys =
+            decl.inputs.iter().map(|a| self.ty_of_arg(a, None));
 
         let output_ty = match decl.output {
             hir::Return(ref output) => self.ast_ty_to_ty(output),
@@ -1602,7 +1603,7 @@ impl<'o, 'gcx: 'tcx, 'tcx> dyn AstConv<'gcx, 'tcx>+'o {
         debug!("ty_of_fn: output_ty={:?}", output_ty);
 
         let bare_fn_ty = ty::Binder::bind(tcx.mk_fn_sig(
-            input_tys.into_iter(),
+            input_tys,
             output_ty,
             decl.variadic,
             unsafety,

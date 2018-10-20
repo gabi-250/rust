@@ -60,7 +60,6 @@ use util::nodemap::{DefIdMap, NodeMap};
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::iter;
 use std::mem;
 use smallvec::SmallVec;
 use syntax::attr;
@@ -315,6 +314,11 @@ enum AnonymousLifetimeMode {
     ///
     /// For **Deprecated** cases, report an error.
     CreateParameter,
+
+    /// Give a hard error when either `&` or `'_` is written. Used to
+    /// rule out things like `where T: Foo<'_>`. Does not imply an
+    /// error on default object bounds (e.g., `Box<dyn Foo>`).
+    ReportError,
 
     /// Pass responsibility to `resolve_lifetime` code for all cases.
     PassThrough,
@@ -736,6 +740,10 @@ impl<'a> LoweringContext<'a> {
                         keywords::UnderscoreLifetime.name().as_interned_str(),
                         hir::LifetimeParamKind::Elided,
                     ),
+                    ParamName::Error => (
+                        keywords::UnderscoreLifetime.name().as_interned_str(),
+                        hir::LifetimeParamKind::Error,
+                    ),
                 };
 
                 // Add a definition for the in-band lifetime def
@@ -792,7 +800,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// When we have either an elided or `'_` lifetime in an impl
-    /// header, we convert it to
+    /// header, we convert it to an in-band lifetime.
     fn collect_fresh_in_band_lifetime(&mut self, span: Span) -> ParamName {
         assert!(self.is_collecting_in_band_lifetimes);
         let index = self.lifetimes_to_define.len();
@@ -1475,7 +1483,7 @@ impl<'a> LoweringContext<'a> {
                         }
                     }
                     hir::LifetimeName::Param(_) => lifetime.name,
-                    hir::LifetimeName::Static => return,
+                    hir::LifetimeName::Error | hir::LifetimeName::Static => return,
                 };
 
                 if !self.currently_bound_lifetimes.contains(&name)
@@ -2163,7 +2171,7 @@ impl<'a> LoweringContext<'a> {
                         }
                     }
                     hir::LifetimeName::Param(_) => lifetime.name,
-                    hir::LifetimeName::Static => return,
+                    hir::LifetimeName::Error | hir::LifetimeName::Static => return,
                 };
 
                 if !self.currently_bound_lifetimes.contains(&name) {
@@ -2294,10 +2302,12 @@ impl<'a> LoweringContext<'a> {
         itctx: ImplTraitContext<'_>,
     ) -> hir::GenericBound {
         match *tpb {
-            GenericBound::Trait(ref ty, modifier) => hir::GenericBound::Trait(
-                self.lower_poly_trait_ref(ty, itctx),
-                self.lower_trait_bound_modifier(modifier),
-            ),
+            GenericBound::Trait(ref ty, modifier) => {
+                hir::GenericBound::Trait(
+                    self.lower_poly_trait_ref(ty, itctx),
+                    self.lower_trait_bound_modifier(modifier),
+                )
+            }
             GenericBound::Outlives(ref lifetime) => {
                 hir::GenericBound::Outlives(self.lower_lifetime(lifetime))
             }
@@ -2319,6 +2329,8 @@ impl<'a> LoweringContext<'a> {
                     AnonymousLifetimeMode::PassThrough => {
                         self.new_named_lifetime(l.id, span, hir::LifetimeName::Underscore)
                     }
+
+                    AnonymousLifetimeMode::ReportError => self.new_error_lifetime(Some(l.id), span),
                 },
             ident => {
                 self.maybe_collect_in_band_lifetime(ident);
@@ -2357,16 +2369,26 @@ impl<'a> LoweringContext<'a> {
                            add_bounds: &NodeMap<Vec<GenericBound>>,
                            mut itctx: ImplTraitContext<'_>)
                            -> hir::GenericParam {
-        let mut bounds = self.lower_param_bounds(&param.bounds, itctx.reborrow());
+        let mut bounds = self.with_anonymous_lifetime_mode(
+            AnonymousLifetimeMode::ReportError,
+            |this| this.lower_param_bounds(&param.bounds, itctx.reborrow()),
+        );
+
         match param.kind {
             GenericParamKind::Lifetime => {
                 let was_collecting_in_band = self.is_collecting_in_band_lifetimes;
                 self.is_collecting_in_band_lifetimes = false;
 
-                let lt = self.lower_lifetime(&Lifetime { id: param.id, ident: param.ident });
+                let lt = self.with_anonymous_lifetime_mode(
+                    AnonymousLifetimeMode::ReportError,
+                    |this| this.lower_lifetime(&Lifetime { id: param.id, ident: param.ident }),
+                );
                 let param_name = match lt.name {
                     hir::LifetimeName::Param(param_name) => param_name,
-                    _ => hir::ParamName::Plain(lt.name.ident()),
+                    hir::LifetimeName::Implicit
+                        | hir::LifetimeName::Underscore
+                        | hir::LifetimeName::Static => hir::ParamName::Plain(lt.name.ident()),
+                    hir::LifetimeName::Error => ParamName::Error,
                 };
                 let param = hir::GenericParam {
                     id: lt.id,
@@ -2490,13 +2512,18 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn lower_where_clause(&mut self, wc: &WhereClause) -> hir::WhereClause {
-        hir::WhereClause {
-            id: self.lower_node_id(wc.id).node_id,
-            predicates: wc.predicates
-                .iter()
-                .map(|predicate| self.lower_where_predicate(predicate))
-                .collect(),
-        }
+        self.with_anonymous_lifetime_mode(
+            AnonymousLifetimeMode::ReportError,
+            |this| {
+                hir::WhereClause {
+                    id: this.lower_node_id(wc.id).node_id,
+                    predicates: wc.predicates
+                        .iter()
+                        .map(|predicate| this.lower_where_predicate(predicate))
+                        .collect(),
+                }
+            },
+        )
     }
 
     fn lower_where_predicate(&mut self, pred: &WherePredicate) -> hir::WherePredicate {
@@ -3888,9 +3915,7 @@ impl<'a> LoweringContext<'a> {
                     .collect::<P<[hir::Field]>>();
 
                 let is_unit = fields.is_empty();
-                let struct_path = iter::once("ops")
-                    .chain(iter::once(path))
-                    .collect::<Vec<_>>();
+                let struct_path = ["ops", path];
                 let struct_path = self.std_path(e.span, &struct_path, None, is_unit);
                 let struct_path = hir::QPath::Resolved(None, P(struct_path));
 
@@ -3953,6 +3978,7 @@ impl<'a> LoweringContext<'a> {
                             constraint: out.constraint.clone(),
                             is_rw: out.is_rw,
                             is_indirect: out.is_indirect,
+                            span: out.expr.span,
                         })
                         .collect(),
                     asm: asm.asm.clone(),
@@ -4839,8 +4865,36 @@ impl<'a> LoweringContext<'a> {
                 }
             }
 
+            AnonymousLifetimeMode::ReportError => self.new_error_lifetime(None, span),
+
             AnonymousLifetimeMode::PassThrough => self.new_implicit_lifetime(span),
         }
+    }
+
+    /// Report an error on illegal use of `'_` or a `&T` with no explicit lifetime;
+    /// return a "error lifetime".
+    fn new_error_lifetime(&mut self, id: Option<NodeId>, span: Span) -> hir::Lifetime {
+        let (id, msg, label) = match id {
+            Some(id) => (id, "`'_` cannot be used here", "`'_` is a reserved lifetime name"),
+
+            None => (
+                self.next_id().node_id,
+                "`&` without an explicit lifetime name cannot be used here",
+                "explicit lifetime name needed here",
+            ),
+        };
+
+        let mut err = struct_span_err!(
+            self.sess,
+            span,
+            E0637,
+            "{}",
+            msg,
+        );
+        err.span_label(span, label);
+        err.emit();
+
+        self.new_named_lifetime(id, span, hir::LifetimeName::Error)
     }
 
     /// Invoked to create the lifetime argument(s) for a path like
@@ -4856,6 +4910,12 @@ impl<'a> LoweringContext<'a> {
             //
             //     impl Foo for std::cell::Ref<u32> // note lack of '_
             AnonymousLifetimeMode::CreateParameter => {}
+
+            AnonymousLifetimeMode::ReportError => {
+                return (0..count)
+                    .map(|_| self.new_error_lifetime(None, span))
+                    .collect();
+            }
 
             // This is the normal case.
             AnonymousLifetimeMode::PassThrough => {}
@@ -4886,6 +4946,10 @@ impl<'a> LoweringContext<'a> {
             //
             // `resolve_lifetime` has the code to make that happen.
             AnonymousLifetimeMode::CreateParameter => {}
+
+            AnonymousLifetimeMode::ReportError => {
+                // ReportError applies to explicit use of `'_`.
+            }
 
             // This is the normal case.
             AnonymousLifetimeMode::PassThrough => {}

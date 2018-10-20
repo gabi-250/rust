@@ -553,7 +553,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         let escaping_types =
             self.type_variables.borrow_mut().types_escaping_snapshot(&snapshot.type_snapshot);
 
-        let mut escaping_region_vars = FxHashSet();
+        let mut escaping_region_vars = FxHashSet::default();
         for ty in &escaping_types {
             self.tcx.collect_regions(ty, &mut escaping_region_vars);
         }
@@ -593,11 +593,11 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
     where
         T : TypeFoldable<'tcx>,
     {
-        let new_universe = self.create_subuniverse();
+        let next_universe = self.create_next_universe();
 
         let (result, map) = self.tcx.replace_late_bound_regions(binder, |br| {
             self.tcx.mk_region(ty::RePlaceholder(ty::Placeholder {
-                universe: new_universe,
+                universe: next_universe,
                 name: br,
             }))
         });

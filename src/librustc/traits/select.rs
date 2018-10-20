@@ -166,7 +166,7 @@ struct TraitObligationStack<'prev, 'tcx: 'prev> {
     previous: TraitObligationStackList<'prev, 'tcx>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SelectionCache<'tcx> {
     hashmap: Lock<
         FxHashMap<ty::TraitRef<'tcx>, WithDepNode<SelectionResult<'tcx, SelectionCandidate<'tcx>>>>,
@@ -444,7 +444,7 @@ impl<'tcx> From<OverflowError> for SelectionError<'tcx> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct EvaluationCache<'tcx> {
     hashmap: Lock<FxHashMap<ty::PolyTraitRef<'tcx>, WithDepNode<EvaluationResult>>>,
 }
@@ -1368,8 +1368,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
 
         // Winnow, but record the exact outcome of evaluation, which
         // is needed for specialization. Propagate overflow if it occurs.
-        let candidates: Result<Vec<Option<EvaluatedCandidate<'_>>>, _> = candidates
-            .into_iter()
+        let mut candidates = candidates.into_iter()
             .map(|c| match self.evaluate_candidate(stack, &c) {
                 Ok(eval) if eval.may_apply() => Ok(Some(EvaluatedCandidate {
                     candidate: c,
@@ -1378,10 +1377,8 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                 Ok(_) => Ok(None),
                 Err(OverflowError) => Err(Overflow),
             })
-            .collect();
-
-        let mut candidates: Vec<EvaluatedCandidate<'_>> =
-            candidates?.into_iter().filter_map(|c| c).collect();
+           .flat_map(Result::transpose)
+           .collect::<Result<Vec<_>, _>>()?;
 
         debug!(
             "winnowed to {} candidates for {:?}: {:?}",
@@ -1390,7 +1387,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             candidates
         );
 
-        // If there are STILL multiple candidate, we can further
+        // If there are STILL multiple candidates, we can further
         // reduce the list by dropping duplicates -- including
         // resolving specializations.
         if candidates.len() > 1 {
@@ -2088,10 +2085,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                         return;
                     }
 
-                    match data.principal() {
-                        Some(p) => p.with_self_ty(this.tcx(), self_ty),
-                        None => return,
-                    }
+                    data.principal().with_self_ty(this.tcx(), self_ty)
                 }
                 ty::Infer(ty::TyVar(_)) => {
                     debug!("assemble_candidates_from_object_ty: ambiguous");
@@ -2183,15 +2177,10 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                 //
                 // We always upcast when we can because of reason
                 // #2 (region bounds).
-                match (data_a.principal(), data_b.principal()) {
-                    (Some(a), Some(b)) => {
-                        a.def_id() == b.def_id()
-                            && data_b.auto_traits()
-                            // All of a's auto traits need to be in b's auto traits.
-                            .all(|b| data_a.auto_traits().any(|a| a == b))
-                    }
-                    _ => false,
-                }
+                data_a.principal().def_id() == data_b.principal().def_id()
+                    && data_b.auto_traits()
+                    // All of a's auto traits need to be in b's auto traits.
+                    .all(|b| data_a.auto_traits().any(|a| a == b))
             }
 
             // T -> Trait.
@@ -2981,7 +2970,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             .shallow_resolve(*obligation.self_ty().skip_binder());
         let poly_trait_ref = match self_ty.sty {
             ty::Dynamic(ref data, ..) => {
-                data.principal().unwrap().with_self_ty(self.tcx(), self_ty)
+                data.principal().with_self_ty(self.tcx(), self_ty)
             }
             _ => span_bug!(obligation.cause.span, "object candidate with non-object"),
         };
@@ -3244,10 +3233,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             (&ty::Dynamic(ref data_a, r_a), &ty::Dynamic(ref data_b, r_b)) => {
                 // See assemble_candidates_for_unsizing for more info.
                 let existential_predicates = data_a.map_bound(|data_a| {
-                    let principal = data_a.principal();
-                    let iter = principal
-                        .into_iter()
-                        .map(ty::ExistentialPredicate::Trait)
+                    let iter = iter::once(ty::ExistentialPredicate::Trait(data_a.principal()))
                         .chain(
                             data_a
                                 .projection_bounds()
@@ -3285,7 +3271,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             // T -> Trait.
             (_, &ty::Dynamic(ref data, r)) => {
                 let mut object_dids = data.auto_traits()
-                    .chain(data.principal().map(|p| p.def_id()));
+                    .chain(iter::once(data.principal().def_id()));
                 if let Some(did) = object_dids.find(|did| !tcx.is_object_safe(*did)) {
                     return Err(TraitNotObjectSafe(did));
                 }
@@ -3756,7 +3742,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             }
         } else {
             // Three or more elements. Use a general deduplication process.
-            let mut seen = FxHashSet();
+            let mut seen = FxHashSet::default();
             predicates.retain(|i| seen.insert(i.clone()));
         }
         self.infcx()
@@ -3803,26 +3789,16 @@ impl<'tcx> TraitObligation<'tcx> {
 }
 
 impl<'tcx> SelectionCache<'tcx> {
-    pub fn new() -> SelectionCache<'tcx> {
-        SelectionCache {
-            hashmap: Lock::new(FxHashMap()),
-        }
-    }
-
+    /// Actually frees the underlying memory in contrast to what stdlib containers do on `clear`
     pub fn clear(&self) {
-        *self.hashmap.borrow_mut() = FxHashMap()
+        *self.hashmap.borrow_mut() = Default::default();
     }
 }
 
 impl<'tcx> EvaluationCache<'tcx> {
-    pub fn new() -> EvaluationCache<'tcx> {
-        EvaluationCache {
-            hashmap: Lock::new(FxHashMap()),
-        }
-    }
-
+    /// Actually frees the underlying memory in contrast to what stdlib containers do on `clear`
     pub fn clear(&self) {
-        *self.hashmap.borrow_mut() = FxHashMap()
+        *self.hashmap.borrow_mut() = Default::default();
     }
 }
 
