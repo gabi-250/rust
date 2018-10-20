@@ -469,7 +469,7 @@ impl fmt::Display for traits::QuantifierKind {
 
 impl<'tcx> fmt::Display for traits::Goal<'tcx> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use traits::Goal::*;
+        use traits::GoalKind::*;
 
         match self {
             Implies(hypotheses, goal) => {
@@ -496,7 +496,7 @@ impl<'tcx> fmt::Display for traits::Goal<'tcx> {
 
 impl<'tcx> fmt::Display for traits::ProgramClause<'tcx> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let traits::ProgramClause { goal, hypotheses } = self;
+        let traits::ProgramClause { goal, hypotheses, .. } = self;
         write!(fmt, "{}", goal)?;
         if !hypotheses.is_empty() {
             write!(fmt, " :- ")?;
@@ -598,25 +598,25 @@ CloneTypeFoldableAndLiftImpls! {
 }
 
 EnumTypeFoldableImpl! {
-    impl<'tcx> TypeFoldable<'tcx> for traits::Goal<'tcx> {
-        (traits::Goal::Implies)(hypotheses, goal),
-        (traits::Goal::And)(goal1, goal2),
-        (traits::Goal::Not)(goal),
-        (traits::Goal::DomainGoal)(domain_goal),
-        (traits::Goal::Quantified)(qkind, goal),
-        (traits::Goal::CannotProve),
+    impl<'tcx> TypeFoldable<'tcx> for traits::GoalKind<'tcx> {
+        (traits::GoalKind::Implies)(hypotheses, goal),
+        (traits::GoalKind::And)(goal1, goal2),
+        (traits::GoalKind::Not)(goal),
+        (traits::GoalKind::DomainGoal)(domain_goal),
+        (traits::GoalKind::Quantified)(qkind, goal),
+        (traits::GoalKind::CannotProve),
     }
 }
 
 EnumLiftImpl! {
-    impl<'a, 'tcx> Lift<'tcx> for traits::Goal<'a> {
-        type Lifted = traits::Goal<'tcx>;
-        (traits::Goal::Implies)(hypotheses, goal),
-        (traits::Goal::And)(goal1, goal2),
-        (traits::Goal::Not)(goal),
-        (traits::Goal::DomainGoal)(domain_goal),
-        (traits::Goal::Quantified)(kind, goal),
-        (traits::Goal::CannotProve),
+    impl<'a, 'tcx> Lift<'tcx> for traits::GoalKind<'a> {
+        type Lifted = traits::GoalKind<'tcx>;
+        (traits::GoalKind::Implies)(hypotheses, goal),
+        (traits::GoalKind::And)(goal1, goal2),
+        (traits::GoalKind::Not)(goal),
+        (traits::GoalKind::DomainGoal)(domain_goal),
+        (traits::GoalKind::Quantified)(kind, goal),
+        (traits::GoalKind::CannotProve),
     }
 }
 
@@ -633,7 +633,7 @@ impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::List<traits::Goal<'tcx>> {
     }
 }
 
-impl<'tcx> TypeFoldable<'tcx> for &'tcx traits::Goal<'tcx> {
+impl<'tcx> TypeFoldable<'tcx> for traits::Goal<'tcx> {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
         let v = (**self).fold_with(folder);
         folder.tcx().mk_goal(v)
@@ -647,8 +647,13 @@ impl<'tcx> TypeFoldable<'tcx> for &'tcx traits::Goal<'tcx> {
 BraceStructTypeFoldableImpl! {
     impl<'tcx> TypeFoldable<'tcx> for traits::ProgramClause<'tcx> {
         goal,
-        hypotheses
+        hypotheses,
+        category,
     }
+}
+
+CloneTypeFoldableAndLiftImpls! {
+    traits::ProgramClauseCategory,
 }
 
 EnumTypeFoldableImpl! {
@@ -658,7 +663,43 @@ EnumTypeFoldableImpl! {
     }
 }
 
-impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::List<traits::Clause<'tcx>> {
+BraceStructTypeFoldableImpl! {
+    impl<'tcx> TypeFoldable<'tcx> for traits::Environment<'tcx> { clauses }
+}
+
+BraceStructTypeFoldableImpl! {
+    impl<'tcx, G> TypeFoldable<'tcx> for traits::InEnvironment<'tcx, G> {
+        environment,
+        goal
+    } where G: TypeFoldable<'tcx>
+}
+
+impl<'a, 'tcx> Lift<'tcx> for traits::Environment<'a> {
+    type Lifted = traits::Environment<'tcx>;
+    fn lift_to_tcx<'b, 'gcx>(&self, tcx: TyCtxt<'b, 'gcx, 'tcx>) -> Option<Self::Lifted> {
+        tcx.lift(&self.clauses).map(|clauses| {
+            traits::Environment {
+                clauses,
+            }
+        })
+    }
+}
+
+impl<'a, 'tcx, G: Lift<'tcx>> Lift<'tcx> for traits::InEnvironment<'a, G> {
+    type Lifted = traits::InEnvironment<'tcx, G::Lifted>;
+    fn lift_to_tcx<'b, 'gcx>(&self, tcx: TyCtxt<'b, 'gcx, 'tcx>) -> Option<Self::Lifted> {
+        tcx.lift(&self.environment).and_then(|environment| {
+            tcx.lift(&self.goal).map(|goal| {
+                traits::InEnvironment {
+                    environment,
+                    goal,
+                }
+            })
+        })
+    }
+}
+
+impl<'tcx> TypeFoldable<'tcx> for traits::Clauses<'tcx> {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
         let v = self.iter()
             .map(|t| t.fold_with(folder))

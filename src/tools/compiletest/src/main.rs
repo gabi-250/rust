@@ -32,7 +32,7 @@ extern crate rustfix;
 use common::CompareMode;
 use common::{expected_output_path, output_base_dir, output_relative_path, UI_EXTENSIONS};
 use common::{Config, TestPaths};
-use common::{DebugInfoGdb, DebugInfoLldb, Mode, Pretty};
+use common::{DebugInfoBoth, DebugInfoGdb, DebugInfoLldb, Mode, Pretty};
 use filetime::FileTime;
 use getopts::Options;
 use std::env;
@@ -44,7 +44,7 @@ use std::process::Command;
 use test::ColorConfig;
 use util::logv;
 
-use self::header::EarlyProps;
+use self::header::{EarlyProps, Ignore};
 
 pub mod common;
 pub mod errors;
@@ -282,6 +282,7 @@ pub fn parse_config(args: Vec<String>) -> Config {
     let android_cross_path = opt_path(matches, "android-cross-path");
     let (gdb, gdb_version, gdb_native_rust) = analyze_gdb(matches.opt_str("gdb"), &target,
                                                           &android_cross_path);
+    let (lldb_version, lldb_native_rust) = extract_lldb_version(matches.opt_str("lldb-version"));
 
     let color = match matches.opt_str("color").as_ref().map(|x| &**x) {
         Some("auto") | None => ColorConfig::AutoColor,
@@ -326,7 +327,8 @@ pub fn parse_config(args: Vec<String>) -> Config {
         gdb,
         gdb_version,
         gdb_native_rust,
-        lldb_version: extract_lldb_version(matches.opt_str("lldb-version")),
+        lldb_version,
+        lldb_native_rust,
         llvm_version: matches.opt_str("llvm-version"),
         system_llvm: matches.opt_present("system-llvm"),
         android_cross_path: android_cross_path,
@@ -423,7 +425,7 @@ pub fn opt_str2(maybestr: Option<String>) -> String {
 
 pub fn run_tests(config: &Config) {
     if config.target.contains("android") {
-        if let DebugInfoGdb = config.mode {
+        if config.mode == DebugInfoGdb || config.mode == DebugInfoBoth {
             println!(
                 "{} debug-info test uses tcp 5039 port.\
                  please reserve it",
@@ -441,7 +443,9 @@ pub fn run_tests(config: &Config) {
     }
 
     match config.mode {
-        DebugInfoLldb => {
+        // Note that we don't need to emit the gdb warning when
+        // DebugInfoBoth, so it is ok to list that here.
+        DebugInfoBoth | DebugInfoLldb => {
             if let Some(lldb_version) = config.lldb_version.as_ref() {
                 if is_blacklisted_lldb_version(&lldb_version[..]) {
                     println!(
@@ -645,15 +649,18 @@ pub fn make_test(config: &Config, testpaths: &TestPaths) -> Vec<test::TestDescAn
         .into_iter()
         .map(|revision| {
             // Debugging emscripten code doesn't make sense today
-            let ignore = early_props.ignore
+            let ignore = early_props.ignore == Ignore::Ignore
                 || !up_to_date(
                     config,
                     testpaths,
                     &early_props,
                     revision.map(|s| s.as_str()),
                 )
-                || (config.mode == DebugInfoGdb || config.mode == DebugInfoLldb)
-                    && config.target.contains("emscripten");
+                || ((config.mode == DebugInfoBoth ||
+                     config.mode == DebugInfoGdb || config.mode == DebugInfoLldb)
+                    && config.target.contains("emscripten"))
+                || (config.mode == DebugInfoGdb && !early_props.ignore.can_run_gdb())
+                || (config.mode == DebugInfoLldb && !early_props.ignore.can_run_lldb());
             test::TestDescAndFn {
                 desc: test::TestDesc {
                     name: make_test_name(config, testpaths, revision),
@@ -661,7 +668,7 @@ pub fn make_test(config: &Config, testpaths: &TestPaths) -> Vec<test::TestDescAn
                     should_panic,
                     allow_fail: false,
                 },
-                testfn: make_test_closure(config, testpaths, revision),
+                testfn: make_test_closure(config, early_props.ignore, testpaths, revision),
             }
         })
         .collect()
@@ -772,10 +779,21 @@ fn make_test_name(
 
 fn make_test_closure(
     config: &Config,
+    ignore: Ignore,
     testpaths: &TestPaths,
     revision: Option<&String>,
 ) -> test::TestFn {
-    let config = config.clone();
+    let mut config = config.clone();
+    if config.mode == DebugInfoBoth {
+        // If both gdb and lldb were ignored, then the test as a whole
+        // would be ignored.
+        if !ignore.can_run_gdb() {
+            config.mode = DebugInfoLldb;
+        } else if !ignore.can_run_lldb() {
+            config.mode = DebugInfoGdb;
+        }
+    }
+
     let testpaths = testpaths.clone();
     let revision = revision.cloned();
     test::DynTestFn(Box::new(move || {
@@ -906,17 +924,27 @@ fn extract_gdb_version(full_version_line: &str) -> Option<u32> {
     None
 }
 
-fn extract_lldb_version(full_version_line: Option<String>) -> Option<String> {
+/// Returns (LLDB version, LLDB is rust-enabled)
+fn extract_lldb_version(full_version_line: Option<String>) -> (Option<String>, bool) {
     // Extract the major LLDB version from the given version string.
     // LLDB version strings are different for Apple and non-Apple platforms.
-    // At the moment, this function only supports the Apple variant, which looks
-    // like this:
+    // The Apple variant looks like this:
     //
     // LLDB-179.5 (older versions)
     // lldb-300.2.51 (new versions)
     //
     // We are only interested in the major version number, so this function
     // will return `Some("179")` and `Some("300")` respectively.
+    //
+    // Upstream versions look like:
+    // lldb version 6.0.1
+    //
+    // There doesn't seem to be a way to correlate the Apple version
+    // with the upstream version, and since the tests were originally
+    // written against Apple versions, we make a fake Apple version by
+    // multiplying the first number by 100.  This is a hack, but
+    // normally fine because the only non-Apple version we test is
+    // rust-enabled.
 
     if let Some(ref full_version_line) = full_version_line {
         if !full_version_line.trim().is_empty() {
@@ -951,12 +979,22 @@ fn extract_lldb_version(full_version_line: Option<String>) -> Option<String> {
                     .take_while(|c| c.is_digit(10))
                     .collect::<String>();
                 if !vers.is_empty() {
-                    return Some(vers);
+                    return (Some(vers), full_version_line.contains("rust-enabled"));
+                }
+            }
+
+            if full_version_line.starts_with("lldb version ") {
+                let vers = full_version_line[13..]
+                    .chars()
+                    .take_while(|c| c.is_digit(10))
+                    .collect::<String>();
+                if !vers.is_empty() {
+                    return (Some(vers + "00"), full_version_line.contains("rust-enabled"));
                 }
             }
         }
     }
-    None
+    (None, false)
 }
 
 fn is_blacklisted_lldb_version(version: &str) -> bool {

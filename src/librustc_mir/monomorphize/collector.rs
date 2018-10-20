@@ -238,7 +238,7 @@ impl<'tcx> InliningMap<'tcx> {
 
     fn new() -> InliningMap<'tcx> {
         InliningMap {
-            index: FxHashMap(),
+            index: FxHashMap::default(),
             targets: Vec::new(),
             inlines: GrowableBitSet::with_capacity(1024),
         }
@@ -305,7 +305,7 @@ pub fn collect_crate_mono_items<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
 
     debug!("Building mono item graph, beginning at roots");
 
-    let mut visited = MTLock::new(FxHashSet());
+    let mut visited = MTLock::new(FxHashSet::default());
     let mut inlining_map = MTLock::new(InliningMap::new());
 
     {
@@ -907,22 +907,20 @@ fn create_mono_items_for_vtable_methods<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
             !impl_ty.needs_subst() && !impl_ty.has_escaping_regions());
 
     if let ty::Dynamic(ref trait_ty, ..) = trait_ty.sty {
-        if let Some(principal) = trait_ty.principal() {
-            let poly_trait_ref = principal.with_self_ty(tcx, impl_ty);
-            assert!(!poly_trait_ref.has_escaping_regions());
+        let poly_trait_ref = trait_ty.principal().with_self_ty(tcx, impl_ty);
+        assert!(!poly_trait_ref.has_escaping_regions());
 
-            // Walk all methods of the trait, including those of its supertraits
-            let methods = tcx.vtable_methods(poly_trait_ref);
-            let methods = methods.iter().cloned().filter_map(|method| method)
-                .map(|(def_id, substs)| ty::Instance::resolve(
-                        tcx,
-                        ty::ParamEnv::reveal_all(),
-                        def_id,
-                        substs).unwrap())
-                .filter(|&instance| should_monomorphize_locally(tcx, &instance))
-                .map(|instance| create_fn_mono_item(instance));
-            output.extend(methods);
-        }
+        // Walk all methods of the trait, including those of its supertraits
+        let methods = tcx.vtable_methods(poly_trait_ref);
+        let methods = methods.iter().cloned().filter_map(|method| method)
+            .map(|(def_id, substs)| ty::Instance::resolve(
+                    tcx,
+                    ty::ParamEnv::reveal_all(),
+                    def_id,
+                    substs).unwrap())
+            .filter(|&instance| should_monomorphize_locally(tcx, &instance))
+            .map(|instance| create_fn_mono_item(instance));
+        output.extend(methods);
         // Also add the destructor
         visit_drop_use(tcx, impl_ty, false, output);
     }
@@ -1163,7 +1161,7 @@ fn collect_miri<'a, 'tcx>(
         }
         Some(AllocType::Memory(alloc)) => {
             trace!("collecting {:?} with {:#?}", alloc_id, alloc);
-            for &inner in alloc.relocations.values() {
+            for &((), inner) in alloc.relocations.values() {
                 collect_miri(tcx, inner, output);
             }
         },
@@ -1272,7 +1270,7 @@ fn collect_const<'a, 'tcx>(
         ConstValue::Scalar(Scalar::Ptr(ptr)) =>
             collect_miri(tcx, ptr.alloc_id, output),
         ConstValue::ByRef(_id, alloc, _offset) => {
-            for &id in alloc.relocations.values() {
+            for &((), id) in alloc.relocations.values() {
                 collect_miri(tcx, id, output);
             }
         }

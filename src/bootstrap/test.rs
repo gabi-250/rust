@@ -812,8 +812,7 @@ default_test!(Incremental {
 
 default_test!(Debuginfo {
     path: "src/test/debuginfo",
-    // What this runs varies depending on the native platform being apple
-    mode: "debuginfo-XXX",
+    mode: "debuginfo",
     suite: "debuginfo"
 });
 
@@ -950,18 +949,11 @@ impl Step for Compiletest {
                 return;
             }
 
-            if mode == "debuginfo-XXX" {
-                return if builder.config.build.contains("apple") {
-                    builder.ensure(Compiletest {
-                        mode: "debuginfo-lldb",
-                        ..self
-                    });
-                } else {
-                    builder.ensure(Compiletest {
-                        mode: "debuginfo-gdb",
-                        ..self
-                    });
-                };
+            if mode == "debuginfo" {
+                return builder.ensure(Compiletest {
+                    mode: "debuginfo-both",
+                    ..self
+                });
             }
 
             builder.ensure(dist::DebuggerScripts {
@@ -1082,11 +1074,34 @@ impl Step for Compiletest {
         if let Some(ref gdb) = builder.config.gdb {
             cmd.arg("--gdb").arg(gdb);
         }
-        if let Some(ref vers) = builder.lldb_version {
+
+        let run = |cmd: &mut Command| {
+            cmd.output().map(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .lines().next().unwrap_or_else(|| {
+                        panic!("{:?} failed {:?}", cmd, output)
+                    }).to_string()
+            })
+        };
+        let lldb_exe = if builder.config.lldb_enabled && !target.contains("emscripten") {
+            // Test against the lldb that was just built.
+            builder.llvm_out(target)
+                .join("bin")
+                .join("lldb")
+        } else {
+            PathBuf::from("lldb")
+        };
+        let lldb_version = Command::new(&lldb_exe)
+            .arg("--version")
+            .output()
+            .map(|output| { String::from_utf8_lossy(&output.stdout).to_string() })
+            .ok();
+        if let Some(ref vers) = lldb_version {
             cmd.arg("--lldb-version").arg(vers);
-        }
-        if let Some(ref dir) = builder.lldb_python_dir {
-            cmd.arg("--lldb-python-dir").arg(dir);
+            let lldb_python_dir = run(Command::new(&lldb_exe).arg("-P")).ok();
+            if let Some(ref dir) = lldb_python_dir {
+                cmd.arg("--lldb-python-dir").arg(dir);
+            }
         }
 
         // Get paths from cmd args

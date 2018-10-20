@@ -33,10 +33,10 @@ use middle::resolve_lifetime::{self, ObjectLifetimeDefault};
 use middle::stability;
 use mir::{self, Mir, interpret};
 use mir::interpret::Allocation;
-use ty::subst::{CanonicalSubsts, Kind, Substs, Subst};
+use ty::subst::{CanonicalUserSubsts, Kind, Substs, Subst};
 use ty::ReprOptions;
 use traits;
-use traits::{Clause, Clauses, Goal, Goals};
+use traits::{Clause, Clauses, GoalKind, Goal, Goals};
 use ty::{self, Ty, TypeAndMut};
 use ty::{TyS, TyKind, List};
 use ty::{AdtKind, AdtDef, ClosureSubsts, GeneratorSubsts, Region, Const};
@@ -89,13 +89,14 @@ pub struct AllArenas<'tcx> {
 impl<'tcx> AllArenas<'tcx> {
     pub fn new() -> Self {
         AllArenas {
-            global: WorkerLocal::new(|_| GlobalArenas::new()),
-            interner: SyncDroplessArena::new(),
+            global: WorkerLocal::new(|_| GlobalArenas::default()),
+            interner: SyncDroplessArena::default(),
         }
     }
 }
 
 /// Internal storage
+#[derive(Default)]
 pub struct GlobalArenas<'tcx> {
     // internings
     layout: TypedArena<LayoutDetails>,
@@ -109,21 +110,6 @@ pub struct GlobalArenas<'tcx> {
     tables: TypedArena<ty::TypeckTables<'tcx>>,
     /// miri allocations
     const_allocs: TypedArena<interpret::Allocation>,
-}
-
-impl<'tcx> GlobalArenas<'tcx> {
-    pub fn new() -> GlobalArenas<'tcx> {
-        GlobalArenas {
-            layout: TypedArena::new(),
-            generics: TypedArena::new(),
-            trait_def: TypedArena::new(),
-            adt_def: TypedArena::new(),
-            steal_mir: TypedArena::new(),
-            mir: TypedArena::new(),
-            tables: TypedArena::new(),
-            const_allocs: TypedArena::new(),
-        }
-    }
 }
 
 type InternedSet<'tcx, T> = Lock<FxHashSet<Interned<'tcx, T>>>;
@@ -143,7 +129,8 @@ pub struct CtxtInterners<'tcx> {
     predicates: InternedSet<'tcx, List<Predicate<'tcx>>>,
     const_: InternedSet<'tcx, Const<'tcx>>,
     clauses: InternedSet<'tcx, List<Clause<'tcx>>>,
-    goals: InternedSet<'tcx, List<Goal<'tcx>>>,
+    goal: InternedSet<'tcx, GoalKind<'tcx>>,
+    goal_list: InternedSet<'tcx, List<Goal<'tcx>>>,
 }
 
 impl<'gcx: 'tcx, 'tcx> CtxtInterners<'tcx> {
@@ -159,7 +146,8 @@ impl<'gcx: 'tcx, 'tcx> CtxtInterners<'tcx> {
             predicates: Default::default(),
             const_: Default::default(),
             clauses: Default::default(),
-            goals: Default::default(),
+            goal: Default::default(),
+            goal_list: Default::default(),
         }
     }
 
@@ -381,7 +369,7 @@ pub struct TypeckTables<'tcx> {
     /// If the user wrote `foo.collect::<Vec<_>>()`, then the
     /// canonical substitutions would include only `for<X> { Vec<X>
     /// }`.
-    user_substs: ItemLocalMap<CanonicalSubsts<'tcx>>,
+    user_substs: ItemLocalMap<CanonicalUserSubsts<'tcx>>,
 
     adjustments: ItemLocalMap<Vec<ty::adjustment::Adjustment<'tcx>>>,
 
@@ -460,15 +448,15 @@ impl<'tcx> TypeckTables<'tcx> {
             adjustments: ItemLocalMap(),
             pat_binding_modes: ItemLocalMap(),
             pat_adjustments: ItemLocalMap(),
-            upvar_capture_map: FxHashMap(),
+            upvar_capture_map: Default::default(),
             closure_kind_origins: ItemLocalMap(),
             liberated_fn_sigs: ItemLocalMap(),
             fru_field_types: ItemLocalMap(),
             cast_kinds: ItemLocalMap(),
             used_trait_imports: Lrc::new(DefIdSet()),
             tainted_by_errors: false,
-            free_region_map: FreeRegionMap::new(),
-            concrete_existential_types: FxHashMap(),
+            free_region_map: Default::default(),
+            concrete_existential_types: Default::default(),
         }
     }
 
@@ -571,14 +559,14 @@ impl<'tcx> TypeckTables<'tcx> {
         self.node_substs.get(&id.local_id).cloned()
     }
 
-    pub fn user_substs_mut(&mut self) -> LocalTableInContextMut<'_, CanonicalSubsts<'tcx>> {
+    pub fn user_substs_mut(&mut self) -> LocalTableInContextMut<'_, CanonicalUserSubsts<'tcx>> {
         LocalTableInContextMut {
             local_id_root: self.local_id_root,
             data: &mut self.user_substs
         }
     }
 
-    pub fn user_substs(&self, id: hir::HirId) -> Option<CanonicalSubsts<'tcx>> {
+    pub fn user_substs(&self, id: hir::HirId) -> Option<CanonicalUserSubsts<'tcx>> {
         validate_hir_id_for_typeck_tables(self.local_id_root, id, false);
         self.user_substs.get(&id.local_id).cloned()
     }
@@ -827,12 +815,9 @@ impl<'tcx> CommonTypes<'tcx> {
     fn new(interners: &CtxtInterners<'tcx>) -> CommonTypes<'tcx> {
         // Ensure our type representation does not grow
         #[cfg(target_pointer_width = "64")]
-        #[allow(dead_code)]
-        static ASSERT_TY_KIND: () =
-            [()][!(::std::mem::size_of::<ty::TyKind<'_>>() <= 24) as usize];
+        static_assert!(ASSERT_TY_KIND: ::std::mem::size_of::<ty::TyKind<'_>>() <= 24);
         #[cfg(target_pointer_width = "64")]
-        #[allow(dead_code)]
-        static ASSERT_TYS: () = [()][!(::std::mem::size_of::<ty::TyS<'_>>() <= 32) as usize];
+        static_assert!(ASSERT_TYS: ::std::mem::size_of::<ty::TyS<'_>>() <= 32);
 
         let mk = |sty| CtxtInterners::intern_ty(interners, interners, sty);
         let mk_region = |r| {
@@ -937,8 +922,8 @@ pub struct GlobalCtxt<'tcx> {
     freevars: FxHashMap<DefId, Lrc<Vec<hir::Freevar>>>,
 
     maybe_unused_trait_imports: FxHashSet<DefId>,
-
     maybe_unused_extern_crates: Vec<(DefId, Span)>,
+    pub extern_prelude: FxHashSet<ast::Name>,
 
     // Internal cache for metadata decoding. No need to track deps on this.
     pub rcache: Lock<FxHashMap<ty::CReaderCacheKey, Ty<'tcx>>>,
@@ -1191,7 +1176,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             None
         };
 
-        let mut trait_map: FxHashMap<_, Lrc<FxHashMap<_, _>>> = FxHashMap();
+        let mut trait_map: FxHashMap<_, Lrc<FxHashMap<_, _>>> = FxHashMap::default();
         for (k, v) in resolutions.trait_map {
             let hir_id = hir.node_to_hir_id(k);
             let map = trait_map.entry(hir_id.owner).or_default();
@@ -1224,6 +1209,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
                     .into_iter()
                     .map(|(id, sp)| (hir.local_def_id(id), sp))
                     .collect(),
+            extern_prelude: resolutions.extern_prelude,
             hir,
             def_path_hash_to_def_id,
             queries: query::Queries::new(
@@ -1231,14 +1217,14 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
                 extern_providers,
                 on_disk_query_result_cache,
             ),
-            rcache: Lock::new(FxHashMap()),
-            selection_cache: traits::SelectionCache::new(),
-            evaluation_cache: traits::EvaluationCache::new(),
+            rcache: Default::default(),
+            selection_cache: Default::default(),
+            evaluation_cache: Default::default(),
             crate_name: Symbol::intern(crate_name),
             data_layout,
-            layout_interner: Lock::new(FxHashSet()),
-            stability_interner: Lock::new(FxHashSet()),
-            allocation_interner: Lock::new(FxHashSet()),
+            layout_interner: Default::default(),
+            stability_interner: Default::default(),
+            allocation_interner: Default::default(),
             alloc_map: Lock::new(interpret::AllocMap::new()),
             tx_to_llvm_workers: Lock::new(tx),
             output_filenames: Arc::new(output_filenames.clone()),
@@ -1731,9 +1717,9 @@ impl<'a, 'tcx> Lift<'tcx> for Region<'a> {
     }
 }
 
-impl<'a, 'tcx> Lift<'tcx> for &'a Goal<'a> {
-    type Lifted = &'tcx Goal<'tcx>;
-    fn lift_to_tcx<'b, 'gcx>(&self, tcx: TyCtxt<'b, 'gcx, 'tcx>) -> Option<&'tcx Goal<'tcx>> {
+impl<'a, 'tcx> Lift<'tcx> for Goal<'a> {
+    type Lifted = Goal<'tcx>;
+    fn lift_to_tcx<'b, 'gcx>(&self, tcx: TyCtxt<'b, 'gcx, 'tcx>) -> Option<Goal<'tcx>> {
         if tcx.interners.arena.in_arena(*self as *const _) {
             return Some(unsafe { mem::transmute(*self) });
         }
@@ -2304,6 +2290,12 @@ impl<'tcx> Borrow<RegionKind> for Interned<'tcx, RegionKind> {
     }
 }
 
+impl<'tcx: 'lcx, 'lcx> Borrow<GoalKind<'lcx>> for Interned<'tcx, GoalKind<'tcx>> {
+    fn borrow<'a>(&'a self) -> &'a GoalKind<'lcx> {
+        &self.0
+    }
+}
+
 impl<'tcx: 'lcx, 'lcx> Borrow<[ExistentialPredicate<'lcx>]>
     for Interned<'tcx, List<ExistentialPredicate<'tcx>>> {
     fn borrow<'a>(&'a self) -> &'a [ExistentialPredicate<'lcx>] {
@@ -2419,7 +2411,8 @@ pub fn keep_local<'tcx, T: ty::TypeFoldable<'tcx>>(x: &T) -> bool {
 
 direct_interners!('tcx,
     region: mk_region(|r: &RegionKind| r.keep_in_local_tcx()) -> RegionKind,
-    const_: mk_const(|c: &Const<'_>| keep_local(&c.ty) || keep_local(&c.val)) -> Const<'tcx>
+    const_: mk_const(|c: &Const<'_>| keep_local(&c.ty) || keep_local(&c.val)) -> Const<'tcx>,
+    goal: mk_goal(|c: &GoalKind<'_>| keep_local(c)) -> GoalKind<'tcx>
 );
 
 macro_rules! slice_interners {
@@ -2438,7 +2431,7 @@ slice_interners!(
     type_list: _intern_type_list(Ty),
     substs: _intern_substs(Kind),
     clauses: _intern_clauses(Clause),
-    goals: _intern_goals(Goal)
+    goal_list: _intern_goals(Goal)
 );
 
 // This isn't a perfect fit: CanonicalVarInfo slices are always
@@ -2816,10 +2809,6 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
 
     pub fn mk_goals<I: InternAs<[Goal<'tcx>], Goals<'tcx>>>(self, iter: I) -> I::Output {
         iter.intern_with(|xs| self.intern_goals(xs))
-    }
-
-    pub fn mk_goal(self, goal: Goal<'tcx>) -> &'tcx Goal<'_> {
-        &self.intern_goals(&[goal])[0]
     }
 
     pub fn lint_hir<S: Into<MultiSpan>>(self,

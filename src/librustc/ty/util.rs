@@ -681,7 +681,7 @@ impl<'a, 'tcx> ty::TyS<'tcx> {
                 match (r1, r2) {
                     (Representability::SelfRecursive(v1),
                      Representability::SelfRecursive(v2)) => {
-                        Representability::SelfRecursive(v1.iter().map(|s| *s).chain(v2).collect())
+                        Representability::SelfRecursive(v1.into_iter().chain(v2).collect())
                     }
                     (r1, r2) => cmp::max(r1, r2)
                 }
@@ -846,7 +846,7 @@ impl<'a, 'tcx> ty::TyS<'tcx> {
         // contains a different, structurally recursive type, maintain a stack
         // of seen types and check recursion for each of them (issues #3008, #3779).
         let mut seen: Vec<Ty<'_>> = Vec::new();
-        let mut representable_cache = FxHashMap();
+        let mut representable_cache = FxHashMap::default();
         let r = is_type_structurally_recursive(
             tcx, sp, &mut seen, &mut representable_cache, self);
         debug!("is_type_representable: {:?} is {:?}", self, r);

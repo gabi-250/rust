@@ -9,6 +9,7 @@
 // except according to those terms.
 
 use std::fmt::Write;
+use std::hash::Hash;
 
 use syntax_pos::symbol::Symbol;
 use rustc::ty::layout::{self, Size, Align, TyLayout};
@@ -80,15 +81,15 @@ pub enum PathElem {
 }
 
 /// State for tracking recursive validation of references
-pub struct RefTracking<'tcx> {
-    pub seen: FxHashSet<(OpTy<'tcx>)>,
-    pub todo: Vec<(OpTy<'tcx>, Vec<PathElem>)>,
+pub struct RefTracking<'tcx, Tag> {
+    pub seen: FxHashSet<(OpTy<'tcx, Tag>)>,
+    pub todo: Vec<(OpTy<'tcx, Tag>, Vec<PathElem>)>,
 }
 
-impl<'tcx> RefTracking<'tcx> {
-    pub fn new(op: OpTy<'tcx>) -> Self {
+impl<'tcx, Tag: Copy+Eq+Hash> RefTracking<'tcx, Tag> {
+    pub fn new(op: OpTy<'tcx, Tag>) -> Self {
         let mut ref_tracking = RefTracking {
-            seen: FxHashSet(),
+            seen: FxHashSet::default(),
             todo: vec![(op, Vec::new())],
         };
         ref_tracking.seen.insert(op);
@@ -128,7 +129,7 @@ fn path_format(path: &Vec<PathElem>) -> String {
     out
 }
 
-fn scalar_format(value: ScalarMaybeUndef) -> String {
+fn scalar_format<Tag>(value: ScalarMaybeUndef<Tag>) -> String {
     match value {
         ScalarMaybeUndef::Undef =>
             "uninitialized bytes".to_owned(),
@@ -143,9 +144,9 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
     /// Make sure that `value` is valid for `ty`, *assuming* `ty` is a primitive type.
     fn validate_primitive_type(
         &self,
-        value: ValTy<'tcx>,
+        value: ValTy<'tcx, M::PointerTag>,
         path: &Vec<PathElem>,
-        ref_tracking: Option<&mut RefTracking<'tcx>>,
+        ref_tracking: Option<&mut RefTracking<'tcx, M::PointerTag>>,
         const_mode: bool,
     ) -> EvalResult<'tcx> {
         // Go over all the primitive types
@@ -185,7 +186,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                     let tail = self.tcx.struct_tail(place.layout.ty);
                     match tail.sty {
                         ty::Dynamic(..) => {
-                            let vtable = try_validation!(place.extra.unwrap().to_ptr(),
+                            let vtable = try_validation!(place.meta.unwrap().to_ptr(),
                                 "non-pointer vtable in fat pointer", path);
                             try_validation!(self.read_drop_type_from_vtable(vtable),
                                 "invalid drop fn in vtable", path);
@@ -194,7 +195,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                             // FIXME: More checks for the vtable.
                         }
                         ty::Slice(..) | ty::Str => {
-                            try_validation!(place.extra.unwrap().to_usize(self),
+                            try_validation!(place.meta.unwrap().to_usize(self),
                                 "non-integer slice length in fat pointer", path);
                         }
                         ty::Foreign(..) => {
@@ -207,7 +208,11 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                 // for safe ptrs, also check the ptr values itself
                 if !ty.is_unsafe_ptr() {
                     // Make sure this is non-NULL and aligned
-                    let (size, align) = self.size_and_align_of(place.extra, place.layout)?;
+                    let (size, align) = self.size_and_align_of(place.meta, place.layout)?
+                        // for the purpose of validity, consider foreign types to have
+                        // alignment and size determined by the layout (size will be 0,
+                        // alignment should take attributes into account).
+                        .unwrap_or_else(|| place.layout.size_and_align());
                     match self.memory.check_align(place.ptr, align) {
                         Ok(_) => {},
                         Err(err) => match err.kind {
@@ -217,7 +222,9 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                                 return validation_failure!("unaligned reference", path),
                             _ =>
                                 return validation_failure!(
-                                    "dangling (deallocated) reference", path
+                                    "dangling (out-of-bounds) reference (might be NULL at \
+                                     run-time)",
+                                    path
                                 ),
                         }
                     }
@@ -272,7 +279,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
     /// Make sure that `value` matches the
     fn validate_scalar_layout(
         &self,
-        value: ScalarMaybeUndef,
+        value: ScalarMaybeUndef<M::PointerTag>,
         size: Size,
         path: &Vec<PathElem>,
         layout: &layout::Scalar,
@@ -363,9 +370,9 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
     /// validation (e.g., pointer values are fine in integers at runtime).
     pub fn validate_operand(
         &self,
-        dest: OpTy<'tcx>,
+        dest: OpTy<'tcx, M::PointerTag>,
         path: &mut Vec<PathElem>,
-        mut ref_tracking: Option<&mut RefTracking<'tcx>>,
+        mut ref_tracking: Option<&mut RefTracking<'tcx, M::PointerTag>>,
         const_mode: bool,
     ) -> EvalResult<'tcx> {
         trace!("validate_operand: {:?}, {:?}", *dest, dest.layout.ty);
@@ -489,9 +496,10 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                     }
                     // Special handling for arrays/slices of builtin integer types
                     ty::Array(tys, ..) | ty::Slice(tys) if {
-                        // This optimization applies only for integer types
+                        // This optimization applies only for integer and floating point types
+                        // (i.e., types that can hold arbitrary bytes).
                         match tys.sty {
-                            ty::Int(..) | ty::Uint(..) => true,
+                            ty::Int(..) | ty::Uint(..) | ty::Float(..) => true,
                             _ => false,
                         }
                     } => {
@@ -503,9 +511,20 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                         // This is the size in bytes of the whole array.
                         let size = Size::from_bytes(ty_size * len);
 
-                        match self.memory.read_bytes(dest.ptr, size) {
+                        // In run-time mode, we accept pointers in here.  This is actually more
+                        // permissive than a per-element check would be, e.g. we accept
+                        // an &[u8] that contains a pointer even though bytewise checking would
+                        // reject it.  However, that's good: We don't inherently want
+                        // to reject those pointers, we just do not have the machinery to
+                        // talk about parts of a pointer.
+                        // We also accept undef, for consistency with the type-based checks.
+                        match self.memory.check_bytes(
+                            dest.ptr,
+                            size,
+                            /*allow_ptr_and_undef*/!const_mode,
+                        ) {
                             // In the happy case, we needn't check anything else.
-                            Ok(_) => {},
+                            Ok(()) => {},
                             // Some error happened, try to provide a more detailed description.
                             Err(err) => {
                                 // For some errors we might be able to provide extra information
@@ -552,11 +571,11 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
         match layout.ty.sty {
             // generators and closures.
             ty::Closure(def_id, _) | ty::Generator(def_id, _, _) => {
-                if let Some(node_id) = self.tcx.hir.as_local_node_id(def_id) {
-                    let freevar = self.tcx.with_freevars(node_id, |fv| fv[field]);
-                    PathElem::ClosureVar(self.tcx.hir.name(freevar.var_id()))
+                if let Some(upvar) = self.tcx.optimized_mir(def_id).upvar_decls.get(field) {
+                    PathElem::ClosureVar(upvar.debug_name)
                 } else {
-                    // The closure is not local, so we cannot get the name
+                    // Sometimes the index is beyond the number of freevars (seen
+                    // for a generator).
                     PathElem::ClosureVar(Symbol::intern(&field.to_string()))
                 }
             }

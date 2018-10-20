@@ -75,8 +75,7 @@ use self::cfg::Cfg;
 use self::auto_trait::AutoTraitFinder;
 use self::blanket_impl::BlanketImplFinder;
 
-thread_local!(pub static MAX_DEF_ID: RefCell<FxHashMap<CrateNum, DefId>> =
-    RefCell::new(FxHashMap()));
+thread_local!(pub static MAX_DEF_ID: RefCell<FxHashMap<CrateNum, DefId>> = Default::default());
 
 const FN_OUTPUT_NAME: &'static str = "Output";
 
@@ -165,7 +164,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> Clean<Crate> for visit_ast::RustdocVisitor<'a, 'tc
         // Clean the crate, translating the entire libsyntax AST to one that is
         // understood by rustdoc.
         let mut module = self.module.clean(cx);
-        let mut masked_crates = FxHashSet();
+        let mut masked_crates = FxHashSet::default();
 
         match module.inner {
             ModuleItem(ref module) => {
@@ -1585,7 +1584,7 @@ impl<'a, 'tcx> Clean<Generics> for (&'a ty::Generics,
         // Note that associated types also have a sized bound by default, but we
         // don't actually know the set of associated types right here so that's
         // handled in cleaning associated types
-        let mut sized_params = FxHashSet();
+        let mut sized_params = FxHashSet::default();
         where_predicates.retain(|pred| {
             match *pred {
                 WP::BoundPredicate { ty: Generic(ref g), ref bounds } => {
@@ -2447,8 +2446,8 @@ impl Clean<Type> for hir::Ty {
 
                 if let Some(&hir::ItemKind::Ty(ref ty, ref generics)) = alias {
                     let provided_params = &path.segments.last().expect("segments were empty");
-                    let mut ty_substs = FxHashMap();
-                    let mut lt_substs = FxHashMap();
+                    let mut ty_substs = FxHashMap::default();
+                    let mut lt_substs = FxHashMap::default();
                     provided_params.with_generic_args(|generic_args| {
                         let mut indices: GenericParamCount = Default::default();
                         for param in generics.params.iter() {
@@ -2632,47 +2631,44 @@ impl<'tcx> Clean<Type> for Ty<'tcx> {
                 }
             }
             ty::Dynamic(ref obj, ref reg) => {
-                if let Some(principal) = obj.principal() {
-                    let did = principal.def_id();
+                let principal = obj.principal();
+                let did = principal.def_id();
+                inline::record_extern_fqn(cx, did, TypeKind::Trait);
+
+                let mut typarams = vec![];
+                reg.clean(cx).map(|b| typarams.push(GenericBound::Outlives(b)));
+                for did in obj.auto_traits() {
+                    let empty = cx.tcx.intern_substs(&[]);
+                    let path = external_path(cx, &cx.tcx.item_name(did).as_str(),
+                        Some(did), false, vec![], empty);
                     inline::record_extern_fqn(cx, did, TypeKind::Trait);
+                    let bound = GenericBound::TraitBound(PolyTrait {
+                        trait_: ResolvedPath {
+                            path,
+                            typarams: None,
+                            did,
+                            is_generic: false,
+                        },
+                        generic_params: Vec::new(),
+                    }, hir::TraitBoundModifier::None);
+                    typarams.push(bound);
+                }
 
-                    let mut typarams = vec![];
-                    reg.clean(cx).map(|b| typarams.push(GenericBound::Outlives(b)));
-                    for did in obj.auto_traits() {
-                        let empty = cx.tcx.intern_substs(&[]);
-                        let path = external_path(cx, &cx.tcx.item_name(did).as_str(),
-                            Some(did), false, vec![], empty);
-                        inline::record_extern_fqn(cx, did, TypeKind::Trait);
-                        let bound = GenericBound::TraitBound(PolyTrait {
-                            trait_: ResolvedPath {
-                                path,
-                                typarams: None,
-                                did,
-                                is_generic: false,
-                            },
-                            generic_params: Vec::new(),
-                        }, hir::TraitBoundModifier::None);
-                        typarams.push(bound);
-                    }
+                let mut bindings = vec![];
+                for pb in obj.projection_bounds() {
+                    bindings.push(TypeBinding {
+                        name: cx.tcx.associated_item(pb.item_def_id()).ident.name.clean(cx),
+                        ty: pb.skip_binder().ty.clean(cx)
+                    });
+                }
 
-                    let mut bindings = vec![];
-                    for pb in obj.projection_bounds() {
-                        bindings.push(TypeBinding {
-                            name: cx.tcx.associated_item(pb.item_def_id()).ident.name.clean(cx),
-                            ty: pb.skip_binder().ty.clean(cx)
-                        });
-                    }
-
-                    let path = external_path(cx, &cx.tcx.item_name(did).as_str(), Some(did),
-                        false, bindings, principal.skip_binder().substs);
-                    ResolvedPath {
-                        path,
-                        typarams: Some(typarams),
-                        did,
-                        is_generic: false,
-                    }
-                } else {
-                    Never
+                let path = external_path(cx, &cx.tcx.item_name(did).as_str(), Some(did),
+                    false, bindings, principal.skip_binder().substs);
+                ResolvedPath {
+                    path,
+                    typarams: Some(typarams),
+                    did,
+                    is_generic: false,
                 }
             }
             ty::Tuple(ref t) => Tuple(t.clean(cx)),
@@ -3391,7 +3387,7 @@ impl Clean<Vec<Item>> for doctree::Impl {
                   .into_iter()
                   .map(|meth| meth.ident.to_string())
                   .collect()
-        }).unwrap_or(FxHashSet());
+        }).unwrap_or_default();
 
         ret.push(Item {
             name: None,
@@ -3505,7 +3501,7 @@ impl Clean<Vec<Item>> for doctree::Import {
         let path = self.path.clean(cx);
         let inner = if self.glob {
             if !denied {
-                let mut visited = FxHashSet();
+                let mut visited = FxHashSet::default();
                 if let Some(items) = inline::try_inline_glob(cx, path.def, &mut visited) {
                     return items;
                 }
@@ -3515,7 +3511,7 @@ impl Clean<Vec<Item>> for doctree::Import {
         } else {
             let name = self.name;
             if !denied {
-                let mut visited = FxHashSet();
+                let mut visited = FxHashSet::default();
                 if let Some(items) = inline::try_inline(cx, path.def, name, &mut visited) {
                     return items;
                 }
