@@ -1,4 +1,5 @@
 extern crate ar;
+extern crate goblin;
 
 use rustc::middle::cstore::{MetadataLoader, METADATA_FILENAME, metadata_section_name};
 use rustc_data_structures::owning_ref::OwningRef;
@@ -15,9 +16,8 @@ pub struct IronOxMetadataLoader;
 impl MetadataLoader for IronOxMetadataLoader {
     fn get_rlib_metadata(&self, _: &Target, filename: &Path)
         -> Result<MetadataRef, String> {
-        let input_file =
-            File::open(filename)
-                .map_err(|_e| format!("failed to read {}", filename.display()))?;
+        let input_file = File::open(filename)
+            .map_err(|_e| format!("failed to read {}", filename.display()))?;
         let mut archive = ar::Archive::new(input_file);
         let mut buf = vec![];
         while let Some(entry) = archive.next_entry() {
@@ -55,4 +55,5 @@ fn search_meta_section<'a>(bytes: &'a [u8], target: &Target, filename: &Path)
             return Ok(&bytes[start_index..end_index]);
         }
     }
+    Err(format!("metadata not found: '{}'", filename.display()))
 }
