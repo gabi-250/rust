@@ -10,4 +10,5 @@ crate-type = ["dylib"]
 test = false
 
 [dependencies]
-ar = "0.6.0"
+ar = "0.6"
+goblin = "0.0"
