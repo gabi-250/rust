@@ -600,14 +600,14 @@ pub fn codegen_crate<B : ExtraBackendMethods>(
     check_for_rustc_errors_attr(tcx);
 
     if let Some(true) = tcx.sess.opts.debugging_opts.thinlto {
-        if backend.thin_lto_available() {
+        if !backend.thin_lto_available() {
             tcx.sess.fatal("this compiler's LLVM does not support ThinLTO");
         }
     }
 
     if (tcx.sess.opts.debugging_opts.pgo_gen.is_some() ||
         !tcx.sess.opts.debugging_opts.pgo_use.is_empty()) &&
-        backend.pgo_available()
+        !backend.pgo_available()
     {
         tcx.sess.fatal("this compiler's LLVM does not support PGO");
     }

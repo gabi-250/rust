@@ -134,10 +134,10 @@ pub struct LlvmCodegenBackend(());
 
 impl ExtraBackendMethods for LlvmCodegenBackend {
     fn thin_lto_available(&self) -> bool {
-         unsafe { !llvm::LLVMRustThinLTOAvailable() }
+         unsafe { llvm::LLVMRustThinLTOAvailable() }
     }
     fn pgo_available(&self) -> bool {
-        unsafe { !llvm::LLVMRustPGOAvailable() }
+        unsafe { llvm::LLVMRustPGOAvailable() }
     }
     fn new_metadata(&self, sess: &Session, mod_name: &str) -> ModuleLlvm {
         ModuleLlvm::new(sess, mod_name)
