@@ -42,6 +42,28 @@ pub use self::NativeLibraryKind::*;
 
 pub const METADATA_FILENAME: &str = "rust.metadata.bin";
 
+pub fn metadata_section_name(target: &Target) -> &'static str {
+    // Historical note:
+    //
+    // When using link.exe it was seen that the section name `.note.rustc`
+    // was getting shortened to `.note.ru`, and according to the PE and COFF
+    // specification:
+    //
+    // > Executable images do not use a string table and do not support
+    // > section names longer than 8 characters
+    //
+    // https://msdn.microsoft.com/en-us/library/windows/hardware/gg463119.aspx
+    //
+    // As a result, we choose a slightly shorter name! As to why
+    // `.note.rustc` works on MinGW, that's another good question...
+
+    if target.options.is_like_osx {
+        "__DATA,.rustc"
+    } else {
+        ".rustc"
+    }
+}
+
 // lonely orphan structs and enums looking for a better home
 
 /// Where a crate came from on the local filesystem. One of these three options
