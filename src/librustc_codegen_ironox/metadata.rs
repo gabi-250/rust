@@ -1,6 +1,6 @@
 extern crate ar;
 
-use rustc::middle::cstore::{MetadataLoader, METADATA_FILENAME};
+use rustc::middle::cstore::{MetadataLoader, METADATA_FILENAME, metadata_section_name};
 use rustc_data_structures::owning_ref::OwningRef;
 use rustc_target::spec::Target;
 
@@ -31,8 +31,28 @@ impl MetadataLoader for IronOxMetadataLoader {
         Ok(rustc_erase_owner!(buf))
     }
 
-    fn get_dylib_metadata(&self, _target: &Target, filename: &Path)
+    fn get_dylib_metadata(&self, target: &Target, filename: &Path)
         -> Result<MetadataRef, String> {
-        unimplemented!("get_dylib_metadata {:?}", filename);
+        let mut input_file = File::open(filename)
+            .map_err(|_e| format!("failed to read {}", filename.display()))?;
+        let mut buf = vec![];
+        input_file.read_to_end(&mut buf)
+            .map_err(|_| format!("failed to read {}", filename.display()))?;
+        let buf = OwningRef::new(box buf);
+        let buf = buf.try_map(|buf| search_meta_section(&buf, target, filename))?;
+        return Ok(rustc_erase_owner!(buf));
+    }
+}
+
+fn search_meta_section<'a>(bytes: &'a [u8], target: &Target, filename: &Path)
+    -> Result<&'a [u8], String> {
+    let elf = goblin::elf::Elf::parse(&bytes).map_err(|_| "failed to parse ELF")?;
+    for sh in &elf.section_headers {
+        if elf.shdr_strtab.get(sh.sh_name)
+            .map_or(false, |r| r.ok() == Some(metadata_section_name(target))) {
+            let start_index = sh.sh_offset as usize;
+            let end_index = (sh.sh_offset + sh.sh_size) as usize;
+            return Ok(&bytes[start_index..end_index]);
+        }
     }
 }
