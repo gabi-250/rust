@@ -45,6 +45,7 @@ use rustc::ty::TyCtxt;
 use rustc_mir::monomorphize;
 
 pub mod link;
+pub mod base;
 pub mod codegen_backend;
 pub mod symbol_names;
 pub mod symbol_names_test;

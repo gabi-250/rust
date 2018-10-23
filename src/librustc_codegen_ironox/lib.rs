@@ -85,10 +85,12 @@ impl CodegenBackend for IronOxCodegenBackend {
         };
         back::symbol_names::provide(providers);
         back::symbol_export::provide(providers);
+        base::provide(providers);
     }
 
     fn provide_extern(&self, providers: &mut ty::query::Providers) {
         back::symbol_export::provide_extern(providers);
+        base::provide_extern(providers);
     }
 
     fn codegen_crate<'a, 'tcx>(
@@ -123,7 +125,7 @@ impl CodegenBackend for IronOxCodegenBackend {
     ) -> Result<(), CompileIncomplete> {
         let _ongoing_codegen = ongoing_codegen.downcast::<::base::OngoingCodegen>()
             .expect("Expected the iron-ox OngoingCodegen!");
-        unimplemented!("join_codegen_and_link");
+        Ok(())
     }
 }
 
