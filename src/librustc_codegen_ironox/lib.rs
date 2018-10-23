@@ -7,6 +7,7 @@ extern crate rustc_target;
 #[macro_use]
 extern crate rustc_data_structures;
 extern crate rustc_codegen_utils;
+extern crate syntax_pos;
 
 mod metadata;
 
@@ -29,6 +30,8 @@ mod back {
     pub use rustc_codegen_utils::symbol_export;
     pub use rustc_codegen_utils::symbol_names;
 }
+
+mod base;
 
 pub struct IronOxCodegenBackend(());
 
@@ -91,7 +94,7 @@ impl CodegenBackend for IronOxCodegenBackend {
     fn codegen_crate<'a, 'tcx>(
         &self,
         tcx: TyCtxt<'a, 'tcx, 'tcx>,
-        _rx: mpsc::Receiver<Box<dyn Any + Send>>,
+        rx: mpsc::Receiver<Box<dyn Any + Send>>,
     ) -> Box<dyn Any> {
         // Print the MIR
         for mono_item in collector::collect_crate_mono_items(
@@ -108,16 +111,18 @@ impl CodegenBackend for IronOxCodegenBackend {
                 _ => {}
             }
         }
-        unimplemented!("codegen_crate");
+        box base::codegen_crate(tcx, rx)
     }
 
     fn join_codegen_and_link(
         &self,
-        _ongoing_codegen: Box<dyn Any>,
+        ongoing_codegen: Box<dyn Any>,
         _sess: &Session,
         _dep_graph: &DepGraph,
         _outputs: &OutputFilenames,
     ) -> Result<(), CompileIncomplete> {
+        let _ongoing_codegen = ongoing_codegen.downcast::<::base::OngoingCodegen>()
+            .expect("Expected the iron-ox OngoingCodegen!");
         unimplemented!("join_codegen_and_link");
     }
 }
