@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc::middle::cstore::{MetadataLoader, METADATA_FILENAME};
+use rustc::middle::cstore::MetadataLoader;
 use rustc_target::spec::Target;
 use llvm;
 use llvm::{False, ObjectFile, mk_section_iter};
@@ -20,6 +20,7 @@ use std::ptr;
 use std::slice;
 use rustc_fs_util::path2cstr;
 
+pub use rustc::middle::cstore::METADATA_FILENAME;
 pub use rustc_data_structures::sync::MetadataRef;
 
 pub struct LlvmMetadataLoader;

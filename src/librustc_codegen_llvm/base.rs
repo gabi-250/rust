@@ -31,7 +31,6 @@ use super::CachedModuleCodegen;
 use abi;
 use back::write::{self, OngoingCodegen};
 use llvm::{self, TypeKind, get_param};
-use metadata;
 use rustc::dep_graph::cgu_reuse_tracker::CguReuse;
 use rustc::hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
 use rustc::middle::lang_items::StartFnLangItem;
@@ -656,7 +655,7 @@ fn write_metadata<'a, 'gcx>(tcx: TyCtxt<'a, 'gcx, 'gcx>,
     };
     unsafe {
         llvm::LLVMSetInitializer(llglobal, llconst);
-        let section_name = metadata::metadata_section_name(&tcx.sess.target.target);
+        let section_name = cstore::metadata_section_name(&tcx.sess.target.target);
         let name = SmallCStr::new(section_name);
         llvm::LLVMSetSection(llglobal, name.as_ptr());
 
