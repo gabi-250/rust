@@ -28,7 +28,6 @@ use rustc_codegen_ssa::{ModuleCodegen, ModuleKind};
 use rustc_codegen_ssa::base::maybe_create_entry_wrapper;
 use super::LlvmCodegenBackend;
 
-use back::write;
 use llvm;
 use metadata;
 use rustc::mir::mono::{Linkage, Visibility, Stats};
@@ -50,6 +49,7 @@ use CrateInfo;
 use rustc_data_structures::small_c_str::SmallCStr;
 
 use rustc_codegen_ssa::interfaces::*;
+use rustc_codegen_ssa::back::write::submit_codegened_module_to_llvm;
 
 use std::any::Any;
 use std::cmp;
@@ -66,7 +66,7 @@ use value::Value;
 
 
 
-pub(crate) fn write_metadata<'a, 'gcx>(
+pub fn write_metadata<'a, 'gcx>(
     tcx: TyCtxt<'a, 'gcx, 'gcx>,
     llvm_module: &ModuleLlvm
 ) -> EncodedMetadata {
@@ -406,9 +406,7 @@ pub fn compile_codegen_unit<'ll, 'tcx>(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     let cost = time_to_codegen.as_secs() * 1_000_000_000 +
                time_to_codegen.subsec_nanos() as u64;
 
-    write::submit_codegened_module_to_llvm(tcx,
-                                           module,
-                                           cost);
+    submit_codegened_module_to_llvm(&LlvmCodegenBackend(()), tcx, module, cost);
     return stats;
 
     fn module_codegen<'ll, 'tcx>(

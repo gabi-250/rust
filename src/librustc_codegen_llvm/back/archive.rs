@@ -18,6 +18,7 @@ use std::ptr;
 use std::str;
 
 use back::bytecode::RLIB_BYTECODE_EXTENSION;
+use rustc_codegen_ssa::back::archive::find_library;
 use libc;
 use llvm::archive_ro::{ArchiveRO, Child};
 use llvm::{self, ArchiveKind};
