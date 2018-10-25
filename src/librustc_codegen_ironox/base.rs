@@ -1,28 +1,45 @@
-use rustc::hir::def_id::LOCAL_CRATE;
-use rustc::middle::cstore::EncodedMetadata;
-use rustc::session::config::OutputFilenames;
 use rustc::ty::TyCtxt;
-use rustc::ty::query::Providers;
-use rustc_codegen_utils::base;
-use rustc_data_structures::svh::Svh;
-use syntax_pos::symbol::Symbol;
 
 use std::any::Any;
-use std::sync::Arc;
 use std::sync::mpsc;
+
+
+use rustc::hir::def_id::LOCAL_CRATE;
+use rustc::ty::query::Providers;
+
+use rustc_codegen_utils::base;
 
 #[allow(dead_code)]
 pub struct OngoingCodegen {
-    crate_name: Symbol,
-    crate_hash: Svh,
-    metadata: EncodedMetadata,
-    output_filenames: Arc<OutputFilenames>,
+    pub crate_name: String,
 }
 
-pub fn codegen_crate<'a, 'tcx>(_tcx: TyCtxt<'a, 'tcx, 'tcx>,
+fn compile_codegen_unit<'a, 'tcx>(_tcx: TyCtxt<'a, 'tcx, 'tcx>,
+                                  cgu_name: InternedString) {
+    eprintln!("{:?}", cgu_name);
+}
+
+pub fn codegen_crate<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                                _rx: mpsc::Receiver<Box<dyn Any + Send>>)
                                -> OngoingCodegen {
-    unimplemented!("base::codegen_crate");
+
+
+    let codegen_units =
+        tcx.collect_and_partition_mono_items(LOCAL_CRATE).1;
+
+
+    let codegen_units = (*codegen_units).clone();
+    for cgu in codegen_units.into_iter() {
+
+        compile_codegen_unit(tcx, *cgu.name());
+        for (&mono_item, &linkage) in cgu.items() {
+            eprintln!("{:?}", mono_item);
+            eprintln!("{:?}", linkage);
+        }
+    }
+    return OngoingCodegen {
+        crate_name: "dummy-crate".to_string()
+    };
 }
 
 pub fn provide(providers: &mut Providers) {
