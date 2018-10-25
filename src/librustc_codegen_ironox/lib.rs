@@ -23,8 +23,6 @@ use rustc::ty::{self, TyCtxt};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
 use rustc_codegen_utils::target_features::{all_known_features, X86_WHITELIST};
 use rustc_data_structures::sync::Lrc;
-use rustc_mir::monomorphize::collector;
-use rustc_mir::monomorphize::item::MonoItem;
 
 mod back {
     pub use rustc_codegen_utils::symbol_export;
@@ -98,21 +96,6 @@ impl CodegenBackend for IronOxCodegenBackend {
         tcx: TyCtxt<'a, 'tcx, 'tcx>,
         rx: mpsc::Receiver<Box<dyn Any + Send>>,
     ) -> Box<dyn Any> {
-        // Print the MIR
-        for mono_item in collector::collect_crate_mono_items(
-            tcx, collector::MonoItemCollectionMode::Eager).0 {
-            match mono_item {
-                MonoItem::Fn(inst) => {
-                    let def_id = inst.def_id();
-                    eprintln!("Def ID: {:?}", def_id);
-                    let mir = tcx.instance_mir(inst.def);
-                    for bb in mir.basic_blocks() {
-                        eprintln!("Statements: {:?}", bb.statements);
-                    }
-                }
-                _ => {}
-            }
-        }
         box base::codegen_crate(tcx, rx)
     }
 
