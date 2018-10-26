@@ -39,22 +39,32 @@ use errors::{FatalError, Handler};
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_ssa::CompiledModule;
 
+mod back {
+    pub use rustc_codegen_utils::symbol_names;
+}
+
 mod base;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
 
+impl Clone for TargetMachineIronOx {
+    fn clone(&self) -> Self {
+        panic!()
+    }
+}
+
 impl ExtraBackendMethods for IronOxCodegenBackend {
     fn thin_lto_available(&self) -> bool {
-        unimplemented!("");
+        false
     }
 
     fn pgo_available(&self) -> bool {
-        unimplemented!("");
+        false
     }
 
     fn new_metadata(&self, sess: &Session, mod_name: &str) -> ModuleIronOx {
-        unimplemented!("");
+        ModuleIronOx {}
     }
 
     fn write_metadata<'b, 'gcx>(
@@ -62,7 +72,8 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
         tcx: TyCtxt<'b, 'gcx, 'gcx>,
         metadata: &ModuleIronOx
     ) -> EncodedMetadata {
-        unimplemented!("");
+        let metadata = tcx.encode_metadata();
+        metadata
     }
 
     fn codegen_allocator(&self, tcx: TyCtxt, mods: &ModuleIronOx, kind: AllocatorKind) {
@@ -82,8 +93,8 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
         sess: &Session,
         find_features: bool
     ) -> Arc<dyn Fn() ->
-        Result<&'static mut TargetMachineIronOx, String> + Send + Sync> {
-        unimplemented!("");
+        Result<TargetMachineIronOx, String> + Send + Sync> {
+        Arc::new(move || { Ok(TargetMachineIronOx {}) })
     }
 
     fn target_cpu<'b>(&self, sess: &'b Session) -> &'b str {
@@ -111,17 +122,11 @@ impl ThinBufferMethods for ThinBufferIronOx {
     }
 }
 
-impl Clone for &'static mut TargetMachineIronOx {
-    fn clone(&self) -> Self {
-        panic!()
-    }
-}
-
 impl WriteBackendMethods for IronOxCodegenBackend {
     type Module = ModuleIronOx;
     type ModuleBuffer = ModuleBufferIronOx;
     type Context = ContextIronOx;
-    type TargetMachine = &'static mut TargetMachineIronOx;
+    type TargetMachine = TargetMachineIronOx;
     type ThinData = ThinDataIronOx;
     type ThinBuffer = ThinBufferIronOx;
 
@@ -157,7 +162,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         config: &ModuleConfig,
         timeline: &mut Timeline
     ) -> Result<(), FatalError> {
-        unimplemented!("");
+        Ok(())
     }
 
     unsafe fn optimize_thin(
@@ -236,6 +241,7 @@ impl<'a> CodegenBackend for IronOxCodegenBackend {
                 )
             }
         };
+        back::symbol_names::provide(providers);
         rustc_codegen_ssa::back::symbol_export::provide(providers);
         rustc_codegen_ssa::base::provide(providers);
     }
