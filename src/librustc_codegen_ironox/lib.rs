@@ -3,6 +3,7 @@
 
 extern crate rustc_errors;
 extern crate rustc;
+extern crate rustc_allocator;
 extern crate rustc_mir;
 extern crate rustc_target;
 #[macro_use]
@@ -20,8 +21,9 @@ use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::dep_graph::DepGraph;
 use rustc::middle::cstore::MetadataLoader;
 use rustc::session::{CompileIncomplete, Session};
-use rustc::session::config::{OutputFilenames, PrintRequest};
+use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
 use rustc::ty::{self, TyCtxt};
+use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
 use rustc_codegen_utils::target_features::{all_known_features, X86_WHITELIST};
 use rustc_data_structures::sync::Lrc;
@@ -46,6 +48,7 @@ mod back {
 }
 
 mod base;
+mod context;
 
 
 #[derive(Clone)]
@@ -71,8 +74,21 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
         metadata
     }
 
-    fn codegen_allocator(&self, _tcx: TyCtxt, _mods: &ModuleIronOx, _kind: AllocatorKind) {
-        unimplemented!("codegen_allocator");
+    fn codegen_allocator(&self, tcx: TyCtxt, _mods: &ModuleIronOx, _kind: AllocatorKind) {
+        eprintln!("Codegen allocator");
+        for method in ALLOCATOR_METHODS {
+            eprintln!("Name {:?}", method.name);
+            for ty in method.inputs.iter() {
+                match *ty {
+                    AllocatorTy::Layout => eprintln!("Layout"),
+                    AllocatorTy::Ptr => eprintln!("Ptr"),
+                    AllocatorTy::ResultPtr => eprintln!("ResultPtr"),
+                    AllocatorTy::Unit => eprintln!("Unit"),
+                    AllocatorTy::Usize => eprintln!("Usize"),
+
+                }
+            }
+        }
     }
 
     fn compile_codegen_unit<'ll, 'tcx: 'll>(
@@ -157,13 +173,22 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     }
 
     unsafe fn codegen(
-        _cgcx: &CodegenContext<Self>,
+        cgcx: &CodegenContext<Self>,
         _diag_handler: &Handler,
-        _module: ModuleCodegen<Self::Module>,
+        module: ModuleCodegen<Self::Module>,
         _config: &ModuleConfig,
         _timeline: &mut Timeline
     ) -> Result<CompiledModule, FatalError> {
-        unimplemented!("codegen");
+        let object = cgcx.output_filenames
+            .temp_path(OutputType::Object, Some(&module.name));
+        eprintln!("Object is {:?}", object);
+        Ok(CompiledModule {
+            name: module.name.clone(),
+            kind: module.kind,
+            object: Some(object),
+            bytecode: None,
+            bytecode_compressed: None,
+        })
     }
 
     fn run_lto_pass_manager(
