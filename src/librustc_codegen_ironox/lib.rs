@@ -1,6 +1,7 @@
 #![feature(box_syntax)]
 #![feature(optin_builtin_traits)]
 
+extern crate rustc_errors;
 extern crate rustc;
 extern crate rustc_mir;
 extern crate rustc_target;
@@ -13,7 +14,7 @@ extern crate syntax_pos;
 mod metadata;
 
 use std::any::Any;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 
 use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::dep_graph::DepGraph;
@@ -26,18 +27,154 @@ use rustc_codegen_utils::target_features::{all_known_features, X86_WHITELIST};
 use rustc_data_structures::sync::Lrc;
 use rustc_mir::monomorphize::collector;
 use rustc_mir::monomorphize::item::MonoItem;
+use rustc_codegen_ssa::CompiledModule;
+use rustc_codegen_ssa::ModuleCodegen;
+use rustc_errors::{FatalError, Handler};
+use rustc::mir::mono::Stats;
+use rustc_codegen_ssa::traits::{ExtraBackendMethods, WriteBackendMethods,
+                                ThinBufferMethods, ModuleBufferMethods};
+use rustc::middle::cstore::EncodedMetadata;
+use rustc::middle::allocator::AllocatorKind;
+use syntax_pos::symbol::InternedString;
+use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig};
+use rustc_codegen_ssa::back::lto::{SerializedModule, LtoModuleCodegen, ThinModule};
+use rustc::dep_graph::WorkProduct;
+use rustc::util::time_graph::Timeline;
 
 mod back {
-    pub use rustc_codegen_ssa::back::symbol_export;
     pub use rustc_codegen_utils::symbol_names;
 }
 
 mod base;
 
+
+#[derive(Clone)]
 pub struct IronOxCodegenBackend(());
 
-impl !Send for IronOxCodegenBackend {}
-impl !Sync for IronOxCodegenBackend {}
+impl Clone for TargetMachineIronOx {
+    fn clone(&self) -> Self {
+        panic!()
+    }
+}
+
+impl ExtraBackendMethods for IronOxCodegenBackend {
+    fn new_metadata(&self, _sess: &Session, _mod_name: &str) -> ModuleIronOx {
+        ModuleIronOx {}
+    }
+
+    fn write_metadata<'b, 'gcx>(
+        &self,
+        tcx: TyCtxt<'b, 'gcx, 'gcx>,
+        _metadata: &ModuleIronOx
+    ) -> EncodedMetadata {
+        let metadata = tcx.encode_metadata();
+        metadata
+    }
+
+    fn codegen_allocator(&self, _tcx: TyCtxt, _mods: &ModuleIronOx, _kind: AllocatorKind) {
+        unimplemented!("codegen_allocator");
+    }
+
+    fn compile_codegen_unit<'ll, 'tcx: 'll>(
+        &self,
+        tcx: TyCtxt<'ll, 'tcx, 'tcx>,
+        cgu_name: InternedString
+    ) -> Stats {
+        base::compile_codegen_unit(tcx, cgu_name)
+    }
+
+    fn target_machine_factory(
+        &self,
+        _sess: &Session,
+        _find_features: bool
+    ) -> Arc<dyn Fn() ->
+        Result<TargetMachineIronOx, String> + Send + Sync> {
+        Arc::new(move || { Ok(TargetMachineIronOx {}) })
+    }
+
+    fn target_cpu<'b>(&self, _sess: &'b Session) -> &'b str {
+        unimplemented!("target_cpu");
+    }
+}
+
+pub struct ModuleIronOx {}
+pub struct ModuleBufferIronOx {}
+
+impl ModuleBufferMethods for ModuleBufferIronOx {
+    fn data(&self) -> &[u8] {
+        unimplemented!("");
+    }
+}
+
+pub struct ContextIronOx {}
+pub struct TargetMachineIronOx {}
+pub struct ThinDataIronOx {}
+pub struct ThinBufferIronOx {}
+
+impl ThinBufferMethods for ThinBufferIronOx {
+    fn data(&self) -> &[u8] {
+        unimplemented!("");
+    }
+}
+
+impl WriteBackendMethods for IronOxCodegenBackend {
+    type Module = ModuleIronOx;
+    type ModuleBuffer = ModuleBufferIronOx;
+    type Context = ContextIronOx;
+    type TargetMachine = TargetMachineIronOx;
+    type ThinData = ThinDataIronOx;
+    type ThinBuffer = ThinBufferIronOx;
+
+    fn print_pass_timings(&self) {
+        unimplemented!("");
+    }
+
+    fn run_lto(
+        _cgcx: &CodegenContext<Self>,
+        _modules: Vec<ModuleCodegen<Self::Module>>,
+        _cached_modules: Vec<(SerializedModule<Self::ModuleBuffer>, WorkProduct)>,
+        _timeline: &mut Timeline
+    ) -> Result<(Vec<LtoModuleCodegen<Self>>, Vec<WorkProduct>), FatalError> {
+        unimplemented!("run_lto");
+    }
+
+    unsafe fn optimize(
+        _cgcx: &CodegenContext<Self>,
+        _diag_handler: &Handler,
+        _module: &ModuleCodegen<Self::Module>,
+        _config: &ModuleConfig,
+        _timeline: &mut Timeline
+    ) -> Result<(), FatalError> {
+        Ok(())
+    }
+
+    unsafe fn optimize_thin(
+        _cgcx: &CodegenContext<Self>,
+        _thin: &mut ThinModule<Self>,
+        _timeline: &mut Timeline
+    ) -> Result<ModuleCodegen<Self::Module>, FatalError> {
+        unimplemented!("optimize_thin");
+    }
+
+    unsafe fn codegen(
+        _cgcx: &CodegenContext<Self>,
+        _diag_handler: &Handler,
+        _module: ModuleCodegen<Self::Module>,
+        _config: &ModuleConfig,
+        _timeline: &mut Timeline
+    ) -> Result<CompiledModule, FatalError> {
+        unimplemented!("codegen");
+    }
+
+    fn run_lto_pass_manager(
+        _cgcx: &CodegenContext<Self>,
+        _module: &ModuleCodegen<Self::Module>,
+        _config: &ModuleConfig,
+        _thin: bool
+    ) {
+        unimplemented!("run_lto_pass_manager");
+    }
+}
 
 pub fn target_feature_whitelist(sess: &Session)
     -> &'static [(&'static str, Option<&'static str>)] {
@@ -85,11 +222,12 @@ impl CodegenBackend for IronOxCodegenBackend {
             }
         };
         back::symbol_names::provide(providers);
-        back::symbol_export::provide(providers);
+        rustc_codegen_ssa::back::symbol_export::provide(providers);
+        rustc_codegen_ssa::base::provide_both(providers);
     }
 
     fn provide_extern(&self, providers: &mut ty::query::Providers) {
-        back::symbol_export::provide_extern(providers);
+        rustc_codegen_ssa::back::symbol_export::provide_extern(providers);
     }
 
     fn codegen_crate<'a, 'tcx>(
@@ -112,18 +250,16 @@ impl CodegenBackend for IronOxCodegenBackend {
                 _ => {}
             }
         }
-        box base::codegen_crate(tcx, rx)
+        box rustc_codegen_ssa::base::codegen_crate(IronOxCodegenBackend(()), tcx, rx)
     }
 
     fn join_codegen_and_link(
         &self,
-        ongoing_codegen: Box<dyn Any>,
+        _ongoing_codegen: Box<dyn Any>,
         _sess: &Session,
         _dep_graph: &DepGraph,
         _outputs: &OutputFilenames,
     ) -> Result<(), CompileIncomplete> {
-        let _ongoing_codegen = ongoing_codegen.downcast::<::base::OngoingCodegen>()
-            .expect("Expected the iron-ox OngoingCodegen!");
         unimplemented!("join_codegen_and_link");
     }
 }
