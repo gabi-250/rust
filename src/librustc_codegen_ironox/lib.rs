@@ -35,8 +35,8 @@ use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::dep_graph::DepGraph;
 use rustc::middle::cstore::MetadataLoader;
 use rustc::session::{CompileIncomplete, Session};
-use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
-use rustc::ty::{self, TyCtxt};
+use rustc::session::config::{OutputFilenames, PrintRequest};
+use rustc::ty::{self, TyCtxt, PolyFnSig, FnSig};
 use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
 use rustc_codegen_utils::target_features::{all_known_features, X86_WHITELIST};
@@ -75,11 +75,18 @@ mod consts;
 mod context;
 mod debuginfo;
 mod declare;
+mod function;
 mod intrinsic;
 mod ironox_type;
 mod metadata;
 mod mono_item;
+mod registers;
 mod value;
+
+use context::CodegenCx;
+use ironox_type::Type;
+use value::Value;
+use function::IronOxFunction;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -92,7 +99,7 @@ impl Clone for TargetMachineIronOx {
 
 impl ExtraBackendMethods for IronOxCodegenBackend {
     fn new_metadata(&self, _sess: &Session, _mod_name: &str) -> ModuleIronOx {
-        ModuleIronOx { asm: "".to_string() }
+        ModuleIronOx::new()
     }
 
     fn write_metadata<'b, 'gcx>(
@@ -129,8 +136,45 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 }
 
+#[derive(Debug)]
 pub struct ModuleIronOx {
-    asm: String
+    pub functions: Vec<IronOxFunction>,
+}
+
+impl ModuleIronOx {
+    pub fn new() -> ModuleIronOx {
+        ModuleIronOx {
+            functions: vec![],
+        }
+    }
+
+    pub fn add_function(&mut self, name: &str, sig: FnSig) -> Value {
+        self.functions.push(IronOxFunction::new(name, sig));
+        Value::Function(self.functions.len() - 1)
+    }
+
+    pub fn add_function_with_type(
+        &mut self,
+        cx: &CodegenCx,
+        name: &str,
+        fn_type: Type) -> Value {
+        self.functions.push(IronOxFunction::new_with_type(cx, name, fn_type));
+        Value::Function(self.functions.len() - 1)
+    }
+
+    // XXX slow
+    pub fn get_function(&self, name: &str) -> Option<Value> {
+        for (i, f) in self.functions.iter().enumerate() {
+            if f.name == name {
+                return Some(Value::Function(i))
+            }
+        }
+        return None;
+    }
+
+    pub fn asm(&self) -> String {
+        "not actual asm".to_string()
+    }
 }
 
 pub struct ModuleBufferIronOx {}
@@ -160,10 +204,6 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     type ThinData = ThinDataIronOx;
     type ThinBuffer = ThinBufferIronOx;
 
-    fn print_pass_timings(&self) {
-        unimplemented!("print_pass_timings");
-    }
-
     fn run_fat_lto(
         cgcx: &CodegenContext<Self>,
         modules: Vec<ModuleCodegen<Self::Module>>,
@@ -171,6 +211,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     ) -> Result<LtoModuleCodegen<Self>, FatalError> {
         unimplemented!("run_fat_lto");
     }
+
     fn run_thin_lto(
         cgcx: &CodegenContext<Self>,
         modules: Vec<(String, Self::ThinBuffer)>,
@@ -178,6 +219,9 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         timeline: &mut Timeline
     ) -> Result<(Vec<LtoModuleCodegen<Self>>, Vec<WorkProduct>), FatalError> {
         unimplemented!("run_thin_lto");
+}
+    fn print_pass_timings(&self) {
+        unimplemented!("print_pass_timings");
     }
 
     unsafe fn optimize(
@@ -200,33 +244,12 @@ impl WriteBackendMethods for IronOxCodegenBackend {
 
     unsafe fn codegen(
         cgcx: &CodegenContext<Self>,
-        _diag_handler: &Handler,
+        diag_handler: &Handler,
         module: ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
-        _timeline: &mut Timeline
+        timeline: &mut Timeline
     ) -> Result<CompiledModule, FatalError> {
-        // FIXME fix this
-        if true || config.no_integrated_as {
-            let object = cgcx.output_filenames
-                .temp_path(OutputType::Object, Some(&module.name));
-            let filename = object.to_str().unwrap().to_string();
-            let mut cmd = Command::new("as").arg("-o").arg(filename)
-                .stdin(Stdio::piped()).spawn().expect("failed to run as");
-            {
-                let stdin = cmd.stdin.as_mut().expect("failed to open stdin");
-                stdin.write_all(module.module_llvm.asm.as_bytes())
-                    .expect("failed to write to stdin");
-            }
-            Ok(CompiledModule {
-                name: module.name.clone(),
-                kind: module.kind,
-                object: Some(object),
-                bytecode: None,
-                bytecode_compressed: None,
-            })
-        } else {
-            unimplemented!("ironox does not have an integrated assembler!");
-        }
+        back::write::codegen(cgcx, diag_handler, module, config, timeline)
     }
 
     fn prepare_thin(

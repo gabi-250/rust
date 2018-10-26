@@ -6,12 +6,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt;
 use std::hash::{Hash, Hasher};
+use registers::GPR;
 
-#[allow(dead_code)]
-#[derive(Debug, PartialEq)]
-pub struct Value {}
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Value {
+    Function(usize),
+    // (function index, local index)
+    Local(usize, usize),
+    Register(GPR),
+    RbpOffset(isize),
+    ConstUndef,
+    Const(u64),
+    BigConst(u128),
+    Global,
+}
 
 impl Eq for Value {}
 

@@ -9,7 +9,6 @@ use rustc::session::config::Sanitizer;
 use rustc::ty::{self, TyCtxt, PolyFnSig};
 use rustc::ty::layout::HasTyCtxt;
 use rustc::ty::query::Providers;
-use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_data_structures::sync::Lrc;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_target::spec::PanicStrategy;

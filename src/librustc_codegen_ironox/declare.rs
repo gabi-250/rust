@@ -10,7 +10,7 @@
 
 use context::CodegenCx;
 use ironox_type::Type;
-use rustc::ty::PolyFnSig;
+use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
 use value::Value;
 
@@ -18,36 +18,43 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn declare_global(
         &self,
-        name: &str, ty: &'ll Type
-    ) -> &'ll Value {
+        name: &str, ty: Type
+    ) -> Value {
         unimplemented!("declare_global");
     }
 
     fn declare_cfn(
         &self,
         name: &str,
-        fn_type: &'ll Type
-    ) -> &'ll Value {
-        unimplemented!("declare_cfn");
+        fn_type: Type
+    ) -> Value {
+        // XXX
+        eprintln!("Declare cfun of type {:?}", fn_type);
+        self.module.borrow_mut().add_function_with_type(self, name, fn_type)
     }
 
     fn declare_fn(
         &self,
         name: &str,
         sig: PolyFnSig<'tcx>,
-    ) -> &'ll Value {
-        unimplemented!("declare_fn");
+    ) -> Value {
+        let sig = self.tcx.normalize_erasing_late_bound_regions(
+            ty::ParamEnv::reveal_all(),
+            &sig);
+        let val = self.module.borrow_mut().add_function(name, sig);
+        eprintln!("val is {:?}", val);
+        val
     }
 
     fn define_global(
         &self,
         name: &str,
-        ty: &'ll Type
-    ) -> Option<&'ll Value> {
+        ty: Type
+    ) -> Option<Value> {
         unimplemented!("define_global");
     }
 
-    fn define_private_global(&self, ty: &'ll Type) -> &'ll Value {
+    fn define_private_global(&self, ty: Type) -> Value {
         unimplemented!("define_private_global");
     }
 
@@ -55,7 +62,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str,
         fn_sig: PolyFnSig<'tcx>,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("define_fn");
     }
 
@@ -63,15 +70,16 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str,
         fn_sig: PolyFnSig<'tcx>,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("define_internal_fn");
     }
 
-    fn get_declared_value(&self, name: &str) -> Option<&'ll Value> {
-        unimplemented!("get_declared_value");
+    fn get_declared_value(&self, name: &str) -> Option<Value> {
+        self.module.borrow().get_function(name)
     }
 
-    fn get_defined_value(&self, name: &str) -> Option<&'ll Value> {
-        unimplemented!("get_defined_value");
+    fn get_defined_value(&self, name: &str) -> Option<Value> {
+        // XXX
+        self.get_declared_value(name)
     }
 }

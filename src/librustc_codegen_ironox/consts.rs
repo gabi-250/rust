@@ -16,14 +16,25 @@ use rustc_codegen_ssa::traits::*;
 use rustc::hir::def_id::DefId;
 use rustc::ty::layout::Align;
 
+
 impl StaticMethods for CodegenCx<'ll, 'tcx> {
+
     fn static_addr_of(
         &self,
-        cv: &'ll Value,
+        cv: Value,
         align: Align,
         kind: Option<&str>,
-    ) -> &'ll Value {
-        unimplemented!("static_addr_of");
+    ) -> Value {
+        match cv {
+            Value::Local(fn_idx, idx) => {
+                let mut module = self.module.borrow_mut();
+                let rbp_offset = module.functions[fn_idx].rbp_offset(idx);
+                Value::RbpOffset(rbp_offset as isize)
+            },
+            _ => {
+                unimplemented!("addr_of {:?}", cv);
+            }
+        }
     }
 
     fn codegen_static(
