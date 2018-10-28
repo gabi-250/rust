@@ -7,47 +7,52 @@ extern crate rustc_mir;
 extern crate rustc_target;
 #[macro_use]
 extern crate rustc_data_structures;
+extern crate faerie;
 extern crate rustc_codegen_ssa;
 extern crate rustc_codegen_utils;
-extern crate syntax_pos;
 extern crate rustc_errors as errors;
+extern crate syntax_pos;
+extern crate target_lexicon;
+extern crate x86asm;
 
 mod metadata;
 
-use std::any::Any;
-use std::sync::{mpsc, Arc};
-
-use rustc::hir::def_id::LOCAL_CRATE;
+use errors::{FatalError, Handler};
+use faerie::{ArtifactBuilder, Decl};
 use rustc::dep_graph::DepGraph;
+use rustc::dep_graph::WorkProduct;
+use rustc::hir::def_id::LOCAL_CRATE;
+use rustc::middle::allocator::AllocatorKind;
+use rustc::middle::cstore::EncodedMetadata;
 use rustc::middle::cstore::MetadataLoader;
-use rustc::session::{CompileIncomplete, Session};
+use rustc::mir::mono::Stats;
 use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
+use rustc::session::{CompileIncomplete, Session};
 use rustc::ty::{self, TyCtxt};
+use rustc::util::time_graph::Timeline;
+use rustc_codegen_ssa::back::lto::{LtoModuleCodegen, SerializedModule, ThinModule};
+use rustc_codegen_ssa::back::write::{CodegenContext, DiagnosticHandlers, ModuleConfig};
+use rustc_codegen_ssa::interfaces::{
+    ExtraBackendMethods, ModuleBufferMethods, ThinBufferMethods, WriteBackendMethods,
+};
+use rustc_codegen_ssa::CompiledModule;
+use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
 use rustc_codegen_utils::target_features::{all_known_features, X86_WHITELIST};
 use rustc_data_structures::sync::Lrc;
-use rustc::mir::mono::Stats;
-use rustc_codegen_ssa::interfaces::{ExtraBackendMethods, WriteBackendMethods,
-                                    ThinBufferMethods, ModuleBufferMethods};
-use rustc::middle::cstore::EncodedMetadata;
-use rustc::middle::allocator::AllocatorKind;
+use std::any::Any;
+use std::fs::File;
+use std::sync::{mpsc, Arc};
 use syntax_pos::symbol::InternedString;
-use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig, DiagnosticHandlers};
-use rustc_codegen_ssa::back::lto::{SerializedModule, LtoModuleCodegen, ThinModule};
-use rustc::dep_graph::WorkProduct;
-use rustc::util::time_graph::Timeline;
-use errors::{FatalError, Handler};
-use rustc_codegen_ssa::ModuleCodegen;
-use rustc_codegen_ssa::CompiledModule;
-use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
+use target_lexicon::{Architecture, BinaryFormat, Environment, OperatingSystem, Triple, Vendor};
 
 mod back {
     pub use rustc_codegen_utils::symbol_names;
 }
 
 mod base;
-mod value;
 mod context;
+mod value;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -68,39 +73,26 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 
     fn new_metadata(&self, sess: &Session, mod_name: &str) -> ModuleIronOx {
-        ModuleIronOx {}
+        ModuleIronOx { bytes: vec![] }
     }
 
     fn write_metadata<'b, 'gcx>(
         &self,
         tcx: TyCtxt<'b, 'gcx, 'gcx>,
-        metadata: &ModuleIronOx
+        metadata: &ModuleIronOx,
     ) -> EncodedMetadata {
         let metadata = tcx.encode_metadata();
         metadata
     }
 
     fn codegen_allocator(&self, tcx: TyCtxt, mods: &ModuleIronOx, kind: AllocatorKind) {
-        eprintln!("Codegen allocato");
-        for method in ALLOCATOR_METHODS {
-            eprintln!("Name {:?}", method.name);
-            for ty in method.inputs.iter() {
-                match *ty {
-                    AllocatorTy::Layout => eprintln!("Layout"),
-                    AllocatorTy::Ptr => eprintln!("Ptr"),
-                    AllocatorTy::ResultPtr => eprintln!("ResultPtr"),
-                    AllocatorTy::Unit => eprintln!("Unit"),
-                    AllocatorTy::Usize => eprintln!("Usize"),
-
-                }
-            }
-        }
+        // XXX
     }
 
     fn compile_codegen_unit<'ll, 'tcx: 'll>(
         &self,
         tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-        cgu_name: InternedString
+        cgu_name: InternedString,
     ) -> Stats {
         base::compile_codegen_unit(tcx, cgu_name)
     }
@@ -108,10 +100,9 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     fn target_machine_factory(
         &self,
         sess: &Session,
-        find_features: bool
-    ) -> Arc<dyn Fn() ->
-        Result<TargetMachineIronOx, String> + Send + Sync> {
-        Arc::new(move || { Ok(TargetMachineIronOx {}) })
+        find_features: bool,
+    ) -> Arc<dyn Fn() -> Result<TargetMachineIronOx, String> + Send + Sync> {
+        Arc::new(move || Ok(TargetMachineIronOx {}))
     }
 
     fn target_cpu<'b>(&self, sess: &'b Session) -> &'b str {
@@ -119,7 +110,9 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 }
 
-pub struct ModuleIronOx {}
+pub struct ModuleIronOx {
+    bytes: Vec<u8>,
+}
 pub struct ModuleBufferIronOx {}
 
 impl ModuleBufferMethods for ModuleBufferIronOx {
@@ -155,7 +148,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         cgcx: &CodegenContext<Self>,
         modules: Vec<ModuleCodegen<Self::Module>>,
         cached_modules: Vec<(SerializedModule<Self::ModuleBuffer>, WorkProduct)>,
-        timeline: &mut Timeline
+        timeline: &mut Timeline,
     ) -> Result<(Vec<LtoModuleCodegen<Self>>, Vec<WorkProduct>), FatalError> {
         unimplemented!("");
     }
@@ -163,12 +156,12 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     fn new_diagnostic_handlers<'a>(
         cgcx: &'a CodegenContext<Self>,
         handler: &'a Handler,
-        llcx: &'a Self::Context
+        llcx: &'a Self::Context,
     ) -> DiagnosticHandlers<'a, Self> {
         unimplemented!("");
     }
 
-    fn drop_diagnostic_handlers<'a>(diag : &mut DiagnosticHandlers<'a, Self>) {
+    fn drop_diagnostic_handlers<'a>(diag: &mut DiagnosticHandlers<'a, Self>) {
         unimplemented!("");
     }
 
@@ -177,7 +170,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         diag_handler: &Handler,
         module: &ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
-        timeline: &mut Timeline
+        timeline: &mut Timeline,
     ) -> Result<(), FatalError> {
         Ok(())
     }
@@ -185,7 +178,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     unsafe fn optimize_thin(
         cgcx: &CodegenContext<Self>,
         thin: &mut ThinModule<Self>,
-        timeline: &mut Timeline
+        timeline: &mut Timeline,
     ) -> Result<ModuleCodegen<Self::Module>, FatalError> {
         unimplemented!("");
     }
@@ -195,11 +188,37 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         diag_handler: &Handler,
         module: ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
-        timeline: &mut Timeline
+        timeline: &mut Timeline,
     ) -> Result<CompiledModule, FatalError> {
-        let object = cgcx.output_filenames
+        let object = cgcx
+            .output_filenames
             .temp_path(OutputType::Object, Some(&module.name));
-        eprintln!("Object is {:?}", object);
+        let target = Triple {
+            architecture: Architecture::X86_64,
+            vendor: Vendor::Unknown,
+            operating_system: OperatingSystem::Unknown,
+            environment: Environment::Unknown,
+            binary_format: BinaryFormat::Elf,
+        };
+        let filename = object.to_str().unwrap().to_string();
+        let file = File::create(&filename).expect("failed to create file");
+        let mut obj = ArtifactBuilder::new(target).name(filename).finish();
+        // Add dummy declarations
+        obj.declarations(
+            [
+                ("str.1", Decl::CString { global: false }),
+                ("deadbeef", Decl::Function { global: true }),
+            ]
+                .into_iter()
+                .cloned(),
+        ).map_err(|e| diag_handler.fatal(&format!("{:?}", e)))?;
+        obj.define("str.1", b"hello".to_vec())
+            .map_err(|e| diag_handler.fatal(&format!("failed to define string: {:?}", e)))?;
+        obj.define("deadbeef", module.module_llvm.bytes)
+            .map_err(|e| diag_handler.fatal(&format!("failed to define string: {:?}", e)))?;
+        obj.write(file)
+            .map_err(|_| diag_handler.fatal("failed to write file"))?;
+        eprintln!("Compiling {:?}", object);
         Ok(CompiledModule {
             name: module.name.clone(),
             kind: module.kind,
@@ -213,7 +232,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         cgcx: &CodegenContext<Self>,
         module: &ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
-        thin: bool
+        thin: bool,
     ) {
         unimplemented!("");
     }
@@ -222,8 +241,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
 unsafe impl<'a> Send for IronOxCodegenBackend {}
 unsafe impl<'a> Sync for IronOxCodegenBackend {}
 
-pub fn target_feature_whitelist(sess: &Session)
-    -> &'static [(&'static str, Option<&'static str>)] {
+pub fn target_feature_whitelist(sess: &Session) -> &'static [(&'static str, Option<&'static str>)] {
     match &*sess.target.target.arch {
         "x86" | "x86_64" => X86_WHITELIST,
         _ => &[],
@@ -293,7 +311,7 @@ impl<'a> CodegenBackend for IronOxCodegenBackend {
         _outputs: &OutputFilenames,
     ) -> Result<(), CompileIncomplete> {
         //let _ongoing_codegen = ongoing_codegen.downcast::<::base::OngoingCodegen>()
-            //.expect("Expected the iron-ox OngoingCodegen!");
+        //.expect("Expected the iron-ox OngoingCodegen!");
         Ok(())
     }
 }
