@@ -12,3 +12,6 @@ test = false
 [dependencies]
 ar = "0.6"
 goblin = "0.0"
+faerie = "0.5.1"
+target-lexicon = "0.0.3"
+x86asm = { git = "https://github.com/gabi-250/rust-x86asm", branch = "temporary-fix" }
