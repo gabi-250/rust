@@ -8,8 +8,8 @@ extern crate rustc_mir;
 extern crate rustc_target;
 #[macro_use]
 extern crate rustc_data_structures;
-extern crate rustc_codegen_utils;
 extern crate rustc_codegen_ssa;
+extern crate rustc_codegen_utils;
 extern crate syntax_pos;
 extern crate faerie;
 extern crate target_lexicon;
@@ -17,17 +17,13 @@ extern crate x86asm;
 
 mod metadata;
 
-use errors::{FatalError, Handler};
 use faerie::{ArtifactBuilder, Decl};
-use rustc::dep_graph::DepGraph;
-use rustc::dep_graph::WorkProduct;
+use std::sync::{mpsc, Arc};
 use rustc::hir::def_id::LOCAL_CRATE;
-use rustc::middle::allocator::AllocatorKind;
-use rustc::middle::cstore::EncodedMetadata;
+use rustc::dep_graph::DepGraph;
 use rustc::middle::cstore::MetadataLoader;
-use rustc::mir::mono::Stats;
-use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
 use rustc::session::{CompileIncomplete, Session};
+use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
 use rustc::ty::{self, TyCtxt};
 use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
@@ -50,7 +46,6 @@ use rustc::dep_graph::WorkProduct;
 use rustc::util::time_graph::Timeline;
 use std::any::Any;
 use std::fs::File;
-use std::sync::{mpsc, Arc};
 use target_lexicon::{Architecture, BinaryFormat, Environment, OperatingSystem, Triple, Vendor};
 
 mod back {
@@ -58,8 +53,8 @@ mod back {
 }
 
 mod base;
-mod context;
 mod value;
+mod context;
 
 
 #[derive(Clone)]
@@ -72,7 +67,7 @@ impl Clone for TargetMachineIronOx {
 }
 
 impl ExtraBackendMethods for IronOxCodegenBackend {
-    fn new_metadata(&self, sess: &Session, mod_name: &str) -> ModuleIronOx {
+    fn new_metadata(&self, _sess: &Session, _mod_name: &str) -> ModuleIronOx {
         ModuleIronOx { bytes: vec![] }
     }
 
@@ -85,7 +80,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
         metadata
     }
 
-    fn codegen_allocator(&self, tcx: TyCtxt, _mods: &ModuleIronOx, _kind: AllocatorKind) {
+    fn codegen_allocator(&self, _tcx: TyCtxt, _mods: &ModuleIronOx, _kind: AllocatorKind) {
         eprintln!("Codegen allocator");
         for method in ALLOCATOR_METHODS {
             eprintln!("Name {:?}", method.name);
@@ -105,7 +100,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     fn compile_codegen_unit<'ll, 'tcx: 'll>(
         &self,
         tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-        cgu_name: InternedString,
+        cgu_name: InternedString
     ) -> Stats {
         base::compile_codegen_unit(tcx, cgu_name)
     }
@@ -124,7 +119,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 }
 
 pub struct ModuleIronOx {
-    bytes: Vec<u8>,
+    bytes: Vec<u8>
 }
 pub struct ModuleBufferIronOx {}
 
@@ -186,13 +181,12 @@ impl WriteBackendMethods for IronOxCodegenBackend {
 
     unsafe fn codegen(
         cgcx: &CodegenContext<Self>,
-        _diag_handler: &Handler,
+        diag_handler: &Handler,
         module: ModuleCodegen<Self::Module>,
         _config: &ModuleConfig,
         _timeline: &mut Timeline
     ) -> Result<CompiledModule, FatalError> {
-        let object = cgcx
-            .output_filenames
+        let object = cgcx.output_filenames
             .temp_path(OutputType::Object, Some(&module.name));
         let target = Triple {
             architecture: Architecture::X86_64,
@@ -205,20 +199,16 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         let file = File::create(&filename).expect("failed to create file");
         let mut obj = ArtifactBuilder::new(target).name(filename).finish();
         // Add dummy declarations
-        obj.declarations(
-            [
-                ("str.1", Decl::CString { global: false }),
-                ("deadbeef", Decl::Function { global: true }),
-            ]
-                .into_iter()
-                .cloned(),
-        ).map_err(|e| diag_handler.fatal(&format!("{:?}", e)))?;
-        obj.define("str.1", b"hello".to_vec())
-            .map_err(|e| diag_handler.fatal(&format!("failed to define string: {:?}", e)))?;
-        obj.define("deadbeef", module.module_llvm.bytes)
-            .map_err(|e| diag_handler.fatal(&format!("failed to define string: {:?}", e)))?;
-        obj.write(file)
-            .map_err(|_| diag_handler.fatal("failed to write file"))?;
+        obj.declarations([
+            ("str.1",    Decl::CString { global: false }),
+            ("deadbeef", Decl::Function { global: true }),
+        ].into_iter().cloned()).map_err(
+            |e| diag_handler.fatal(&format!("{:?}", e)))?;
+        obj.define("str.1", b"hello".to_vec()).map_err(
+            |e| diag_handler.fatal(&format!("failed to define string: {:?}", e)))?;
+        obj.define("deadbeef", module.module_llvm.bytes).map_err(
+            |e| diag_handler.fatal(&format!("failed to define string: {:?}", e)))?;
+        obj.write(file).map_err(|_| diag_handler.fatal("failed to write file"))?;
         eprintln!("Compiling {:?}", object);
         Ok(CompiledModule {
             name: module.name.clone(),
@@ -239,7 +229,11 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     }
 }
 
-pub fn target_feature_whitelist(sess: &Session) -> &'static [(&'static str, Option<&'static str>)] {
+unsafe impl<'a> Send for IronOxCodegenBackend {}
+unsafe impl<'a> Sync for IronOxCodegenBackend {}
+
+pub fn target_feature_whitelist(sess: &Session)
+    -> &'static [(&'static str, Option<&'static str>)] {
     match &*sess.target.target.arch {
         "x86" | "x86_64" => X86_WHITELIST,
         _ => &[],

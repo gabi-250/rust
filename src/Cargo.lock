@@ -928,16 +928,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "goblin"
-version = "0.0.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "log 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "plain 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "scroll 0.9.2 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "graphviz"
 version = "0.0.0"
 
@@ -2218,7 +2208,7 @@ version = "0.0.0"
 dependencies = [
  "ar 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "faerie 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "goblin 0.0.19 (registry+https://github.com/rust-lang/crates.io-index)",
+ "goblin 0.0.17 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc_codegen_ssa 0.0.0",
  "target-lexicon 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "x86asm 0.1.0 (git+https://github.com/gabi-250/rust-x86asm?branch=temporary-fix)",
@@ -3441,7 +3431,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum glob 0.2.11 (registry+https://github.com/rust-lang/crates.io-index)" = "8be18de09a56b60ed0edf84bc9df007e30040691af7acd1c41874faac5895bfb"
 "checksum globset 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "8e49edbcc9c7fc5beb8c0a54e7319ff8bed353a2b55e85811c6281188c2a6c84"
 "checksum goblin 0.0.17 (registry+https://github.com/rust-lang/crates.io-index)" = "5911d7df7b8f65ab676c5327b50acea29d3c6a1a4ad05e444cf5dce321b26db2"
-"checksum goblin 0.0.19 (registry+https://github.com/rust-lang/crates.io-index)" = "c65cd533b33e3d04c6e393225fa8919ddfcf5862ca8919c7f9a167c312ef41c2"
 "checksum handlebars 0.32.4 (registry+https://github.com/rust-lang/crates.io-index)" = "d89ec99d1594f285d4590fc32bac5f75cdab383f1123d504d27862c644a807dd"
 "checksum heck 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ea04fa3ead4e05e51a7c806fc07271fdbde4e246a6c6d1efd52e72230b771b82"
 "checksum hex 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = "805026a5d0141ffc30abb3be3173848ad46a1b1664fe632428479619a3644d77"

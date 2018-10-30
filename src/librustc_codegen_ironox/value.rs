@@ -1,7 +1,7 @@
-use rustc_codegen_ssa::interfaces::CodegenObject;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
+#[allow(dead_code)]
 pub struct Value {}
 
 impl PartialEq for Value {
@@ -9,8 +9,6 @@ impl PartialEq for Value {
         self as *const _ == other as *const _
     }
 }
-
-impl<'ll> CodegenObject for &'ll Value {}
 
 impl Eq for Value {}
 
