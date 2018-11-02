@@ -11,13 +11,9 @@ extern crate rustc_codegen_ssa;
 extern crate rustc_codegen_utils;
 extern crate syntax_pos;
 extern crate rustc_errors as errors;
-extern crate faerie;
-extern crate target_lexicon;
-extern crate x86asm;
 
 mod metadata;
 
-use faerie::{ArtifactBuilder, Decl};
 use std::any::Any;
 use std::sync::{mpsc, Arc};
 use rustc::hir::def_id::LOCAL_CRATE;
@@ -42,8 +38,9 @@ use rustc::util::time_graph::Timeline;
 use errors::{FatalError, Handler};
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_ssa::CompiledModule;
-use target_lexicon::{Architecture, Vendor, OperatingSystem, Environment, BinaryFormat, Triple};
-use std::fs::File;
+
+use std::process::{Command, Stdio};
+use std::io::Write;
 
 mod back {
     pub use rustc_codegen_utils::symbol_names;
@@ -72,7 +69,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 
     fn new_metadata(&self, sess: &Session, mod_name: &str) -> ModuleIronOx {
-        ModuleIronOx { bytes: vec![] }
+        ModuleIronOx { asm: "".to_string() }
     }
 
     fn write_metadata<'b, 'gcx>(
@@ -111,7 +108,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 }
 
 pub struct ModuleIronOx {
-    bytes: Vec<u8>
+    asm: String
 }
 pub struct ModuleBufferIronOx {}
 
@@ -192,28 +189,15 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     ) -> Result<CompiledModule, FatalError> {
         let object = cgcx.output_filenames
             .temp_path(OutputType::Object, Some(&module.name));
-        let target = Triple {
-            architecture: Architecture::X86_64,
-            vendor: Vendor::Unknown,
-            operating_system: OperatingSystem::Unknown,
-            environment: Environment::Unknown,
-            binary_format: BinaryFormat::Elf,
-        };
         let filename = object.to_str().unwrap().to_string();
-        let file = File::create(&filename).expect("failed to create file");
-        let mut obj = ArtifactBuilder::new(target).name(filename).finish();
-        // Add dummy declarations
-        obj.declarations([
-            ("str.1",    Decl::CString { global: false }),
-            ("deadbeef", Decl::Function { global: true }),
-        ].into_iter().cloned()).map_err(
-            |e| diag_handler.fatal(&format!("{:?}", e)))?;
-        obj.define("str.1", b"hello".to_vec()).map_err(
-            |e| diag_handler.fatal(&format!("failed to define string: {:?}", e)))?;
-        obj.define("deadbeef", module.module_llvm.bytes).map_err(
-            |e| diag_handler.fatal(&format!("failed to define string: {:?}", e)))?;
-        obj.write(file).map_err(|_| diag_handler.fatal("failed to write file"))?;
         eprintln!("Compiling {:?}", object);
+        let mut cmd = Command::new("as").arg("-o").arg(filename)
+            .stdin(Stdio::piped()).spawn().expect("failed to run as");
+        {
+            let stdin = cmd.stdin.as_mut().expect("failed to open stdin");
+            stdin.write_all(module.module_llvm.asm.as_bytes())
+                .expect("failed to write to stdin");
+        }
         Ok(CompiledModule {
             name: module.name.clone(),
             kind: module.kind,
