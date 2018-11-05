@@ -26,11 +26,13 @@ pub use rustc::mir::mono::MonoItem;
 pub use rustc_mir::monomorphize::item::MonoItemExt as BaseMonoItemExt;
 
 impl<'ll, 'tcx: 'll> PreDefineMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
-    fn predefine_static(&self,
-                                  def_id: DefId,
-                                  linkage: Linkage,
-                                  visibility: Visibility,
-                                  symbol_name: &str) {
+    fn predefine_static(
+        &self,
+        def_id: DefId,
+        linkage: Linkage,
+        visibility: Visibility,
+        symbol_name: &str
+    ) {
         let instance = Instance::mono(self.tcx, def_id);
         let ty = instance.ty(self.tcx);
         let llty = self.layout_of(ty).llvm_type(self);
@@ -48,17 +50,18 @@ impl<'ll, 'tcx: 'll> PreDefineMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll V
         self.instances.borrow_mut().insert(instance, g);
     }
 
-    fn predefine_fn(&self,
-                              instance: Instance<'tcx>,
-                              linkage: Linkage,
-                              visibility: Visibility,
-                              symbol_name: &str) {
+    fn predefine_fn(
+        &self,
+        instance: Instance<'tcx>,
+        linkage: Linkage,
+        visibility: Visibility,
+        symbol_name: &str
+    ) {
         assert!(!instance.substs.needs_infer() &&
                 !instance.substs.has_param_types());
-
-        let mono_ty = instance.ty(self.tcx);
+        let mono_sig = instance.fn_sig(self.tcx);
         let attrs = self.tcx.codegen_fn_attrs(instance.def_id());
-        let lldecl = self.declare_fn(symbol_name, mono_ty);
+        let lldecl = self.declare_fn(symbol_name, mono_sig);
         unsafe { llvm::LLVMRustSetLinkage(lldecl, base::linkage_to_llvm(linkage)) };
         base::set_link_section(lldecl, &attrs);
         if linkage == Linkage::LinkOnceODR ||
@@ -81,7 +84,7 @@ impl<'ll, 'tcx: 'll> PreDefineMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll V
             }
         }
 
-        debug!("predefine_fn: mono_ty = {:?} instance = {:?}", mono_ty, instance);
+        debug!("predefine_fn: mono_sig = {:?} instance = {:?}", mono_sig, instance);
         if instance.def.is_inline(self.tcx) {
             attributes::inline(self, lldecl, attributes::InlineAttr::Hint);
         }

@@ -62,12 +62,12 @@ pub trait BaseTypeMethods<'ll, 'tcx: 'll> : Backend<'ll> {
 
     fn val_ty(&self, v: Self::Value) -> Self::Type;
     fn scalar_lltypes(&self) -> &RefCell<FxHashMap<Ty<'tcx>, Self::Type>>;
-    fn tcx(&self) -> &TyCtxt<'ll, 'tcx, 'tcx>;
+    fn tcx_with_correct_lifetime(&self) -> &TyCtxt<'ll, 'tcx, 'tcx>;
 }
 
 pub trait DerivedTypeMethods<'a, 'll: 'a, 'tcx: 'll> :
-    Backend<'ll> + BaseTypeMethods<'ll, 'tcx> + MiscMethods<'ll, 'tcx>
-    where &'a Self : 'a + LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
+    Backend<'ll> + BaseTypeMethods<'ll, 'tcx> + MiscMethods<'ll, 'tcx> +
+    LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx> + Sized
 {
 
     fn type_bool(&self) -> Self::Type {
@@ -159,15 +159,15 @@ pub trait DerivedTypeMethods<'a, 'll: 'a, 'tcx: 'll> :
     }
 
     fn type_needs_drop(&self, ty: Ty<'tcx>) -> bool {
-        common::type_needs_drop(*self.tcx(), ty)
+        common::type_needs_drop(self.tcx(), ty)
     }
 
     fn type_is_sized(&self, ty: Ty<'tcx>) -> bool {
-        common::type_is_sized(*self.tcx(), ty)
+        common::type_is_sized(self.tcx(), ty)
     }
 
     fn type_is_freeze(&self, ty: Ty<'tcx>) -> bool {
-        common::type_is_freeze(*self.tcx(), ty)
+        common::type_is_freeze(self.tcx(), ty)
     }
 
     fn type_has_metadata(&self, ty: Ty<'tcx>) -> bool {
@@ -203,8 +203,6 @@ pub trait LayoutTypeMethods<'ll, 'tcx> : Backend<'ll> {
 }
 
 pub trait ArgTypeMethods<'a, 'll: 'a, 'tcx: 'll> : HasCodegen<'a, 'll, 'tcx>
-    where &'a Self::CodegenCx :
-        LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {
     fn store_fn_arg(
         &mut self,
@@ -221,6 +219,6 @@ pub trait ArgTypeMethods<'a, 'll: 'a, 'tcx: 'll> : HasCodegen<'a, 'll, 'tcx>
 }
 
 pub trait TypeMethods<'a, 'll: 'a, 'tcx: 'll> :
-    BaseTypeMethods<'ll, 'tcx> + DerivedTypeMethods<'a, 'll, 'tcx> + LayoutTypeMethods<'ll, 'tcx>
-    where &'a Self : 'a + LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
+    BaseTypeMethods<'ll, 'tcx> + DerivedTypeMethods<'a, 'll, 'tcx> + LayoutTypeMethods<'ll, 'tcx> +
+    LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {}

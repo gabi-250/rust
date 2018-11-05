@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc::ty::Ty;
+use rustc::ty::PolyFnSig;
 use super::Backend;
 use rustc::hir::def_id::DefId;
 use rustc::mir::mono::{Linkage, Visibility};
@@ -45,7 +45,7 @@ pub trait DeclareMethods<'ll, 'tcx: 'll> : Backend<'ll> {
     fn declare_fn(
         &self,
         name: &str,
-        fn_type: Ty<'tcx>,
+        fn_sig: PolyFnSig<'tcx>,
     ) -> Self::Value;
 
     /// Declare a global with an intention to define it.
@@ -73,7 +73,7 @@ pub trait DeclareMethods<'ll, 'tcx: 'll> : Backend<'ll> {
     fn define_fn(
         &self,
         name: &str,
-        fn_type: Ty<'tcx>,
+        fn_sig: PolyFnSig<'tcx>,
     ) -> Self::Value;
 
     /// Declare a Rust function with an intention to define it.
@@ -84,7 +84,7 @@ pub trait DeclareMethods<'ll, 'tcx: 'll> : Backend<'ll> {
     fn define_internal_fn(
         &self,
         name: &str,
-        fn_type: Ty<'tcx>,
+        fn_sig: PolyFnSig<'tcx>,
     ) -> Self::Value;
 
     /// Get declared value by name.

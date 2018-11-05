@@ -27,8 +27,6 @@ pub trait Backend<'ll> {
 }
 
 pub trait ExtraBackendMethods : CodegenBackend + WriteBackendMethods + Sized + Send + Sync {
-    fn thin_lto_available(&self) -> bool;
-    fn pgo_available(&self) -> bool;
     fn new_metadata(&self, sess: &Session, mod_name: &str) -> Self::Module;
     fn write_metadata<'b, 'gcx>(
         &self,

@@ -32,7 +32,7 @@ use rustc::hir::def_id::{DefId, CrateNum, LOCAL_CRATE};
 use rustc::ich::NodeIdHashingMode;
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc::ty::Instance;
-use common::{CodegenCx, C_u64};
+use common::CodegenCx;
 use rustc::ty::{self, AdtKind, ParamEnv, Ty, TyCtxt};
 use rustc::ty::layout::{self, Align, HasDataLayout, Integer, IntegerExt, LayoutOf,
                         PrimitiveExt, Size, TyLayout};
@@ -1167,7 +1167,7 @@ fn prepare_union_metadata(
 // sometimes emit the old style rather than emit something completely
 // useless when rust is compiled against LLVM 6 or older.  This
 // function decides which representation will be emitted.
-fn use_enum_fallback(cx: &CodegenCx) -> bool {
+fn use_enum_fallback<'ll, 'tcx: 'll>(cx: &CodegenCx<'ll, 'tcx, &'ll Value>) -> bool {
     // On MSVC we have to use the fallback mode, because LLVM doesn't
     // lower variant parts to PDB.
     return cx.sess().target.target.options.is_like_msvc || unsafe {
@@ -1811,7 +1811,7 @@ fn set_members_of_composite_type(cx: &CodegenCx<'ll, '_, &'ll Value>,
                     member_description.offset.bits(),
                     match member_description.discriminant {
                         None => None,
-                        Some(value) => Some(C_u64(cx, value)),
+                        Some(value) => Some(cx.const_u64(value)),
                     },
                     member_description.flags,
                     member_description.type_metadata))

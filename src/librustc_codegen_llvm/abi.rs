@@ -11,7 +11,6 @@
 use llvm::{self, AttributePlace};
 use rustc_codegen_ssa::MemFlags;
 use builder::Builder;
-use rustc_codegen_ssa::common::ty_fn_sig;
 use context::CodegenCx;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_codegen_ssa::mir::operand::OperandValue;
@@ -19,6 +18,7 @@ use type_::Type;
 use type_of::{LayoutLlvmExt, PointerKind};
 use value::Value;
 use rustc_target::abi::call::ArgType;
+use rustc_mir::monomorphize::Instance;
 
 use rustc_codegen_ssa::interfaces::*;
 

@@ -10,7 +10,7 @@
 
 use rustc::ty::{self, Ty};
 use rustc::ty::cast::{CastTy, IntTy};
-use rustc::ty::layout::{self, LayoutOf, HasTyCtxt, TyLayout};
+use rustc::ty::layout;
 use rustc::mir;
 use rustc::middle::lang_items::ExchangeMallocFnLangItem;
 use rustc_apfloat::{ieee, Float, Status, Round};
@@ -28,8 +28,7 @@ use super::operand::{OperandRef, OperandValue};
 use super::place::PlaceRef;
 
 impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
-    FunctionCx<'a, 'f, 'll, 'tcx, Cx> where
-    &'a Cx: LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
+    FunctionCx<'a, 'f, 'll, 'tcx, Cx>
 {
     pub fn codegen_rvalue<Bx: BuilderMethods<'a, 'll, 'tcx, CodegenCx=Cx>>(
         &mut self,
@@ -230,7 +229,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
                         match operand.layout.ty.sty {
                             ty::Closure(def_id, substs) => {
                                 let instance = monomorphize::resolve_closure(
-                                    *bx.cx().tcx(), def_id, substs, ty::ClosureKind::FnOnce);
+                                    bx.cx().tcx(), def_id, substs, ty::ClosureKind::FnOnce);
                                 OperandValue::Immediate(bx.cx().get_fn(instance))
                             }
                             _ => {
@@ -304,7 +303,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
                             layout::Variants::Single { index } => {
                                 if let Some(def) = operand.layout.ty.ty_adt_def() {
                                     let discr_val = def
-                                        .discriminant_for_variant(*bx.cx().tcx(), index)
+                                        .discriminant_for_variant(bx.cx().tcx(), index)
                                         .val;
                                     let discr = bx.cx().const_uint_big(ll_t_out, discr_val);
                                     return (bx, OperandRef {
@@ -534,7 +533,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
             mir::Rvalue::Aggregate(..) => {
                 // According to `rvalue_creates_operand`, only ZST
                 // aggregate rvalues are allowed to be operands.
-                let ty = rvalue.ty(self.mir, *self.cx.tcx());
+                let ty = rvalue.ty(self.mir, self.cx.tcx());
                 (bx, OperandRef::new_zst(self.cx,
                     self.cx.layout_of(self.monomorphize(&ty))))
             }
@@ -551,7 +550,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
         if let mir::Place::Local(index) = *place {
             if let LocalRef::Operand(Some(op)) = self.locals[index] {
                 if let ty::Array(_, n) = op.layout.ty.sty {
-                    let n = n.unwrap_usize(*bx.cx().tcx());
+                    let n = n.unwrap_usize(bx.cx().tcx());
                     return bx.cx().const_usize(n);
                 }
             }
@@ -726,7 +725,6 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
 
 impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
     FunctionCx<'a, 'f, 'll, 'tcx, Cx> where
-    &'a Cx : LayoutOf<Ty=Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {
     pub fn rvalue_creates_operand(&self, rvalue: &mir::Rvalue<'tcx>) -> bool {
         match *rvalue {
@@ -742,7 +740,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
                 true,
             mir::Rvalue::Repeat(..) |
             mir::Rvalue::Aggregate(..) => {
-                let ty = rvalue.ty(self.mir, *self.cx.tcx());
+                let ty = rvalue.ty(self.mir, self.cx.tcx());
                 let ty = self.monomorphize(&ty);
                 self.cx.layout_of(ty).is_zst()
             }
@@ -761,9 +759,7 @@ fn get_overflow_intrinsic<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 't
     oop: OverflowOp,
     bx: &mut Bx,
     ty: Ty
-) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> <Bx::CodegenCx as Backend<'ll>>::Value {
     use syntax::ast::IntTy::*;
     use syntax::ast::UintTy::*;
     use rustc::ty::{Int, Uint};
@@ -834,9 +830,7 @@ fn cast_int_to_float<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx>>(
     x: <Bx::CodegenCx as Backend<'ll>>::Value,
     int_ty: <Bx::CodegenCx as Backend<'ll>>::Type,
     float_ty: <Bx::CodegenCx as Backend<'ll>>::Type
-) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> <Bx::CodegenCx as Backend<'ll>>::Value {
     // Most integer types, even i128, fit into [-f32::MAX, f32::MAX] after rounding.
     // It's only u128 -> f32 that can cause overflows (i.e., should yield infinity).
     // LLVM's uitofp produces undef in those cases, so we manually check for that case.
@@ -871,9 +865,7 @@ fn cast_float_to_int<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx>>(
     x: <Bx::CodegenCx as Backend<'ll>>::Value,
     float_ty: <Bx::CodegenCx as Backend<'ll>>::Type,
     int_ty: <Bx::CodegenCx as Backend<'ll>>::Type
-) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> <Bx::CodegenCx as Backend<'ll>>::Value {
     let fptosui_result = if signed {
         bx.fptosi(x, int_ty)
     } else {

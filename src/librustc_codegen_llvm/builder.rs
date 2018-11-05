@@ -509,7 +509,7 @@ impl BuilderMethods<'a, 'll, 'tcx>
         &mut self,
         ptr: &'ll Value,
         order: rustc_codegen_ssa::common::AtomicOrdering,
-        align: Align
+        size: Size
     ) -> &'ll Value {
         self.count_insn("load.atomic");
         unsafe {

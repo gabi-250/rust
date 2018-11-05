@@ -10,7 +10,7 @@
 
 use libc::c_uint;
 use rustc::ty::{self, Ty, TypeFoldable, UpvarSubsts};
-use rustc::ty::layout::{LayoutOf, TyLayout, HasTyCtxt};
+use rustc::ty::layout::{LayoutOf, TyLayout};
 use rustc::mir::{self, Mir};
 use rustc::ty::subst::Substs;
 use rustc::session::config::DebugInfo;
@@ -36,9 +36,7 @@ use rustc::mir::traversal;
 use self::operand::{OperandRef, OperandValue};
 
 /// Master context for codegenning from MIR.
-pub struct FunctionCx<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a +  CodegenMethods<'a, 'll, 'tcx>>
-    where &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+pub struct FunctionCx<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a +  CodegenMethods<'a, 'll, 'tcx>> {
     instance: Instance<'tcx>,
 
     mir: &'a mir::Mir<'tcx>,
@@ -103,9 +101,7 @@ pub struct FunctionCx<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a +  CodegenMethods<
 }
 
 impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
-    FunctionCx<'a, 'f, 'll, 'tcx, Cx>
-    where &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+    FunctionCx<'a, 'f, 'll, 'tcx, Cx> {
     pub fn monomorphize<T>(&self, value: &T) -> T
         where T: TypeFoldable<'tcx>
     {
@@ -118,15 +114,12 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
 }
 
 impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
-    FunctionCx<'a, 'f, 'll, 'tcx, Cx>
-    where &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+    FunctionCx<'a, 'f, 'll, 'tcx, Cx> {
     pub fn set_debug_loc<Bx: BuilderMethods<'a, 'll, 'tcx>>(
         &mut self,
         bx: &mut Bx,
         source_info: mir::SourceInfo
-    ) where Bx::CodegenCx : DebugInfoMethods<'ll, 'tcx, DIScope = Cx::DIScope>,
-      &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
+    ) where Bx::CodegenCx : DebugInfoMethods<'ll, 'tcx, DIScope = Cx::DIScope>
     {
         let (scope, span) = self.debug_loc(source_info);
         bx.set_source_location(&self.debug_context, scope, span);
@@ -203,9 +196,7 @@ impl<'a, 'll: 'a, 'tcx: 'll, V : 'll + CodegenObject> LocalRef<'tcx, V> {
     fn new_operand<Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>(
         cx: &'a Cx,
         layout: TyLayout<'tcx>
-    ) -> LocalRef<'tcx, V> where Cx: Backend<'ll, Value=V>,
-        &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-    {
+    ) -> LocalRef<'tcx, V> where Cx: Backend<'ll, Value=V> {
         if layout.is_zst() {
             // Zero-size temporaries aren't always initialized, which
             // doesn't matter because they don't contain data, but
@@ -225,7 +216,7 @@ pub fn codegen_mir<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx>>(
     mir: &'a Mir<'tcx>,
     instance: Instance<'tcx>,
     sig: ty::FnSig<'tcx>,
-) where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx> {
+) {
     let fn_ty = cx.new_fn_type(sig, &[]);
     debug!("fn_ty: {:?}", fn_ty);
     let debug_context =
@@ -388,7 +379,6 @@ fn create_funclets<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx>>(
     block_bxs: &IndexVec<mir::BasicBlock, <Bx::CodegenCx as Backend<'ll>>::BasicBlock>)
     -> (IndexVec<mir::BasicBlock, Option<<Bx::CodegenCx as Backend<'ll>>::BasicBlock>>,
         IndexVec<mir::BasicBlock, Option<Funclet<'ll, <Bx::CodegenCx as Backend<'ll>>::Value>>>)
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {
     block_bxs.iter_enumerated().zip(cleanup_kinds).map(|((bb, &llbb), cleanup_kind)| {
         match *cleanup_kind {
@@ -459,9 +449,7 @@ fn arg_local_refs<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, '
         debuginfo::MirDebugScope<<Bx::CodegenCx as DebugInfoMethods<'ll, 'tcx>>::DIScope>
     >,
     memory_locals: &BitSet<mir::Local>,
-) -> Vec<LocalRef<'tcx, <Bx::CodegenCx as Backend<'ll>>::Value>>
-    where &'a Bx::CodegenCx : LayoutOf<Ty=Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> Vec<LocalRef<'tcx, <Bx::CodegenCx as Backend<'ll>>::Value>> {
     let mir = fx.mir;
     let tcx = bx.tcx();
     let mut idx = 0;

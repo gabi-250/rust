@@ -64,6 +64,7 @@ use std::any::Any;
 use std::sync::Arc;
 use std::time::{Instant, Duration};
 use std::cmp;
+use std::ops::{Deref, DerefMut};
 use std::sync::mpsc;
 use syntax_pos::Span;
 use syntax::attr;
@@ -75,7 +76,6 @@ use std::marker::PhantomData;
 
 
 pub struct StatRecorder<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
-    where &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {
     cx: &'a Cx,
     name: Option<String>,
@@ -83,8 +83,8 @@ pub struct StatRecorder<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll,
     phantom: PhantomData<(&'ll (), &'tcx ())>
 }
 
-impl<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>> StatRecorder<'a, 'll, 'tcx, Cx>
-    where &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
+impl<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
+    StatRecorder<'a, 'll, 'tcx, Cx>
 {
     pub fn new(cx: &'a Cx, name: String) -> Self {
         let istart = cx.stats().borrow().n_llvm_insns;
@@ -99,7 +99,6 @@ impl<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>> StatRecorde
 
 impl<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>> Drop for
     StatRecorder<'a, 'll, 'tcx, Cx>
-    where &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {
     fn drop(&mut self) {
         if self.cx.sess().codegen_stats() {
@@ -155,7 +154,6 @@ pub fn compare_simd_types<'a, 'll:'a, 'tcx:'ll, Bx : BuilderMethods<'a, 'll, 'tc
     ret_ty: <Bx::CodegenCx as Backend<'ll>>::Type,
     op: hir::BinOpKind
 ) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {
     let signed = match t.sty {
         ty::Float(_) => {
@@ -188,11 +186,11 @@ pub fn unsized_info<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tc
     source: Ty<'tcx>,
     target: Ty<'tcx>,
     old_info: Option<Cx::Value>,
-) -> Cx::Value where &'a Cx: LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx> {
+) -> Cx::Value {
     let (source, target) = cx.tcx().struct_lockstep_tails(source, target);
     match (&source.sty, &target.sty) {
         (&ty::Array(_, len), &ty::Slice(_)) => {
-            cx.const_usize(len.unwrap_usize(*cx.tcx()))
+            cx.const_usize(len.unwrap_usize(cx.tcx()))
         }
         (&ty::Dynamic(..), &ty::Dynamic(..)) => {
             // For now, upcasts are limited to changes in marker
@@ -218,9 +216,7 @@ pub fn unsize_thin_ptr<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx>
     src: <Bx::CodegenCx as Backend<'ll>>::Value,
     src_ty: Ty<'tcx>,
     dst_ty: Ty<'tcx>
-) -> (<Bx::CodegenCx as Backend<'ll>>::Value, <Bx::CodegenCx as Backend<'ll>>::Value) where
-    &'a Bx::CodegenCx: LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> (<Bx::CodegenCx as Backend<'ll>>::Value, <Bx::CodegenCx as Backend<'ll>>::Value) {
     debug!("unsize_thin_ptr: {:?} => {:?}", src_ty, dst_ty);
     match (&src_ty.sty, &dst_ty.sty) {
         (&ty::Ref(_, a, _),
@@ -274,8 +270,7 @@ pub fn coerce_unsized_into<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, '
     bx: &mut Bx,
     src: PlaceRef<'tcx, <Bx::CodegenCx as Backend<'ll>>::Value>,
     dst: PlaceRef<'tcx, <Bx::CodegenCx as Backend<'ll>>::Value>
-) where &'a Bx::CodegenCx: LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) {
     let src_ty = src.layout.ty;
     let dst_ty = dst.layout.ty;
     let mut coerce_ptr = || {
@@ -335,9 +330,7 @@ pub fn cast_shift_expr_rhs<'a, 'll: 'a, 'tcx: 'll, Bx : BuilderMethods<'a, 'll, 
     op: hir::BinOpKind,
     lhs: <Bx::CodegenCx as Backend<'ll>>::Value,
     rhs: <Bx::CodegenCx as Backend<'ll>>::Value
-) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> <Bx::CodegenCx as Backend<'ll>>::Value {
     cast_shift_rhs(bx, op, lhs, rhs)
 }
 
@@ -346,9 +339,7 @@ fn cast_shift_rhs<'a, 'll :'a, 'tcx : 'll, Bx : BuilderMethods<'a, 'll, 'tcx>>(
     op: hir::BinOpKind,
     lhs: <Bx::CodegenCx as Backend<'ll>>::Value,
     rhs: <Bx::CodegenCx as Backend<'ll>>::Value,
-) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> <Bx::CodegenCx as Backend<'ll>>::Value {
     // Shifts may have any size int on the rhs
     if op.is_shift() {
         let mut rhs_llty = bx.cx().val_ty(rhs);
@@ -387,9 +378,7 @@ pub fn wants_msvc_seh(sess: &Session) -> bool {
 pub fn call_assume<'a, 'll: 'a, 'tcx: 'll, Bx : BuilderMethods<'a, 'll ,'tcx>>(
     bx: &mut Bx,
     val: <Bx::CodegenCx as Backend<'ll>>::Value
-)
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) {
     let assume_intrinsic = bx.cx().get_intrinsic("llvm.assume");
     bx.call(assume_intrinsic, &[val], None);
 }
@@ -397,9 +386,7 @@ pub fn call_assume<'a, 'll: 'a, 'tcx: 'll, Bx : BuilderMethods<'a, 'll ,'tcx>>(
 pub fn from_immediate<'a, 'll: 'a, 'tcx: 'll, Bx : BuilderMethods<'a, 'll ,'tcx>>(
     bx: &mut Bx,
     val: <Bx::CodegenCx as Backend<'ll>>::Value
-) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> <Bx::CodegenCx as Backend<'ll>>::Value {
     if bx.cx().val_ty(val) == bx.cx().type_i1() {
         bx.zext(val, bx.cx().type_i8())
     } else {
@@ -411,9 +398,7 @@ pub fn to_immediate<'a, 'll: 'a, 'tcx: 'll, Bx : BuilderMethods<'a, 'll, 'tcx>>(
     bx: &mut Bx,
     val: <Bx::CodegenCx as Backend<'ll>>::Value,
     layout: layout::TyLayout,
-) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> <Bx::CodegenCx as Backend<'ll>>::Value {
     if let layout::Abi::Scalar(ref scalar) = layout.abi {
         return to_immediate_scalar(bx, val, scalar);
     }
@@ -424,9 +409,7 @@ pub fn to_immediate_scalar<'a, 'll :'a, 'tcx :'ll, Bx : BuilderMethods<'a, 'll, 
     bx: &mut Bx,
     val: <Bx::CodegenCx as Backend<'ll>>::Value,
     scalar: &layout::Scalar,
-) -> <Bx::CodegenCx as Backend<'ll>>::Value
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> <Bx::CodegenCx as Backend<'ll>>::Value {
     if scalar.is_bool() {
         return bx.trunc(val, bx.cx().type_i1());
     }
@@ -440,9 +423,7 @@ pub fn memcpy_ty<'a, 'll: 'a, 'tcx: 'll, Bx : BuilderMethods<'a, 'll, 'tcx>>(
     layout: TyLayout<'tcx>,
     align: Align,
     flags: MemFlags,
-)
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) {
     let size = layout.size.bytes();
     if size == 0 {
         return;
@@ -451,13 +432,60 @@ pub fn memcpy_ty<'a, 'll: 'a, 'tcx: 'll, Bx : BuilderMethods<'a, 'll, 'tcx>>(
     bx.call_memcpy(dst, src, bx.cx().const_usize(size), align, flags);
 }
 
+/// A curious wrapper structure whose only purpose is to call `codegen_aborted`
+/// when it's dropped abnormally.
+///
+/// In the process of working on rust-lang/rust#55238 a mysterious segfault was
+/// stumbled upon. The segfault was never reproduced locally, but it was
+/// suspected to be releated to the fact that codegen worker threads were
+/// sticking around by the time the main thread was exiting, causing issues.
+///
+/// This structure is an attempt to fix that issue where the `codegen_aborted`
+/// message will block until all workers have finished. This should ensure that
+/// even if the main codegen thread panics we'll wait for pending work to
+/// complete before returning from the main thread, hopefully avoiding
+/// segfaults.
+///
+/// If you see this comment in the code, then it means that this workaround
+/// worked! We may yet one day track down the mysterious cause of that
+/// segfault...
+struct AbortCodegenOnDrop<B : ExtraBackendMethods>(Option<OngoingCodegen<B>>);
+
+impl<B : ExtraBackendMethods> AbortCodegenOnDrop<B> {
+    fn into_inner(mut self) -> OngoingCodegen<B> {
+        self.0.take().unwrap()
+    }
+}
+
+impl<B : ExtraBackendMethods> Deref for AbortCodegenOnDrop<B> {
+    type Target = OngoingCodegen<B>;
+
+    fn deref(&self) -> &OngoingCodegen<B> {
+        self.0.as_ref().unwrap()
+    }
+}
+
+impl<B : ExtraBackendMethods> DerefMut for AbortCodegenOnDrop<B> {
+    fn deref_mut(&mut self) -> &mut OngoingCodegen<B> {
+        self.0.as_mut().unwrap()
+    }
+}
+
+impl<B : ExtraBackendMethods> Drop for AbortCodegenOnDrop<B> {
+    fn drop(&mut self) {
+        if let Some(codegen) = self.0.take() {
+            codegen.codegen_aborted();
+        }
+    }
+}
+
 pub fn codegen_instance<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx>>(
     cx: &'a Bx::CodegenCx,
     instance: Instance<'tcx>
-) where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx> {
+) {
     let _s = if cx.sess().codegen_stats() {
         let mut instance_name = String::new();
-        DefPathBasedNames::new(*cx.tcx(), true, true)
+        DefPathBasedNames::new(cx.tcx(), true, true)
             .push_def_path(instance.def_id(), &mut instance_name);
         Some(StatRecorder::new(cx, instance_name))
     } else {
@@ -469,7 +497,7 @@ pub fn codegen_instance<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx
     // release builds.
     info!("codegen_instance({})", instance);
 
-    let fn_ty = instance.ty(*cx.tcx());
+    let fn_ty = instance.ty(cx.tcx());
     let sig = common::ty_fn_sig(cx, fn_ty);
     let sig = cx.tcx().normalize_erasing_late_bound_regions(ty::ParamEnv::reveal_all(), &sig);
 
@@ -490,9 +518,7 @@ pub fn codegen_instance<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx
 /// users main function.
 pub fn maybe_create_entry_wrapper<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx>>(
     cx: &'a Bx::CodegenCx
-)
-    where &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) {
     let (main_def_id, span) = match *cx.sess().entry_fn.borrow() {
         Some((id, span, _)) => {
             (cx.tcx().hir.local_def_id(id), span)
@@ -500,7 +526,7 @@ pub fn maybe_create_entry_wrapper<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a,
         None => return,
     };
 
-    let instance = Instance::mono(*cx.tcx(), main_def_id);
+    let instance = Instance::mono(cx.tcx(), main_def_id);
 
     if !cx.codegen_unit().contains_item(&MonoItem::Fn(instance)) {
         // We want to create the wrapper in the same codegen unit as Rust's main
@@ -523,10 +549,7 @@ pub fn maybe_create_entry_wrapper<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a,
         rust_main: <Bx::CodegenCx as Backend<'ll>>::Value,
         rust_main_def_id: DefId,
         use_start_lang_item: bool,
-    )
-        where &'a Bx::CodegenCx :
-            LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-    {
+    ) {
         let llfty =
             cx.type_func(&[cx.type_int(), cx.type_ptr_to(cx.type_i8p())], cx.type_int());
 
@@ -537,7 +560,7 @@ pub fn maybe_create_entry_wrapper<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a,
         // regions must appear in the argument
         // listing.
         let main_ret_ty = cx.tcx().erase_regions(
-            &main_ret_ty.no_late_bound_regions().unwrap(),
+            &main_ret_ty.no_bound_vars().unwrap(),
         );
 
         if cx.get_defined_value("main").is_some() {
@@ -596,22 +619,7 @@ pub fn codegen_crate<B : ExtraBackendMethods>(
     tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     rx: mpsc::Receiver<Box<dyn Any + Send>>
 ) -> OngoingCodegen<B> {
-
     check_for_rustc_errors_attr(tcx);
-
-    if let Some(true) = tcx.sess.opts.debugging_opts.thinlto {
-        if backend.thin_lto_available() {
-            tcx.sess.fatal("this compiler's LLVM does not support ThinLTO");
-        }
-    }
-
-    if (tcx.sess.opts.debugging_opts.pgo_gen.is_some() ||
-        !tcx.sess.opts.debugging_opts.pgo_use.is_empty()) &&
-        backend.pgo_available()
-    {
-        tcx.sess.fatal("this compiler's LLVM does not support PGO");
-    }
-
     let cgu_name_builder = &mut CodegenUnitNameBuilder::new(tcx);
 
     // Codegen the metadata.
@@ -645,7 +653,7 @@ pub fn codegen_crate<B : ExtraBackendMethods>(
         let ongoing_codegen = start_async_codegen(
             backend,
             tcx,
-            time_graph.clone(),
+            time_graph,
             metadata,
             rx,
             1);
@@ -662,8 +670,7 @@ pub fn codegen_crate<B : ExtraBackendMethods>(
 
     // Run the monomorphization collector and partition the collected items into
     // codegen units.
-    let codegen_units =
-        tcx.collect_and_partition_mono_items(LOCAL_CRATE).1;
+    let codegen_units = tcx.collect_and_partition_mono_items(LOCAL_CRATE).1;
     let codegen_units = (*codegen_units).clone();
 
     // Force all codegen_unit queries so they are already either red or green
@@ -684,6 +691,7 @@ pub fn codegen_crate<B : ExtraBackendMethods>(
         metadata,
         rx,
         codegen_units.len());
+    let ongoing_codegen = AbortCodegenOnDrop(Some(ongoing_codegen));
 
     // Codegen an allocator shim, if necessary.
     //
@@ -697,12 +705,7 @@ pub fn codegen_crate<B : ExtraBackendMethods>(
         .iter()
         .any(|(_, list)| {
             use rustc::middle::dependency_format::Linkage;
-            list.iter().any(|linkage| {
-                match linkage {
-                    Linkage::Dynamic => true,
-                    _ => false,
-                }
-            })
+            list.iter().any(|&linkage| linkage == Linkage::Dynamic)
         });
     let allocator_module = if any_dynamic_crate {
         None
@@ -713,7 +716,7 @@ pub fn codegen_crate<B : ExtraBackendMethods>(
                                                                          .to_string();
         let modules = backend.new_metadata(tcx.sess, &llmod_id);
         time(tcx.sess, "write allocator module", || {
-            backend.codegen_allocator(tcx, &modules, kind)
+                backend.codegen_allocator(tcx, &modules, kind)
         });
 
         Some(ModuleCodegen {
@@ -816,7 +819,7 @@ pub fn codegen_crate<B : ExtraBackendMethods>(
     ongoing_codegen.check_for_errors(tcx.sess);
 
     assert_and_save_dep_graph(tcx);
-    ongoing_codegen
+    ongoing_codegen.into_inner()
 }
 
 fn assert_and_save_dep_graph<'ll, 'tcx>(tcx: TyCtxt<'ll, 'tcx, 'tcx>) {
@@ -1054,6 +1057,37 @@ pub fn provide(providers: &mut Providers) {
     };
 
     provide_extern(providers);
+}
+
+pub fn provide_both(providers: &mut Providers) {
+    providers.dllimport_foreign_items = |tcx, krate| {
+        let module_map = tcx.foreign_modules(krate);
+        let module_map = module_map.iter()
+            .map(|lib| (lib.def_id, lib))
+            .collect::<FxHashMap<_, _>>();
+
+        let dllimports = tcx.native_libraries(krate)
+            .iter()
+            .filter(|lib| {
+                if lib.kind != cstore::NativeLibraryKind::NativeUnknown {
+                    return false
+                }
+                let cfg = match lib.cfg {
+                    Some(ref cfg) => cfg,
+                    None => return true,
+                };
+                attr::cfg_matches(cfg, &tcx.sess.parse_sess, None)
+            })
+            .filter_map(|lib| lib.foreign_module)
+            .map(|id| &module_map[&id])
+            .flat_map(|module| module.foreign_items.iter().cloned())
+            .collect();
+        Lrc::new(dllimports)
+    };
+
+    providers.is_dllimport_foreign_item = |tcx, def_id| {
+        tcx.dllimport_foreign_items(def_id.krate).contains(&def_id)
+    }
 }
 
 pub fn provide_extern(providers: &mut Providers) {

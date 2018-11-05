@@ -26,6 +26,7 @@ use llvm::debuginfo::{DIFile, DIType, DIScope, DIBuilder, DIArray, DIFlags,
 use rustc::hir::CodegenFnAttrFlags;
 use rustc::hir::def_id::{DefId, CrateNum};
 use rustc::ty::subst::{Substs, UnpackedKind};
+use rustc::ty::layout::HasTyCtxt;
 
 use abi::Abi;
 use common::CodegenCx;
@@ -288,7 +289,7 @@ impl<'ll, 'tcx: 'll> DebugInfoMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll V
         // Get_template_parameters() will append a `<...>` clause to the function
         // name if necessary.
         let generics = self.tcx().generics_of(enclosing_fn_def_id);
-        let substs = instance.substs.truncate_to(*self.tcx(), generics);
+        let substs = instance.substs.truncate_to(self.tcx(), generics);
         let template_parameters = get_template_parameters(&self,
                                                           &generics,
                                                           substs,

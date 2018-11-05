@@ -18,8 +18,7 @@ use base;
 use rustc::hir;
 use rustc::hir::def::Def;
 use rustc::mir::mono::{Linkage, Visibility};
-use rustc::ty::Ty;
-use rustc::ty::layout::{LayoutOf, HasTyCtxt, TyLayout};
+use rustc::ty::layout::HasTyCtxt;
 use std::fmt;
 use interfaces::*;
 
@@ -29,17 +28,15 @@ pub use rustc_mir::monomorphize::item::MonoItemExt as BaseMonoItemExt;
 
 pub trait MonoItemExt<'a, 'll: 'a, 'tcx: 'll> : fmt::Debug + BaseMonoItemExt<'ll, 'tcx>
 {
-    fn define<Bx: BuilderMethods<'a, 'll, 'tcx>>(&self, cx: &'a Bx::CodegenCx) where
-        &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
-    {
+    fn define<Bx: BuilderMethods<'a, 'll, 'tcx>>(&self, cx: &'a Bx::CodegenCx) where {
         debug!("BEGIN IMPLEMENTING '{} ({})' in cgu {}",
-               self.to_string(*cx.tcx()),
+               self.to_string(*cx.tcx_with_correct_lifetime()),
                self.to_raw_string(),
                cx.codegen_unit().name());
 
         match *self.as_mono_item() {
             MonoItem::Static(def_id) => {
-                let tcx = *cx.tcx();
+                let tcx = cx.tcx();
                 let is_mutable = match tcx.describe_def(def_id) {
                     Some(Def::Static(_, is_mutable)) => is_mutable,
                     Some(other) => {
@@ -65,7 +62,7 @@ pub trait MonoItemExt<'a, 'll: 'a, 'tcx: 'll> : fmt::Debug + BaseMonoItemExt<'ll
         }
 
         debug!("END IMPLEMENTING '{} ({})' in cgu {}",
-               self.to_string(*cx.tcx()),
+               self.to_string(*cx.tcx_with_correct_lifetime()),
                self.to_raw_string(),
                cx.codegen_unit().name());
     }
@@ -75,15 +72,13 @@ pub trait MonoItemExt<'a, 'll: 'a, 'tcx: 'll> : fmt::Debug + BaseMonoItemExt<'ll
         cx: &'a Bx::CodegenCx,
         linkage: Linkage,
         visibility: Visibility
-    ) where
-        &'a Bx::CodegenCx : LayoutOf<Ty = Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
-    {
+    ) {
         debug!("BEGIN PREDEFINING '{} ({})' in cgu {}",
-               self.to_string(*cx.tcx()),
+               self.to_string(*cx.tcx_with_correct_lifetime()),
                self.to_raw_string(),
                cx.codegen_unit().name());
 
-        let symbol_name = self.symbol_name(*cx.tcx()).as_str();
+        let symbol_name = self.symbol_name(*cx.tcx_with_correct_lifetime()).as_str();
 
         debug!("symbol {}", &symbol_name);
 
@@ -98,7 +93,7 @@ pub trait MonoItemExt<'a, 'll: 'a, 'tcx: 'll> : fmt::Debug + BaseMonoItemExt<'ll
         }
 
         debug!("END PREDEFINING '{} ({})' in cgu {}",
-               self.to_string(*cx.tcx()),
+               self.to_string(*cx.tcx_with_correct_lifetime()),
                self.to_raw_string(),
                cx.codegen_unit().name());
     }

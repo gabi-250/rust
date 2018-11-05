@@ -15,7 +15,6 @@ use rustc_mir::monomorphize;
 use interfaces::*;
 
 use rustc::ty::{self, Ty};
-use rustc::ty::layout::{LayoutOf, HasDataLayout, HasTyCtxt, TyLayout};
 
 #[derive(Copy, Clone, Debug)]
 pub struct VirtualIndex(u64);
@@ -34,10 +33,7 @@ impl<'a, 'tcx> VirtualIndex {
         bx: &mut Bx,
         llvtable: <Bx::CodegenCx as Backend<'ll>>::Value,
         fn_ty: &FnType<'tcx, Ty<'tcx>>
-    ) -> <Bx::CodegenCx as Backend<'ll>>::Value
-        where &'a Bx::CodegenCx :
-            LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-    {
+    ) -> <Bx::CodegenCx as Backend<'ll>>::Value {
         // Load the data pointer from the object.
         debug!("get_fn({:?}, {:?})", llvtable, self);
 
@@ -58,10 +54,7 @@ impl<'a, 'tcx> VirtualIndex {
         self,
         bx: &mut Bx,
         llvtable: <Bx::CodegenCx as Backend<'ll>>::Value
-    ) -> <Bx::CodegenCx as Backend<'ll>>::Value
-        where &'a Bx::CodegenCx :
-            LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-    {
+    ) -> <Bx::CodegenCx as Backend<'ll>>::Value {
         // Load the data pointer from the object.
         debug!("get_int({:?}, {:?})", llvtable, self);
 
@@ -87,7 +80,7 @@ pub fn get_vtable<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>
     cx: &'a Cx,
     ty: Ty<'tcx>,
     trait_ref: ty::PolyExistentialTraitRef<'tcx>,
-) -> Cx::Value where &'a Cx: LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx> {
+) -> Cx::Value {
     let tcx = cx.tcx();
 
     debug!("get_vtable(ty={:?}, trait_ref={:?})", ty, trait_ref);
@@ -100,7 +93,7 @@ pub fn get_vtable<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>
     // Not in the cache. Build it.
     let nullptr = cx.const_null(cx.type_i8p());
 
-    let methods = tcx.vtable_methods(trait_ref.with_self_ty(*tcx, ty));
+    let methods = tcx.vtable_methods(trait_ref.with_self_ty(tcx, ty));
     let methods = methods.iter().cloned().map(|opt_mth| {
         opt_mth.map_or(nullptr, |(def_id, substs)| {
             callee::resolve_and_get_fn_for_vtable(cx, def_id, substs)
@@ -113,7 +106,7 @@ pub fn get_vtable<'a, 'll: 'a, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>
     // `get_vtable` in rust_mir/interpret/traits.rs
     // /////////////////////////////////////////////////////////////////////////////////////////////
     let components: Vec<_> = [
-        cx.get_fn(monomorphize::resolve_drop_in_place(*cx.tcx(), ty)),
+        cx.get_fn(monomorphize::resolve_drop_in_place(cx.tcx(), ty)),
         cx.const_usize(size.bytes()),
         cx.const_usize(align.abi())
     ].iter().cloned().chain(methods).collect();

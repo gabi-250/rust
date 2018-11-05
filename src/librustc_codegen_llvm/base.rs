@@ -31,34 +31,22 @@ use super::LlvmCodegenBackend;
 use llvm;
 use metadata;
 use rustc::mir::mono::{Linkage, Visibility, Stats};
-use rustc::middle::cstore::{EncodedMetadata};
+use rustc::middle::cstore::EncodedMetadata;
 use rustc::ty::TyCtxt;
 use rustc::middle::exported_symbols;
 use rustc::session::config::{self, DebugInfo};
 use builder::Builder;
 use common;
 use context::CodegenCx;
-use monomorphize::Instance;
-use monomorphize::partitioning::{CodegenUnit, CodegenUnitExt};
-use rustc_codegen_utils::symbol_names_test;
-use time_graph;
-use mono_item::{MonoItem, MonoItemExt};
-use type_of::LayoutLlvmExt;
-use rustc::util::nodemap::FxHashMap;
-use CrateInfo;
+use monomorphize::partitioning::CodegenUnitExt;
 use rustc_data_structures::small_c_str::SmallCStr;
 
 use rustc_codegen_ssa::interfaces::*;
 use rustc_codegen_ssa::back::write::submit_codegened_module_to_llvm;
+use rustc_codegen_ssa::mono_item::MonoItemExt;
 
-use std::any::Any;
-use std::cmp;
 use std::ffi::CString;
-use std::i32;
-use std::ops::{Deref, DerefMut};
-use std::sync::mpsc;
-use std::time::{Instant, Duration};
-use syntax_pos::Span;
+use std::time::Instant;
 use syntax_pos::symbol::InternedString;
 use rustc::hir::CodegenFnAttrs;
 
@@ -159,236 +147,6 @@ pub fn iter_globals(llmod: &'ll llvm::Module) -> ValueIter<'ll> {
     }
 }
 
-/// A curious wrapper structure whose only purpose is to call `codegen_aborted`
-/// when it's dropped abnormally.
-///
-/// In the process of working on rust-lang/rust#55238 a mysterious segfault was
-/// stumbled upon. The segfault was never reproduced locally, but it was
-/// suspected to be releated to the fact that codegen worker threads were
-/// sticking around by the time the main thread was exiting, causing issues.
-///
-/// This structure is an attempt to fix that issue where the `codegen_aborted`
-/// message will block until all workers have finished. This should ensure that
-/// even if the main codegen thread panics we'll wait for pending work to
-/// complete before returning from the main thread, hopefully avoiding
-/// segfaults.
-///
-/// If you see this comment in the code, then it means that this workaround
-/// worked! We may yet one day track down the mysterious cause of that
-/// segfault...
-struct AbortCodegenOnDrop(Option<OngoingCodegen>);
-
-impl AbortCodegenOnDrop {
-    fn into_inner(mut self) -> OngoingCodegen {
-        self.0.take().unwrap()
-    }
-}
-
-impl Deref for AbortCodegenOnDrop {
-    type Target = OngoingCodegen;
-}
-
-fn assert_and_save_dep_graph<'ll, 'tcx>(tcx: TyCtxt<'ll, 'tcx, 'tcx>) {
-    time(tcx.sess,
-         "assert dep graph",
-         || rustc_incremental::assert_dep_graph(tcx));
-
-    time(tcx.sess,
-         "serialize dep graph",
-         || rustc_incremental::save_dep_graph(tcx));
-}
-
-fn collect_and_partition_mono_items<'ll, 'tcx>(
-    tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-    cnum: CrateNum,
-) -> (Arc<DefIdSet>, Arc<Vec<Arc<CodegenUnit<'tcx>>>>)
-{
-    assert_eq!(cnum, LOCAL_CRATE);
-
-    let collection_mode = match tcx.sess.opts.debugging_opts.print_mono_items {
-        Some(ref s) => {
-            let mode_string = s.to_lowercase();
-            let mode_string = mode_string.trim();
-            if mode_string == "eager" {
-                MonoItemCollectionMode::Eager
-            } else {
-                if mode_string != "lazy" {
-                    let message = format!("Unknown codegen-item collection mode '{}'. \
-                                           Falling back to 'lazy' mode.",
-                                          mode_string);
-                    tcx.sess.warn(&message);
-                }
-
-                MonoItemCollectionMode::Lazy
-            }
-        }
-        None => {
-            if tcx.sess.opts.cg.link_dead_code {
-                MonoItemCollectionMode::Eager
-            } else {
-                MonoItemCollectionMode::Lazy
-            }
-        }
-    };
-
-    let (items, inlining_map) =
-        time(tcx.sess, "monomorphization collection", || {
-            collector::collect_crate_mono_items(tcx, collection_mode)
-    });
-
-    tcx.sess.abort_if_errors();
-
-    ::rustc_mir::monomorphize::assert_symbols_are_distinct(tcx, items.iter());
-
-    let strategy = if tcx.sess.opts.incremental.is_some() {
-        PartitioningStrategy::PerModule
-    } else {
-        PartitioningStrategy::FixedUnitCount(tcx.sess.codegen_units())
-    };
-
-    let codegen_units = time(tcx.sess, "codegen unit partitioning", || {
-        partitioning::partition(tcx,
-                                items.iter().cloned(),
-                                strategy,
-                                &inlining_map)
-            .into_iter()
-            .map(Arc::new)
-            .collect::<Vec<_>>()
-    });
-
-    let mono_items: DefIdSet = items.iter().filter_map(|mono_item| {
-        match *mono_item {
-            MonoItem::Fn(ref instance) => Some(instance.def_id()),
-            MonoItem::Static(def_id) => Some(def_id),
-            _ => None,
-        }
-    }).collect();
-
-    fn deref(&self) -> &OngoingCodegen {
-        self.0.as_ref().unwrap()
-    }
-}
-
-impl DerefMut for AbortCodegenOnDrop {
-    fn deref_mut(&mut self) -> &mut OngoingCodegen {
-        self.0.as_mut().unwrap()
-    }
-}
-
-impl Drop for AbortCodegenOnDrop {
-    fn drop(&mut self) {
-        if let Some(codegen) = self.0.take() {
-            codegen.codegen_aborted();
-        }
-    }
-}
-
-fn assert_and_save_dep_graph<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
-    time(tcx.sess,
-         "assert dep graph",
-         || rustc_incremental::assert_dep_graph(tcx));
-
-    time(tcx.sess,
-         "serialize dep graph",
-         || rustc_incremental::save_dep_graph(tcx));
-}
-
-impl CrateInfo {
-    pub fn new(tcx: TyCtxt) -> CrateInfo {
-        let mut info = CrateInfo {
-            panic_runtime: None,
-            compiler_builtins: None,
-            profiler_runtime: None,
-            sanitizer_runtime: None,
-            is_no_builtins: Default::default(),
-            native_libraries: Default::default(),
-            used_libraries: tcx.native_libraries(LOCAL_CRATE),
-            link_args: tcx.link_args(LOCAL_CRATE),
-            crate_name: Default::default(),
-            used_crates_dynamic: cstore::used_crates(tcx, LinkagePreference::RequireDynamic),
-            used_crates_static: cstore::used_crates(tcx, LinkagePreference::RequireStatic),
-            used_crate_source: Default::default(),
-            wasm_imports: Default::default(),
-            lang_item_to_crate: Default::default(),
-            missing_lang_items: Default::default(),
-        };
-        let lang_items = tcx.lang_items();
-
-        let load_wasm_items = tcx.sess.crate_types.borrow()
-            .iter()
-            .any(|c| *c != config::CrateType::Rlib) &&
-            tcx.sess.opts.target_triple.triple() == "wasm32-unknown-unknown";
-
-        if load_wasm_items {
-            info.load_wasm_imports(tcx, LOCAL_CRATE);
-        }
-
-        let crates = tcx.crates();
-
-        let n_crates = crates.len();
-        info.native_libraries.reserve(n_crates);
-        info.crate_name.reserve(n_crates);
-        info.used_crate_source.reserve(n_crates);
-        info.missing_lang_items.reserve(n_crates);
-
-        for &cnum in crates.iter() {
-            info.native_libraries.insert(cnum, tcx.native_libraries(cnum));
-            info.crate_name.insert(cnum, tcx.crate_name(cnum).to_string());
-            info.used_crate_source.insert(cnum, tcx.used_crate_source(cnum));
-            if tcx.is_panic_runtime(cnum) {
-                info.panic_runtime = Some(cnum);
-            }
-            if tcx.is_compiler_builtins(cnum) {
-                info.compiler_builtins = Some(cnum);
-            }
-            if tcx.is_profiler_runtime(cnum) {
-                info.profiler_runtime = Some(cnum);
-            }
-            if tcx.is_sanitizer_runtime(cnum) {
-                info.sanitizer_runtime = Some(cnum);
-            }
-            if tcx.is_no_builtins(cnum) {
-                info.is_no_builtins.insert(cnum);
-            }
-            if load_wasm_items {
-                info.load_wasm_imports(tcx, cnum);
-            }
-            let missing = tcx.missing_lang_items(cnum);
-            for &item in missing.iter() {
-                if let Ok(id) = lang_items.require(item) {
-                    info.lang_item_to_crate.insert(item, id.krate);
-                }
-            }
-
-            // No need to look for lang items that are whitelisted and don't
-            // actually need to exist.
-            let missing = missing.iter()
-                .cloned()
-                .filter(|&l| !weak_lang_items::whitelisted(tcx, l))
-                .collect();
-            info.missing_lang_items.insert(cnum, missing);
-        }
-
-        return info
-    }
-
-    fn load_wasm_imports(&mut self, tcx: TyCtxt, cnum: CrateNum) {
-        self.wasm_imports.extend(tcx.wasm_import_module_map(cnum).iter().map(|(&id, module)| {
-            let instance = Instance::mono(tcx, id);
-            let import_name = tcx.symbol_name(instance);
-
-            (import_name.to_string(), module.clone())
-        }));
-    }
-}
-
-fn is_codegened_item(tcx: TyCtxt, id: DefId) -> bool {
-    let (all_mono_items, _) =
-        tcx.collect_and_partition_mono_items(LOCAL_CRATE);
-    all_mono_items.contains(&id)
-}
-
-=======
 pub fn compile_codegen_unit<'ll, 'tcx>(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
                                   cgu_name: InternedString)
                                   -> Stats {
@@ -459,37 +217,6 @@ pub fn compile_codegen_unit<'ll, 'tcx>(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
             module_llvm: llvm_module,
             kind: ModuleKind::Regular,
         })
-    }
-}
-
-pub fn provide_both(providers: &mut Providers) {
-    providers.dllimport_foreign_items = |tcx, krate| {
-        let module_map = tcx.foreign_modules(krate);
-        let module_map = module_map.iter()
-            .map(|lib| (lib.def_id, lib))
-            .collect::<FxHashMap<_, _>>();
-
-        let dllimports = tcx.native_libraries(krate)
-            .iter()
-            .filter(|lib| {
-                if lib.kind != cstore::NativeLibraryKind::NativeUnknown {
-                    return false
-                }
-                let cfg = match lib.cfg {
-                    Some(ref cfg) => cfg,
-                    None => return true,
-                };
-                attr::cfg_matches(cfg, &tcx.sess.parse_sess, None)
-            })
-            .filter_map(|lib| lib.foreign_module)
-            .map(|id| &module_map[&id])
-            .flat_map(|module| module.foreign_items.iter().cloned())
-            .collect();
-        Lrc::new(dllimports)
-    };
-
-    providers.is_dllimport_foreign_item = |tcx, def_id| {
-        tcx.dllimport_foreign_items(def_id.krate).contains(&def_id)
     }
 }
 

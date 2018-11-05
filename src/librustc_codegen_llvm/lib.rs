@@ -132,12 +132,6 @@ mod value;
 pub struct LlvmCodegenBackend(());
 
 impl ExtraBackendMethods for LlvmCodegenBackend {
-    fn thin_lto_available(&self) -> bool {
-         unsafe { !llvm::LLVMRustThinLTOAvailable() }
-    }
-    fn pgo_available(&self) -> bool {
-        unsafe { !llvm::LLVMRustPGOAvailable() }
-    }
     fn new_metadata(&self, sess: &Session, mod_name: &str) -> ModuleLlvm {
         ModuleLlvm::new(sess, mod_name)
     }
@@ -307,9 +301,9 @@ impl<'a> CodegenBackend for LlvmCodegenBackend {
     }
 
     fn provide(&self, providers: &mut ty::query::Providers) {
-        back::symbol_names::provide(providers);
+        rustc_codegen_utils::symbol_names::provide(providers);
         rustc_codegen_ssa::back::symbol_export::provide(providers);
-        rustc_codegen_ssa::base::provide(providers);
+        rustc_codegen_ssa::base::provide_both(providers);
         attributes::provide(providers);
     }
 

@@ -50,7 +50,6 @@ use rustc::ty::TyCtxt;
 
 pub mod command;
 pub mod link;
-pub mod linker;
 pub mod codegen_backend;
 pub mod symbol_export;
 pub mod symbol_names;

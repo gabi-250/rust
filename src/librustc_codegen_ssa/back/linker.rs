@@ -46,10 +46,13 @@ impl<B : ExtraBackendMethods> LinkerInfo<B> {
         }
     }
 
-    pub fn to_linker<'a>(&'a self,
-                         cmd: Command,
-                         sess: &'a Session,
-                         flavor: LinkerFlavor) -> Box<dyn Linker+'a> {
+    pub fn to_linker<'a>(
+        &'a self,
+        cmd: Command,
+        sess: &'a Session,
+        flavor: LinkerFlavor,
+        target_cpu: &'a str,
+    ) -> Box<dyn Linker+'a> {
         match flavor {
             LinkerFlavor::Lld(LldFlavor::Link) |
             LinkerFlavor::Msvc => {
@@ -73,6 +76,7 @@ impl<B : ExtraBackendMethods> LinkerInfo<B> {
                     info: self,
                     hinted_static: false,
                     is_ld: false,
+                    target_cpu,
                 }) as Box<dyn Linker>
             }
 
@@ -85,6 +89,7 @@ impl<B : ExtraBackendMethods> LinkerInfo<B> {
                     info: self,
                     hinted_static: false,
                     is_ld: true,
+                    target_cpu,
                 }) as Box<dyn Linker>
             }
 
@@ -381,6 +386,7 @@ pub struct GccLinker<'a, B : 'a + ExtraBackendMethods> {
     hinted_static: bool, // Keeps track of the current hinting mode.
     // Link as ld
     is_ld: bool,
+    target_cpu: &'a str
 }
 
 impl<'a,  B : ExtraBackendMethods> GccLinker<'a, B> {
@@ -441,7 +447,8 @@ impl<'a,  B : ExtraBackendMethods> GccLinker<'a, B> {
         };
 
         self.linker_arg(&format!("-plugin-opt={}", opt_level));
-        self.linker_arg(&format!("-plugin-opt=mcpu={}", self.info.backend.target_cpu(self.sess)));
+        let target_cpu = self.target_cpu;
+        self.linker_arg(&format!("-plugin-opt=mcpu={}", target_cpu));
 
         match self.sess.lto() {
             config::Lto::Thin |

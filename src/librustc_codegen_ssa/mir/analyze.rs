@@ -17,16 +17,13 @@ use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 use rustc::mir::{self, Location, TerminatorKind};
 use rustc::mir::visit::{Visitor, PlaceContext, MutatingUseContext, NonMutatingUseContext};
 use rustc::mir::traversal;
-use rustc::ty::{self, Ty};
-use rustc::ty::layout::{LayoutOf, HasTyCtxt, TyLayout};
+use rustc::ty;
 use super::FunctionCx;
 use interfaces::*;
 
 pub fn non_ssa_locals<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>(
     fx: &FunctionCx<'a, 'f, 'll, 'tcx, Cx>
-) -> BitSet<mir::Local>
-    where &'a Cx : LayoutOf<Ty=Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> BitSet<mir::Local> {
     let mir = fx.mir;
     let mut analyzer = LocalAnalyzer::new(fx);
 
@@ -58,9 +55,7 @@ pub fn non_ssa_locals<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'
 struct LocalAnalyzer<
     'mir, 'a: 'mir, 'f: 'mir, 'll: 'a + 'f, 'tcx: 'll,
     Cx: 'a + CodegenMethods<'a, 'll, 'tcx>
-    >
-    where &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+    > {
     fx: &'mir FunctionCx<'a, 'f, 'll, 'tcx, Cx>,
     dominators: Dominators<mir::BasicBlock>,
     non_ssa_locals: BitSet<mir::Local>,
@@ -69,9 +64,7 @@ struct LocalAnalyzer<
     first_assignment: IndexVec<mir::Local, Location>
 }
 
-impl<Cx: 'a + CodegenMethods<'a, 'll, 'tcx>> LocalAnalyzer<'mir, 'a, 'f, 'll, 'tcx, Cx>
-    where &'a Cx : LayoutOf<Ty=Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+impl<Cx: 'a + CodegenMethods<'a, 'll, 'tcx>> LocalAnalyzer<'mir, 'a, 'f, 'll, 'tcx, Cx> {
     fn new(fx: &'mir FunctionCx<'a, 'f, 'll, 'tcx, Cx>) -> Self {
         let invalid_location =
             mir::BasicBlock::new(fx.mir.basic_blocks().len()).start_location();
@@ -114,9 +107,7 @@ impl<Cx: 'a + CodegenMethods<'a, 'll, 'tcx>> LocalAnalyzer<'mir, 'a, 'f, 'll, 't
 }
 
 impl<'mir, 'a: 'mir, 'f: 'mir, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
-    Visitor<'tcx> for LocalAnalyzer<'mir, 'a, 'f, 'll, 'tcx, Cx> where
-    &'a Cx : LayoutOf<Ty=Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+    Visitor<'tcx> for LocalAnalyzer<'mir, 'a, 'f, 'll, 'tcx, Cx> {
     fn visit_assign(&mut self,
                     block: mir::BasicBlock,
                     place: &mir::Place<'tcx>,
@@ -187,12 +178,12 @@ impl<'mir, 'a: 'mir, 'f: 'mir, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<
                 _ => false
             };
             if is_consume {
-                let base_ty = proj.base.ty(self.fx.mir, *cx.tcx());
+                let base_ty = proj.base.ty(self.fx.mir, cx.tcx());
                 let base_ty = self.fx.monomorphize(&base_ty);
 
                 // ZSTs don't require any actual memory access.
                 let elem_ty = base_ty
-                    .projection_ty(*cx.tcx(), &proj.elem)
+                    .projection_ty(cx.tcx(), &proj.elem)
                     .to_ty(cx.tcx());
                 let elem_ty = self.fx.monomorphize(&elem_ty);
                 if cx.layout_of(elem_ty).is_zst() {
@@ -200,7 +191,7 @@ impl<'mir, 'a: 'mir, 'f: 'mir, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<
                 }
 
                 if let mir::ProjectionElem::Field(..) = proj.elem {
-                    let layout = cx.layout_of(base_ty.to_ty(*cx.tcx()));
+                    let layout = cx.layout_of(base_ty.to_ty(cx.tcx()));
                     if cx.is_backend_immediate(&layout) || cx.is_backend_scalar_pair(&layout) {
                         // Recurse with the same context, instead of `Projection`,
                         // potentially stopping at non-operand projections,
@@ -266,8 +257,8 @@ impl<'mir, 'a: 'mir, 'f: 'mir, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<
             }
 
             PlaceContext::MutatingUse(MutatingUseContext::Drop) => {
-                let ty = mir::Place::Local(local).ty(self.fx.mir, *self.fx.cx.tcx());
-                let ty = self.fx.monomorphize(&ty.to_ty(*self.fx.cx.tcx()));
+                let ty = mir::Place::Local(local).ty(self.fx.mir, self.fx.cx.tcx());
+                let ty = self.fx.monomorphize(&ty.to_ty(self.fx.cx.tcx()));
 
                 // Only need the place if we're actually dropping it.
                 if self.fx.cx.type_needs_drop(ty) {

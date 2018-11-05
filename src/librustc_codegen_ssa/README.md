@@ -64,8 +64,7 @@ Because they have to be defined by the backend, `CodegenCx` and `Builder` will b
 pub fn codegen_instance<'a, 'll: 'a, 'tcx: 'll, Bx: BuilderMethods<'a, 'll, 'tcx>>(
     cx: &'a Bx::CodegenCx,
     instance: Instance<'tcx>
-) where &'a Bx::CodegenCx :
-  LayoutOf<Ty = Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx> {
+) {
     /* ... */
 }
 ```

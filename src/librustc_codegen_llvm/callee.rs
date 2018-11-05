@@ -15,8 +15,8 @@
 //! closure.
 
 use attributes;
-use rustc_codegen_ssa::common;
 use llvm;
+use rustc::ty::layout::HasTyCtxt;
 use monomorphize::Instance;
 use context::CodegenCx;
 use value::Value;
@@ -88,11 +88,11 @@ pub fn get_fn(
             llfn
         }
     } else {
-        let llfn = declare::declare_fn(cx, &sym, sig);
+        let llfn = cx.declare_fn(&sym, sig);
         assert_eq!(cx.val_ty(llfn), llptrty);
         debug!("get_fn: not casting pointer!");
 
-        if instance.def.is_inline(*tcx) {
+        if instance.def.is_inline(tcx) {
             attributes::inline(cx, llfn, attributes::InlineAttr::Hint);
         }
         attributes::from_fn_attrs(cx, llfn, Some(instance.def.def_id()));

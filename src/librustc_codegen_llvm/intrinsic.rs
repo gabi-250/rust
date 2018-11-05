@@ -388,16 +388,32 @@ impl IntrinsicCallMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, &'ll Value> 
                         return;
                     }
                 }
-
-                "store" => {
-                    let ty = substs.type_at(0);
-                    if int_type_width_signed(ty, cx).is_some() {
-                        let size = cx.size_of(ty);
-                        bx.atomic_store(args[1].immediate(), args[0].immediate(), order, size);
+            },
+            "fadd_fast" | "fsub_fast" | "fmul_fast" | "fdiv_fast" | "frem_fast" => {
+                let sty = &arg_tys[0].sty;
+                match float_type_width(sty) {
+                    Some(_width) =>
+                        match name {
+                            "fadd_fast" =>
+                                self.fadd_fast(args[0].immediate(), args[1].immediate()),
+                            "fsub_fast" =>
+                                self.fsub_fast(args[0].immediate(), args[1].immediate()),
+                            "fmul_fast" =>
+                                self.fmul_fast(args[0].immediate(), args[1].immediate()),
+                            "fdiv_fast" =>
+                                self.fdiv_fast(args[0].immediate(), args[1].immediate()),
+                            "frem_fast" =>
+                                self.frem_fast(args[0].immediate(), args[1].immediate()),
+                            _ => bug!(),
+                        },
+                    None => {
+                        span_invalid_monomorphization_error(
+                        tcx.sess, span,
+                        &format!("invalid monomorphization of `{}` intrinsic: \
+                                  expected basic float type, found `{}`", name, sty));
                         return;
                     }
                 }
-
             },
 
             "discriminant_value" => {
@@ -486,8 +502,8 @@ impl IntrinsicCallMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, &'ll Value> 
                     "load" => {
                         let ty = substs.type_at(0);
                         if int_type_width_signed(ty, cx).is_some() {
-                            let align = cx.align_of(ty);
-                            self.atomic_load(args[0].immediate(), order, align)
+                            let size = cx.size_of(ty);
+                            self.atomic_load(args[0].immediate(), order, size)
                         } else {
                             return invalid_monomorphization(ty);
                         }

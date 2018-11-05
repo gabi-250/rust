@@ -29,18 +29,15 @@ use std::ops::Range;
 use syntax::ast::AsmDialect;
 
 pub trait HasCodegen<'a, 'll: 'a, 'tcx :'ll>
-    where &'a Self::CodegenCx :
-        LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {
-    type CodegenCx : 'a + CodegenMethods<'a, 'll, 'tcx>;
+    type CodegenCx : 'a + CodegenMethods<'a, 'll, 'tcx> +
+        LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>;
 }
 
 pub trait BuilderMethods<'a, 'll :'a, 'tcx: 'll> : HasCodegen<'a, 'll, 'tcx> +
     DebugInfoBuilderMethods<'a, 'll, 'tcx> + ArgTypeMethods<'a, 'll, 'tcx> +
     AbiBuilderMethods<'a, 'll, 'tcx> + IntrinsicCallMethods<'a, 'll, 'tcx> +
     AsmBuilderMethods<'a, 'll, 'tcx>
-    where &'a Self::CodegenCx :
-        LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {
     fn new_block<'b>(
         cx: &'a Self::CodegenCx,
@@ -250,7 +247,7 @@ pub trait BuilderMethods<'a, 'll :'a, 'tcx: 'll> : HasCodegen<'a, 'll, 'tcx> +
     fn atomic_load(
         &mut self,
         ptr: <Self::CodegenCx as Backend<'ll>>::Value,
-        order: AtomicOrdering, align: Align
+        order: AtomicOrdering, size: Size
     ) -> <Self::CodegenCx as Backend<'ll>>::Value;
     fn load_ref(
         &mut self,

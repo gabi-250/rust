@@ -745,8 +745,7 @@ fn execute_optimize_work_item<B : ExtraBackendMethods>(
         // Additionally here's where we also factor in the current LLVM
         // version. If it doesn't support ThinLTO we skip this.
         Lto::ThinLocal => {
-            module.kind != ModuleKind::Allocator &&
-                cgcx.backend.thin_lto_available()
+            module.kind != ModuleKind::Allocator
         }
     };
 
@@ -862,6 +861,7 @@ pub enum Message<B: WriteBackendMethods> {
     },
     CodegenComplete,
     CodegenItem,
+    CodegenAborted,
 }
 
 struct Diagnostic {
@@ -1146,6 +1146,7 @@ fn start_executing_work<B : ExtraBackendMethods>(
         let mut needs_lto = Vec::new();
         let mut lto_import_only_modules = Vec::new();
         let mut started_lto = false;
+        let mut codegen_aborted = false;
 
         // This flag tracks whether all items have gone through codegens
         let mut codegen_done = false;
@@ -1337,6 +1338,20 @@ fn start_executing_work<B : ExtraBackendMethods>(
                     assert_eq!(main_thread_worker_state,
                                MainThreadWorkerState::Codegenning);
                     main_thread_worker_state = MainThreadWorkerState::Idle;
+                }
+
+                // If codegen is aborted that means translation was aborted due
+                // to some normal-ish compiler error. In this situation we want
+                // to exit as soon as possible, but we want to make sure all
+                // existing work has finished. Flag codegen as being done, and
+                // then conditions above will ensure no more work is spawned but
+                // we'll keep executing this loop until `running` hits 0.
+                Message::CodegenAborted => {
+                    assert!(!codegen_aborted);
+                    codegen_done = true;
+                    codegen_aborted = true;
+                    assert_eq!(main_thread_worker_state,
+                               MainThreadWorkerState::Codegenning);
                 }
 
                 // If a thread exits successfully then we drop a token associated
@@ -1735,6 +1750,20 @@ impl<B : ExtraBackendMethods> OngoingCodegen<B> {
         self.check_for_errors(tcx.sess);
         let msg : Message<B> = Message::CodegenComplete;
         drop(self.coordinator_send.send(Box::new(msg)));
+    }
+
+    /// Consume this context indicating that codegen was entirely aborted, and
+    /// we need to exit as quickly as possible.
+    ///
+    /// This method blocks the current thread until all worker threads have
+    /// finished, and all worker threads should have exited or be real close to
+    /// exiting at this point.
+    pub fn codegen_aborted(self) {
+        // Signal to the coordinator it should spawn no more work and start
+        // shutdown.
+        let msg : Message<B> = Message::CodegenAborted;
+        drop(self.coordinator_send.send(Box::new(msg)));
+        drop(self.future.join());
     }
 
     pub fn check_for_errors(&self, sess: &Session) {

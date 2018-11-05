@@ -8,21 +8,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc::mir::interpret::ConstEvalErr;
 use rustc_mir::const_eval::const_field;
 use rustc::mir;
 use rustc_data_structures::indexed_vec::Idx;
-use rustc::mir::interpret::{GlobalId, Pointer, Scalar, Allocation, ConstValue, AllocType};
+use rustc::mir::interpret::{GlobalId, ErrorHandled, ConstValue};
 use rustc::ty::{self, Ty};
-use rustc::ty::layout::{self, LayoutOf, TyLayout, HasTyCtxt};
+use rustc::ty::layout;
 use syntax::source_map::Span;
 use interfaces::*;
 
 use super::FunctionCx;
 
 impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
-    FunctionCx<'a, 'f, 'll, 'tcx, Cx> where
-    &'a Cx: LayoutOf<Ty=Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
+    FunctionCx<'a, 'f, 'll, 'tcx, Cx>
 {
     fn fully_evaluate<Bx: BuilderMethods<'a, 'll, 'tcx, CodegenCx=Cx>>(
         &mut self,

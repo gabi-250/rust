@@ -13,13 +13,10 @@ use rustc::mir;
 use super::FunctionCx;
 use super::LocalRef;
 use super::OperandValue;
-use rustc::ty::Ty;
-use rustc::ty::layout::{TyLayout, HasTyCtxt, LayoutOf};
 use interfaces::*;
 
 impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
-    FunctionCx<'a, 'f, 'll, 'tcx, Cx> where
-    &'a Cx: LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
+    FunctionCx<'a, 'f, 'll, 'tcx, Cx>
 {
     pub fn codegen_statement<Bx: BuilderMethods<'a, 'll, 'tcx, CodegenCx=Cx>>(
         &mut self,
@@ -93,7 +90,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
                         if let OperandValue::Immediate(_) = op.val {
                             acc.push(op.immediate());
                         } else {
-                            span_err!(bx.sess(), span.to_owned(), E0669,
+                            span_err!(bx.cx().sess(), span.to_owned(), E0669,
                                      "invalid value for constraint in inline assembly");
                         }
                         acc

@@ -9,8 +9,7 @@
 // except according to those terms.
 
 use interfaces::*;
-use rustc::ty::{self, Ty};
-use rustc::ty::layout::{LayoutOf, TyLayout, HasTyCtxt};
+use rustc::ty;
 use rustc::ty::subst::Substs;
 use rustc::hir::def_id::DefId;
 
@@ -18,12 +17,25 @@ pub fn resolve_and_get_fn<'a, 'll: 'a, 'tcx: 'll, Cx : 'a +  CodegenMethods<'a, 
     cx: &Cx,
     def_id: DefId,
     substs: &'tcx Substs<'tcx>,
-) -> Cx::Value
-    where &'a Cx : LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> Cx::Value {
     cx.get_fn(
         ty::Instance::resolve(
-            *cx.tcx(),
+            cx.tcx(),
+            ty::ParamEnv::reveal_all(),
+            def_id,
+            substs
+        ).unwrap()
+    )
+}
+
+pub fn resolve_and_get_fn_for_vtable<'a, 'll: 'a, 'tcx: 'll, Cx : 'a +  CodegenMethods<'a, 'll, 'tcx>>(
+    cx: &Cx,
+    def_id: DefId,
+    substs: &'tcx Substs<'tcx>,
+) -> Cx::Value {
+    cx.get_fn(
+        ty::Instance::resolve_for_vtable(
+            cx.tcx(),
             ty::ParamEnv::reveal_all(),
             def_id,
             substs

@@ -30,7 +30,6 @@ use rustc_target::spec::PanicStrategy;
 use abi::{Abi, FnType, FnTypeExt};
 use attributes;
 use context::CodegenCx;
-use rustc_codegen_ssa::common;
 use type_::Type;
 use rustc_codegen_ssa::interfaces::*;
 use value::Value;
@@ -120,7 +119,7 @@ impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
     fn declare_fn(
         &self,
         name: &str,
-        fn_type: Ty<'tcx>,
+        sig: PolyFnSig<'tcx>
     ) -> &'ll Value {
         debug!("declare_rust_fn(name={:?}, sig={:?})", name, sig);
         let sig = self.tcx.normalize_erasing_late_bound_regions(ty::ParamEnv::reveal_all(), &sig);
@@ -163,20 +162,21 @@ impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
     fn define_fn(
         &self,
         name: &str,
-        fn_type: Ty<'tcx>,
+        fn_sig: PolyFnSig<'tcx>
     ) -> &'ll Value {
         if self.get_defined_value(name).is_some() {
             self.sess().fatal(&format!("symbol `{}` already defined", name))
         } else {
-            self.declare_fn(name, fn_type)
+            self.declare_fn(name, fn_sig)
+        }
     }
 
     fn define_internal_fn(
         &self,
         name: &str,
-        fn_type: Ty<'tcx>,
+        fn_sig: PolyFnSig<'tcx>
     ) -> &'ll Value {
-        let llfn = self.define_fn(name, fn_type);
+        let llfn = self.define_fn(name, fn_sig);
         unsafe { llvm::LLVMRustSetLinkage(llfn, llvm::Linkage::InternalLinkage) };
         llfn
     }

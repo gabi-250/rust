@@ -12,7 +12,7 @@ use libc::c_uint;
 use llvm::{self, SetUnnamedAddr, True};
 use rustc::hir::def_id::DefId;
 use rustc::mir::interpret::{ConstValue, Allocation, read_target_uint,
-    Pointer, ConstEvalErr, GlobalId};
+    Pointer, ErrorHandled, GlobalId};
 use rustc::hir::Node;
 use debuginfo;
 use monomorphize::MonoItem;
@@ -24,7 +24,6 @@ use syntax_pos::symbol::LocalInternedString;
 use base;
 use type_::Type;
 use type_of::LayoutLlvmExt;
-use rustc_data_structures::sync::Lrc;
 use value::Value;
 use rustc::ty::{self, Ty};
 use rustc_codegen_ssa::interfaces::*;
@@ -73,7 +72,7 @@ pub fn const_alloc_to_llvm(cx: &CodegenCx<'ll, '_, &'ll Value>, alloc: &Allocati
 pub fn codegen_static_initializer(
     cx: &CodegenCx<'ll, 'tcx, &'ll Value>,
     def_id: DefId,
-) -> Result<(&'ll Value, &'tcx Allocation), Lrc<ConstEvalErr<'tcx>>> {
+) -> Result<(&'ll Value, &'tcx Allocation), ErrorHandled> {
     let instance = ty::Instance::mono(cx.tcx, def_id);
     let cid = GlobalId {
         instance,

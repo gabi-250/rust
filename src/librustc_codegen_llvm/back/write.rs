@@ -10,7 +10,7 @@
 
 use attributes;
 use back::bytecode::{self, RLIB_BYTECODE_EXTENSION};
-use back::lto::{ModuleBuffer, ThinBuffer};
+use back::lto::ThinBuffer;
 use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig, run_assembler,
     DiagnosticHandlers};
 use rustc_codegen_ssa::interfaces::*;

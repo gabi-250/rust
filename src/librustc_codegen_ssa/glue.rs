@@ -16,7 +16,7 @@ use std;
 
 use common::IntPredicate;
 use meth;
-use rustc::ty::layout::{LayoutOf, TyLayout, HasTyCtxt};
+use rustc::ty::layout::LayoutOf;
 use rustc::ty::{self, Ty};
 use interfaces::*;
 
@@ -26,9 +26,7 @@ pub fn size_and_align_of_dst<'a, 'll: 'a, 'tcx: 'll,
     bx: &mut Bx,
     t: Ty<'tcx>,
     info: Option<<Bx::CodegenCx as Backend<'ll>>::Value>
-) -> (<Bx::CodegenCx as Backend<'ll>>::Value, <Bx::CodegenCx as Backend<'ll>>::Value)  where
-    &'a Bx::CodegenCx: LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+) -> (<Bx::CodegenCx as Backend<'ll>>::Value, <Bx::CodegenCx as Backend<'ll>>::Value) {
     debug!("calculate size of DST: {}; with lost info: {:?}",
            t, info);
     if bx.cx().type_is_sized(t) {

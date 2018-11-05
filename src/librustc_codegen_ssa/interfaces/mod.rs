@@ -62,6 +62,6 @@ pub trait CodegenMethods<'a, 'll: 'a, 'tcx: 'll> :
     Backend<'ll> + TypeMethods<'a, 'll, 'tcx> + MiscMethods<'ll, 'tcx> + ConstMethods<'ll, 'tcx> +
     StaticMethods<'ll> + DebugInfoMethods<'ll, 'tcx> + AbiMethods<'tcx> +
     IntrinsicDeclarationMethods<'ll> + DeclareMethods<'ll, 'tcx> + AsmMethods +
-    PreDefineMethods<'ll, 'tcx>
-    where &'a Self : 'a + LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
+    PreDefineMethods<'ll, 'tcx> +
+    LayoutOf<Ty = Ty<'tcx>, TyLayout = TyLayout<'tcx>> + HasTyCtxt<'tcx>
 {}

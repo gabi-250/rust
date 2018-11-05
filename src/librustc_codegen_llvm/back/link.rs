@@ -32,8 +32,6 @@ use rustc::hir::def_id::CrateNum;
 use tempfile::{Builder as TempFileBuilder, TempDir};
 use rustc_target::spec::{PanicStrategy, RelroLevel, LinkerFlavor};
 use rustc_data_structures::fx::FxHashSet;
-use rustc_codegen_utils::linker::Linker;
-use rustc_codegen_utils::command::Command;
 use context::get_reloc_model;
 use llvm;
 use LlvmCodegenBackend;

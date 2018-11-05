@@ -10,7 +10,7 @@
 
 use rustc::middle::lang_items;
 use rustc::ty::{self, Ty, TypeFoldable};
-use rustc::ty::layout::{self, LayoutOf, HasTyCtxt, TyLayout};
+use rustc::ty::layout;
 use rustc::mir;
 use rustc::mir::interpret::EvalErrorKind;
 use rustc_target::abi::call::{ArgType, FnType, PassMode};
@@ -32,9 +32,7 @@ use super::operand::OperandRef;
 use super::operand::OperandValue::{Pair, Ref, Immediate};
 
 impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
-    FunctionCx<'a, 'f, 'll, 'tcx, Cx>
-    where &'a Cx: LayoutOf<Ty=Ty<'tcx>, TyLayout=TyLayout<'tcx>> + HasTyCtxt<'tcx>
-{
+    FunctionCx<'a, 'f, 'll, 'tcx, Cx> {
     pub fn codegen_block<Bx: BuilderMethods<'a, 'll, 'tcx>>(&mut self, bb: mir::BasicBlock)
         where Bx: BuilderMethods<'a, 'll, 'tcx, CodegenCx=Cx>
     {
@@ -297,7 +295,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
             mir::TerminatorKind::Drop { ref location, target, unwind } => {
                 let ty = location.ty(self.mir, bx.tcx()).to_ty(bx.tcx());
                 let ty = self.monomorphize(&ty);
-                let drop_fn = monomorphize::resolve_drop_in_place(*bx.cx().tcx(), ty);
+                let drop_fn = monomorphize::resolve_drop_in_place(bx.cx().tcx(), ty);
 
                 if let ty::InstanceDef::DropGlue(_, None) = drop_fn.def {
                     // we don't actually need to drop anything.
@@ -316,7 +314,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
                 };
                 let (drop_fn, fn_ty) = match ty.sty {
                     ty::Dynamic(..) => {
-                        let sig = drop_fn.fn_sig(*bx.cx().tcx());
+                        let sig = drop_fn.fn_sig(bx.cx().tcx());
                         let sig = bx.tcx().normalize_erasing_late_bound_regions(
                             ty::ParamEnv::reveal_all(),
                             &sig,
@@ -445,7 +443,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
 
                 let (instance, mut llfn) = match callee.layout.ty.sty {
                     ty::FnDef(def_id, substs) => {
-                        (Some(ty::Instance::resolve(*bx.cx().tcx(),
+                        (Some(ty::Instance::resolve(bx.cx().tcx(),
                                                     ty::ParamEnv::reveal_all(),
                                                     def_id,
                                                     substs).unwrap()),
@@ -638,7 +636,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
                     }).collect();
 
 
-                    let callee_ty = instance.as_ref().unwrap().ty(*bx.cx().tcx());
+                    let callee_ty = instance.as_ref().unwrap().ty(bx.cx().tcx());
                     bx.codegen_intrinsic_call(callee_ty, &fn_ty, &args, dest,
                                                terminator.source_info.span);
 
@@ -678,7 +676,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
                                             && !op.layout.ty.is_region_ptr()
                             {
                                 'iter_fields: for i in 0..op.layout.fields.count() {
-                                    let field = op.extract_field(&bx, i);
+                                    let field = op.extract_field(&mut bx, i);
                                     if !field.layout.is_zst() {
                                         // we found the one non-zero-sized field that is allowed
                                         // now find *its* non-zero-sized field, or stop if it's a
@@ -697,7 +695,7 @@ impl<'a, 'f, 'll: 'a + 'f, 'tcx: 'll, Cx: 'a + CodegenMethods<'a, 'll, 'tcx>>
                             match op.val {
                                 Pair(data_ptr, meta) => {
                                     llfn = Some(meth::VirtualIndex::from_index(idx)
-                                        .get_fn(&bx, meta, &fn_ty));
+                                        .get_fn(&mut bx, meta, &fn_ty));
                                     llargs.push(data_ptr);
                                     continue 'make_args
                                 }

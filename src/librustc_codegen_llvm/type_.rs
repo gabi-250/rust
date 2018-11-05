@@ -246,7 +246,7 @@ impl BaseTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
         &self.scalar_lltypes
     }
 
-    fn tcx(&self) -> &TyCtxt<'ll, 'tcx, 'tcx> {
+    fn tcx_with_correct_lifetime(&self) -> &TyCtxt<'ll, 'tcx, 'tcx> {
         &self.tcx
     }
 }
