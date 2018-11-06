@@ -46,6 +46,7 @@ use std::io::Write;
 
 mod back {
     pub use rustc_codegen_utils::symbol_names;
+    pub mod write;
 }
 
 mod base;
