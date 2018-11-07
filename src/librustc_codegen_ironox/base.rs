@@ -14,18 +14,15 @@ pub fn compile_codegen_unit<'ll, 'tcx>(
 ) -> Stats {
     let cgu = tcx.codegen_unit(cgu_name);
     let mut codegened_module = ModuleIronOx {
-        asm: "mov $5, %rax\n".to_string(),
+        asm: "".to_string(),
     };
     for (&mono_item, &_linkage) in cgu.items() {
         match mono_item {
             MonoItem::Fn(inst) => {
-                eprintln!("Processing function {:?}", inst);
+                eprintln!("Processing function {:?}", tcx.symbol_name(inst).as_str());
+                // create the function
                 //eprintln!("Arg count is {:?}", mir.arg_count);
-                let stack_size = write::stack_size(tcx, inst.def);
-                write::emit_prologue(&mut codegened_module, stack_size);
-                // XXX
-                write::emit_epilogue(&mut codegened_module, stack_size);
-                eprintln!("The size of the stack is {}", stack_size);
+                write::emit_function(tcx, &mut codegened_module, inst);
             },
             _ => {
                 // don't care
