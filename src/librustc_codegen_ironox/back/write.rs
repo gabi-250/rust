@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use rustc::ty::{self, TyCtxt, Instance};
 use rustc::mir::{BasicBlock, BasicBlockData, Local, Place, Rvalue, StatementKind,
                  TerminatorKind, Operand};
