@@ -1,7 +1,10 @@
 #![feature(box_syntax)]
+#![feature(libc)]
+#![feature(in_band_lifetimes)]
 #![feature(optin_builtin_traits)]
 #![allow(unused_variables)]
-extern crate rustc;
+
+#[macro_use] extern crate rustc;
 extern crate rustc_allocator;
 extern crate rustc_mir;
 extern crate rustc_target;
@@ -11,6 +14,8 @@ extern crate rustc_codegen_ssa;
 extern crate rustc_codegen_utils;
 extern crate syntax_pos;
 extern crate rustc_errors as errors;
+extern crate libc;
+extern crate syntax;
 
 mod metadata;
 
@@ -47,9 +52,19 @@ mod back {
     pub mod write;
 }
 
+mod abi;
+mod asm;
 mod base;
-mod value;
+mod basic_block;
+mod builder;
+mod consts;
 mod context;
+mod debuginfo;
+mod declare;
+mod intrinsic;
+mod ironox_type;
+mod mono_item;
+mod value;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -111,6 +126,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 pub struct ModuleIronOx {
     asm: String
 }
+
 pub struct ModuleBufferIronOx {}
 
 impl ModuleBufferMethods for ModuleBufferIronOx {
@@ -188,24 +204,29 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         config: &ModuleConfig,
         timeline: &mut Timeline
     ) -> Result<CompiledModule, FatalError> {
-        let object = cgcx.output_filenames
-            .temp_path(OutputType::Object, Some(&module.name));
-        let filename = object.to_str().unwrap().to_string();
-        eprintln!("Compiling {:?}", object);
-        let mut cmd = Command::new("as").arg("-o").arg(filename)
-            .stdin(Stdio::piped()).spawn().expect("failed to run as");
-        {
-            let stdin = cmd.stdin.as_mut().expect("failed to open stdin");
-            stdin.write_all(module.module_llvm.asm.as_bytes())
-                .expect("failed to write to stdin");
+        // XXX fix this
+        if true || config.no_integrated_as {
+            let object = cgcx.output_filenames
+                .temp_path(OutputType::Object, Some(&module.name));
+            let filename = object.to_str().unwrap().to_string();
+            eprintln!("Compiling {:?}", object);
+            let mut cmd = Command::new("as").arg("-o").arg(filename)
+                .stdin(Stdio::piped()).spawn().expect("failed to run as");
+            {
+                let stdin = cmd.stdin.as_mut().expect("failed to open stdin");
+                stdin.write_all(module.module_llvm.asm.as_bytes())
+                    .expect("failed to write to stdin");
+            }
+            Ok(CompiledModule {
+                name: module.name.clone(),
+                kind: module.kind,
+                object: Some(object),
+                bytecode: None,
+                bytecode_compressed: None,
+            })
+        } else {
+            unimplemented!("ironox does not have an integrated assembler!");
         }
-        Ok(CompiledModule {
-            name: module.name.clone(),
-            kind: module.kind,
-            object: Some(object),
-            bytecode: None,
-            bytecode_compressed: None,
-        })
     }
 
     fn run_lto_pass_manager(
