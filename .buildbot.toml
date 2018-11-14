@@ -1,0 +1,4 @@
+# Config file for continuous integration.
+
+[rust]
+codegen-backends = ["ironox"]
