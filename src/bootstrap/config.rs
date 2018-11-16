@@ -183,6 +183,7 @@ struct TomlConfig {
     rust: Option<Rust>,
     target: Option<HashMap<String, TomlTarget>>,
     dist: Option<Dist>,
+    ironox: Option<IronOx>
 }
 
 /// TOML representation of various global build decisions.
@@ -256,6 +257,12 @@ struct Llvm {
     clang_cl: Option<String>,
     use_libcxx: Option<bool>,
 }
+
+/// TOML representation of how the ironox build is configured.
+/// FIXME: not yet implemented
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct IronOx { }
 
 #[derive(Deserialize, Default, Clone)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
@@ -605,6 +612,10 @@ impl Config {
             config.dist_upload_addr = t.upload_addr.clone();
             set(&mut config.rust_dist_src, t.src_tarball);
             set(&mut config.missing_tools, t.missing_tools);
+        }
+
+        if let Some(ref _t) = toml.ironox {
+            // nothing for now
         }
 
         // Now that we've reached the end of our configuration, infer the
