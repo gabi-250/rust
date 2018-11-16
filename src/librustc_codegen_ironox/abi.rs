@@ -11,23 +11,24 @@ use rustc_target::abi::call::*;
 use rustc_target::abi::LayoutOf;
 use rustc_target::spec::abi::Abi;
 
-impl AbiBuilderMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, &'ll Value> {
+impl AbiBuilderMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, Value> {
     fn apply_attrs_callsite(
         &mut self,
         ty: &FnType<'tcx, Ty<'tcx>>,
         callsite: <Self::CodegenCx as Backend<'ll>>::Value
     ) {
+        // XXX Do nothing for now
         //ty.apply_attrs_callsite(self, callsite)
-        unimplemented!("apply_attrs_callsite");
+        //unimplemented!("apply_attrs_callsite");
     }
 }
 
-impl<'a, 'll: 'a, 'tcx: 'll> ArgTypeMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, &'ll Value> {
+impl<'a, 'll: 'a, 'tcx: 'll> ArgTypeMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, Value> {
     fn store_fn_arg(
         &mut self,
         ty: &ArgType<'tcx, Ty<'tcx>>,
         idx: &mut usize,
-        dst: PlaceRef<'tcx, &'ll Value>
+        dst: PlaceRef<'tcx, Value>
     ) {
         unimplemented!("store_fn_arg");
     }
@@ -35,8 +36,8 @@ impl<'a, 'll: 'a, 'tcx: 'll> ArgTypeMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 
     fn store_arg_ty(
         &mut self,
         ty: &ArgType<'tcx, Ty<'tcx>>,
-        val: &'ll Value,
-        dst: PlaceRef<'tcx, &'ll Value>
+        val: Value,
+        dst: PlaceRef<'tcx, Value>
     ) {
         unimplemented!("store_arg_ty");
     }
@@ -46,7 +47,7 @@ impl<'a, 'll: 'a, 'tcx: 'll> ArgTypeMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 
     }
 }
 
-impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
+impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx, Value> {
     fn new_fn_type(&self, sig: ty::FnSig<'tcx>, extra_args: &[Ty<'tcx>])
         -> FnType<'tcx, Ty<'tcx>> {
         use self::Abi::*;
@@ -62,10 +63,12 @@ impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
             _ => unimplemented!("Unknown calling convention")
         };
         // return the FnType
-        //
         FnType {
             ret: ArgType::new(self.layout_of(sig.output())),
-            args: vec![], //sig.inputs().iter().collect(),
+            // XXX
+            args: sig.inputs().iter().chain(extra_args).enumerate().map(|(i, ty)| {
+                ArgType::new(self.layout_of(ty))
+            }).collect(),
             variadic: sig.variadic,
             conv
         }

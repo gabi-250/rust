@@ -8,28 +8,28 @@ use rustc_codegen_ssa::mir::operand::OperandRef;
 use rustc_target::abi::call::FnType;
 use syntax_pos::Span;
 
-impl IntrinsicCallMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, &'ll Value> {
+impl IntrinsicCallMethods<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, Value> {
     fn codegen_intrinsic_call(
         &mut self,
         callee_ty: Ty<'tcx>,
         fn_ty: &FnType<'tcx, Ty<'tcx>>,
-        args: &[OperandRef<'tcx, &'ll Value>],
-        llresult: &'ll Value,
+        args: &[OperandRef<'tcx, Value>],
+        llresult: Value,
         span: Span,
     ) {
         unimplemented!("codegen_intrinsic_call");
     }
 }
 
-impl IntrinsicDeclarationMethods<'b> for CodegenCx<'b, 'tcx, &'b Value> {
-    fn get_intrinsic(&self, key: &str) -> &'b Value {
+impl IntrinsicDeclarationMethods<'b> for CodegenCx<'b, 'tcx, Value> {
+    fn get_intrinsic(&self, key: &str) -> Value {
         unimplemented!("get_intrinsic");
     }
 
     fn declare_intrinsic(
         &self,
         key: &str
-    ) -> Option<&'b Value> {
+    ) -> Option<Value> {
         unimplemented!("declare_intrinsic");
     }
 }

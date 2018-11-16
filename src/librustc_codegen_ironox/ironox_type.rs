@@ -5,25 +5,26 @@ use rustc_codegen_ssa::interfaces::{CodegenObject, BaseTypeMethods, LayoutTypeMe
     DerivedTypeMethods, TypeMethods};
 use rustc_codegen_ssa::common::TypeKind;
 use rustc::util::nodemap::FxHashMap;
-use rustc::ty::{layout, Ty, TyCtxt};
+use rustc::ty::{self, layout, Ty, TyCtxt};
 use rustc::ty::layout::TyLayout;
 use std::cell::RefCell;
+use rustc_target::abi::LayoutOf;
 use rustc_target::abi::call::{CastTarget, FnType, Reg};
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub struct Type {
-    size: u64
+    pub size: u64,
 }
 
 impl<'ll> CodegenObject for &'ll Type {}
 
 impl<'a, 'll: 'a, 'tcx: 'll> TypeMethods<'a, 'll, 'tcx> for
-    CodegenCx<'ll, 'tcx, &'ll Value> {}
+    CodegenCx<'ll, 'tcx, Value> {}
 
 impl<'a, 'll: 'a, 'tcx: 'll> DerivedTypeMethods<'a, 'll, 'tcx> for
-    CodegenCx<'ll, 'tcx, &'ll Value> {}
+    CodegenCx<'ll, 'tcx, Value> {}
 
-impl BaseTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
+impl BaseTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, Value> {
     fn type_void(&self) -> &'ll Type {
         unimplemented!("type_void");
     }
@@ -33,13 +34,14 @@ impl BaseTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
     }
 
     fn type_i1(&self) -> &'ll Type {
-        unimplemented!("type_i1");
+        // XXX return the real type
+        &Type{ size: 0 }
     }
 
     fn type_i8(&self) -> &'ll Type {
-        unimplemented!("type_i8");
+        // XXX return the real type
+        &Type{ size: 0 }
     }
-
 
     fn type_i16(&self) -> &'ll Type {
         unimplemented!("type_i16");
@@ -122,7 +124,8 @@ impl BaseTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
     }
 
     fn type_ptr_to(&self, ty: &'ll Type) -> &'ll Type {
-        unimplemented!("type_ptr_to");
+        &Type{ size: 0 }
+        //unimplemented!("type_ptr_to");
     }
 
     fn element_type(&self, ty: &'ll Type) -> &'ll Type {
@@ -145,8 +148,9 @@ impl BaseTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
         unimplemented!("int_width");
     }
 
-    fn val_ty(&self, v: &'ll Value) -> &'ll Type {
-        unimplemented!("val_ty");
+    fn val_ty(&self, v: Value) -> &'ll Type {
+        // XXX return the real type
+        &Type{ size: 0 }
     }
 
     fn scalar_lltypes(&self) -> &RefCell<FxHashMap<Ty<'tcx>, Self::Type>> {
@@ -159,12 +163,26 @@ impl BaseTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
 
 }
 
-impl LayoutTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
+impl LayoutTypeMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, Value> {
     fn backend_type(&self, ty: &TyLayout<'tcx>) -> &'ll Type {
-        unimplemented!("backend_type");
+        let ironox_ty = match ty.ty.sty {
+            ty::Ref(_, ty, _) |
+            ty::RawPtr(ty::TypeAndMut { ty, .. }) => {
+                self.type_ptr_to(self.backend_type(&self.layout_of(ty)))
+            }
+            ty::Adt(def, _) if def.is_box() => {
+                &Type { size: 8 }
+            }
+            ty::FnPtr(sig) => {
+                &Type { size: 8 }
+            }
+            _ => &Type { size: 0 }
+        };
+        ironox_ty
     }
     fn immediate_backend_type(&self, ty: &TyLayout<'tcx>) -> &'ll Type {
-        unimplemented!("immediate_backend_type");
+        // XXX return the real type
+        &Type{ size: 0 }
     }
     fn is_backend_immediate(&self, ty: &TyLayout<'tcx>) -> bool {
         match ty.abi {

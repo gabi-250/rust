@@ -6,35 +6,36 @@ use rustc_codegen_ssa::interfaces::*;
 use rustc::hir::def_id::DefId;
 use rustc::ty::layout::Align;
 
-
-impl StaticMethods<'ll> for CodegenCx<'ll, 'tcx, &'ll Value> {
-    fn static_ptrcast(&self, val: &'ll Value, ty: &'ll Type) -> &'ll Value {
-        unimplemented!("");
+impl StaticMethods<'ll> for CodegenCx<'ll, 'tcx, Value> {
+    fn static_ptrcast(&self, val: Value, ty: &'ll Type) -> Value {
+        // XXX
+        val
     }
 
-    fn static_bitcast(&self, val: &'ll Value, ty: &'ll Type) -> &'ll Value {
+    fn static_bitcast(&self, val: Value, ty: &'ll Type) -> Value {
         unimplemented!("");
     }
 
     fn static_addr_of_mut(
         &self,
-        cv: &'ll Value,
+        cv: Value,
         align: Align,
         kind: Option<&str>,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("");
     }
 
     fn static_addr_of(
         &self,
-        cv: &'ll Value,
+        cv: Value,
         align: Align,
         kind: Option<&str>,
-    ) -> &'ll Value {
-        unimplemented!("");
+    ) -> Value {
+        // XXX implement this
+        Value::Local(112, 112)
     }
 
-    fn get_static(&self, def_id: DefId) -> &'ll Value {
+    fn get_static(&self, def_id: DefId) -> Value {
         unimplemented!("");
     }
 
@@ -46,7 +47,7 @@ impl StaticMethods<'ll> for CodegenCx<'ll, 'tcx, &'ll Value> {
         unimplemented!("");
     }
 
-    fn static_replace_all_uses(&self, old_g: &'ll Value, new_g: &'ll Value) {
+    fn static_replace_all_uses(&self, old_g: Value, new_g: Value) {
         unimplemented!("");
     }
 }

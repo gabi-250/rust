@@ -9,12 +9,12 @@ pub use rustc::mir::mono::MonoItem;
 
 pub use rustc_mir::monomorphize::item::MonoItemExt as BaseMonoItemExt;
 
-impl<'ll, 'tcx: 'll> PreDefineMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
+impl<'ll, 'tcx: 'll> PreDefineMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, Value> {
     fn predefine_static(&self,
-                                  def_id: DefId,
-                                  linkage: Linkage,
-                                  visibility: Visibility,
-                                  symbol_name: &str) {
+                        def_id: DefId,
+                        linkage: Linkage,
+                        visibility: Visibility,
+                        symbol_name: &str) {
         unimplemented!("predefine_static");
     }
 
@@ -23,9 +23,10 @@ impl<'ll, 'tcx: 'll> PreDefineMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll V
                     linkage: Linkage,
                     visibility: Visibility,
                     symbol_name: &str) {
-
-        // insert an empty value for now
-        self.instances.borrow_mut().insert(instance, &Value {});
-        //unimplemented!("predefine_fn");
+        let mono_ty = instance.ty(self.tcx);
+        eprintln!("\nInstance {:?}\n", instance);
+        eprintln!("fn ty is {:?} {:?}", instance, mono_ty);
+        let fn_decl = self.declare_fn(symbol_name, mono_ty);
+        self.instances.borrow_mut().insert(instance, fn_decl);
     }
 }

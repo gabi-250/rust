@@ -61,10 +61,14 @@ mod consts;
 mod context;
 mod debuginfo;
 mod declare;
+mod function;
 mod intrinsic;
 mod ironox_type;
 mod mono_item;
 mod value;
+
+use value::Value;
+use function::IronOxFunction;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -85,7 +89,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 
     fn new_metadata(&self, sess: &Session, mod_name: &str) -> ModuleIronOx {
-        ModuleIronOx { asm: "".to_string() }
+        ModuleIronOx::new()
     }
 
     fn write_metadata<'b, 'gcx>(
@@ -98,7 +102,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 
     fn codegen_allocator(&self, tcx: TyCtxt, mods: &ModuleIronOx, kind: AllocatorKind) {
-        // XXX
+        // TODO implement
     }
 
     fn compile_codegen_unit<'ll, 'tcx: 'll>(
@@ -124,7 +128,24 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 }
 
 pub struct ModuleIronOx {
-    asm: String
+    // XXX
+    asm: String,
+    pub functions: Vec<IronOxFunction>,
+}
+
+impl<'ll> ModuleIronOx {
+    pub fn new() -> ModuleIronOx {
+        ModuleIronOx {
+            asm: "".to_string(),
+            functions: vec![],
+        }
+    }
+
+    pub fn add_function(&mut self, name: &str) -> Value {
+        let function = IronOxFunction::new(name);
+        self.functions.push(function);
+        Value::Function(self.functions.len() - 1)
+    }
 }
 
 pub struct ModuleBufferIronOx {}

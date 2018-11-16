@@ -5,12 +5,12 @@ use ironox_type::Type;
 use rustc_codegen_ssa::interfaces::*;
 use value::Value;
 
-impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
+impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, Value> {
 
     fn declare_global(
         &self,
         name: &str, ty: &'ll Type
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("declare_global");
     }
 
@@ -18,7 +18,7 @@ impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
         &self,
         name: &str,
         fn_type: &'ll Type
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("declare_cfn");
     }
 
@@ -26,19 +26,22 @@ impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
         &self,
         name: &str,
         fn_type: Ty<'tcx>,
-    ) -> &'ll Value {
-        unimplemented!("declare_fn");
+    ) -> Value {
+        eprintln!("Added function {}", name);
+        let val = self.module.borrow_mut().add_function(name, fn_type);
+        eprintln!("val is {:?}", val);
+        val
     }
 
     fn define_global(
         &self,
         name: &str,
         ty: &'ll Type
-    ) -> Option<&'ll Value> {
+    ) -> Option<Value> {
         unimplemented!("define_global");
     }
 
-    fn define_private_global(&self, ty: &'ll Type) -> &'ll Value {
+    fn define_private_global(&self, ty: &'ll Type) -> Value {
         unimplemented!("define_private_global");
     }
 
@@ -46,7 +49,7 @@ impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
         &self,
         name: &str,
         fn_type: Ty<'tcx>,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("define_fn");
     }
 
@@ -54,15 +57,15 @@ impl DeclareMethods<'ll, 'tcx> for CodegenCx<'ll, 'tcx, &'ll Value> {
         &self,
         name: &str,
         fn_type: Ty<'tcx>,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("define_internal_fn");
     }
 
-    fn get_declared_value(&self, name: &str) -> Option<&'ll Value> {
-        unimplemented!("get_declared_value");
+    fn get_declared_value(&self, name: &str) -> Option<Value> {
+        self.module.borrow().get_function(name)
     }
 
-    fn get_defined_value(&self, name: &str) -> Option<&'ll Value> {
+    fn get_defined_value(&self, name: &str) -> Option<Value> {
         unimplemented!("get_defined_value");
     }
 }

@@ -1,38 +1,48 @@
 use rustc_codegen_ssa::common::{IntPredicate, RealPredicate, AtomicOrdering,
     OperandBundleDef, SynchronizationScope, AtomicRmwBinOp};
 use rustc_codegen_ssa::MemFlags;
-use context::CodegenCx;
-use value::Value;
 use libc::c_char;
 use rustc::ty::TyCtxt;
 use rustc::ty::layout::{Align, Size};
 //use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_codegen_ssa::interfaces::*;
-use rustc_codegen_ssa::mir::operand::OperandRef;
+use rustc_codegen_ssa::base::to_immediate;
+use rustc_codegen_ssa::mir::operand::{OperandValue, OperandRef};
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use std::borrow::Cow;
 use std::ops::Range;
 use syntax::ast::AsmDialect;
 
 use basic_block::BasicBlock;
+use context::CodegenCx;
+use value::Value;
+use ironox_type::Type;
 
-pub struct Builder<'a, 'll: 'a, 'tcx: 'll, V : 'll> {
+pub struct Builder<'a, 'll: 'a, 'tcx: 'll, V: 'll> {
     pub cx: &'a CodegenCx<'ll, 'tcx, V>,
 }
 
-impl<'a, 'll, 'tcx> HasCodegen<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, &'ll Value> {
-    type CodegenCx = CodegenCx<'ll, 'tcx, &'ll Value>;
+impl<'a, 'll, 'tcx> HasCodegen<'a, 'll, 'tcx> for Builder<'a, 'll, 'tcx, Value> {
+    type CodegenCx = CodegenCx<'ll, 'tcx, Value>;
 }
 
 impl<'a, 'll, 'tcx> BuilderMethods<'a, 'll, 'tcx>
-    for Builder<'a, 'll, 'tcx, &'ll Value> {
+    for Builder<'a, 'll, 'tcx, Value> {
     fn new_block<'b>(
         cx: &'a Self::CodegenCx,
-        llfn: <Self::CodegenCx as Backend<'ll>>::Value,
+        llfn: Value,
         name: &'b str
     )-> Self {
+        let bb = BasicBlock::new(cx, name, llfn);
+        eprintln!("Create a new block in llfn {:?} named {}", llfn, name);
+        eprintln!("Function count {}", cx.module.borrow().functions.len());
         let bx = Builder::with_cx(cx);
-        // add a basic block
+        let (llfn, bb) = match bb {
+            Value::BasicBlock(f, b) => (f, b),
+            _ => bug!("Invalid basic block or function")
+        };
+
+        cx.current_bb.replace(Some(Value::BasicBlock(llfn, bb)));
         bx
     }
 
@@ -51,58 +61,67 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'll, 'tcx>
     fn tcx(&self) -> TyCtxt<'a, 'tcx, 'tcx> {
         self.cx.tcx
     }
-    fn llfn(&self) -> &'ll Value {
-        &Value {}
+    fn llfn(&self) -> Value {
+        // the parent of the current basic block
+        let bb = self.cx.current_bb.borrow().expect("Invalid insertion point");
+        let fn_index = match bb {
+            Value::BasicBlock(fn_index, _) => fn_index,
+            _ => bug!("expected basic block, found {:?}", bb)
+        };
+        Value::Function(fn_index)
     }
-    fn llbb(&self) -> &'ll BasicBlock {
-        &BasicBlock {}
+    fn llbb(&self) -> Value {
+        self.cx.current_bb.borrow().expect("Invalid insertion point")
     }
     fn count_insn(&self, category: &str) {
-        unimplemented!("count_insn(&self, category: &str)");
+        unimplemented!("count_insn");
     }
 
-    fn set_value_name(&mut self, value: <Self::CodegenCx as Backend<'ll>>::Value, name: &str) {
-        unimplemented!("set_value_name(&mut self, value: <Self::CodegenCx as Backend<'ll>>::Value, name: &str)");
+    fn set_value_name(&mut self, value: Value, name: &str) {
+        eprintln!("rename value {:?} to {:?}", value, name);
+        //unimplemented!("set_value_name(&mut self, value: Value, name: &str)");
     }
-    fn position_at_end(&mut self, llbb: <Self::CodegenCx as Backend<'ll>>::BasicBlock) {
-        unimplemented!("position_at_end(&mut self, llbb: <Self::CodegenCx as Backend<'ll>>::BasicBlock)");
+    fn position_at_end(&mut self, llbb: Value) {
+        //unimplemented!("position_at_end(&mut self, llbb: Value)");
     }
-    fn position_at_start(&mut self, llbb: <Self::CodegenCx as Backend<'ll>>::BasicBlock) {
-        unimplemented!("position_at_start(&mut self, llbb: <Self::CodegenCx as Backend<'ll>>::BasicBlock)");
+    fn position_at_start(&mut self, llbb: Value) {
+        //unimplemented!("position_at_start(&mut self, llbb: Value)");
     }
     fn ret_void(&mut self) {
         unimplemented!("ret_void(&mut self)");
     }
-    fn ret(&mut self, v: <Self::CodegenCx as Backend<'ll>>::Value) {
-        unimplemented!("ret(&mut self, v: <Self::CodegenCx as Backend<'ll>>::Value)");
+    fn ret(&mut self, v: Value) {
+        eprintln!("return {:?}", v);
+        //unimplemented!("ret(&mut self, v: Value)");
     }
-    fn br(&mut self, dest: <Self::CodegenCx as Backend<'ll>>::BasicBlock) {
-        unimplemented!("br(&mut self, dest: <Self::CodegenCx as Backend<'ll>>::BasicBlock)");
+    fn br(&mut self, dest: Value) {
+        eprintln!("br to {:?}", dest);
+        //unimplemented!("br(&mut self, dest: Value)");
     }
     fn cond_br(
         &mut self,
-        cond: <Self::CodegenCx as Backend<'ll>>::Value,
-        then_llbb: <Self::CodegenCx as Backend<'ll>>::BasicBlock,
-        else_llbb: <Self::CodegenCx as Backend<'ll>>::BasicBlock,
+        cond: Value,
+        then_llbb: Value,
+        else_llbb: Value,
     ) {
         unimplemented!("");
     }
     fn switch(
         &mut self,
-        v: <Self::CodegenCx as Backend<'ll>>::Value,
-        else_llbb: <Self::CodegenCx as Backend<'ll>>::BasicBlock,
+        v: Value,
+        else_llbb: Value,
         num_cases: usize,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn invoke(
         &mut self,
-        llfn: <Self::CodegenCx as Backend<'ll>>::Value,
-        args: &[<Self::CodegenCx as Backend<'ll>>::Value],
-        then: <Self::CodegenCx as Backend<'ll>>::BasicBlock,
-        catch: <Self::CodegenCx as Backend<'ll>>::BasicBlock,
-        bundle: Option<&OperandBundleDef<'ll, <Self::CodegenCx as Backend<'ll>>::Value>>
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        llfn: Value,
+        args: &[Value],
+        then: Value,
+        catch: Value,
+        bundle: Option<&OperandBundleDef<'ll, Value>>
+    )-> Value {
         unimplemented!("");
     }
     fn unreachable(&mut self) {
@@ -110,272 +129,283 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'll, 'tcx>
     }
     fn add(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fadd(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fadd_fast(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn sub(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fsub(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fsub_fast(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn mul(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fmul(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fmul_fast(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn udiv(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn exactudiv(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn sdiv(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn exactsdiv(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fdiv(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fdiv_fast(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn urem(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn srem(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn frem(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn frem_fast(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn shl(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn lshr(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn ashr(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn and(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn or(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn xor(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn neg(
         &mut self,
-        v: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        v: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fneg(
         &mut self,
-        v: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        v: Value
+    )-> Value {
         unimplemented!("");
     }
     fn not(
         &mut self,
-        v: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        v: Value
+    )-> Value {
         unimplemented!("");
     }
 
     fn alloca(
         &mut self,
-        ty: <Self::CodegenCx as Backend<'ll>>::Type,
+        ty: &'ll Type,
         name: &str, align: Align
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
-        unimplemented!("");
+    )-> Value {
+        let (cur_fn, cur_bb)  = match *self.cx.current_bb.borrow() {
+            Some(Value::BasicBlock(f, bb)) => (f, bb),
+            _ => bug!("Invalid insertion point")
+        };
+        let mut module = self.cx.module.borrow_mut();
+        let local_idx = module.functions[cur_fn].alloca(ty, name, align);
+        Value::Local(cur_fn, local_idx)
     }
     fn dynamic_alloca(
         &mut self,
-        ty: <Self::CodegenCx as Backend<'ll>>::Type,
+        ty: &'ll Type,
         name: &str, align: Align
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn array_alloca(
         &mut self,
-        ty: <Self::CodegenCx as Backend<'ll>>::Type,
-        len: <Self::CodegenCx as Backend<'ll>>::Value,
+        ty: &'ll Type,
+        len: Value,
         name: &str,
         align: Align
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
 
     fn load(
         &mut self,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
+        ptr: Value,
         align: Align
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn volatile_load(
         &mut self,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        ptr: Value
+    )-> Value {
         unimplemented!("");
     }
     fn atomic_load(
         &mut self,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
+        ptr: Value,
         order: AtomicOrdering, align: Align
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn load_ref(
         &mut self,
-        ptr: &PlaceRef<'tcx,<Self::CodegenCx as Backend<'ll>>::Value>
-    )-> OperandRef<'tcx, <Self::CodegenCx as Backend<'ll>>::Value> {
-        unimplemented!("");
+        ptr: &PlaceRef<'tcx,Value>
+    )-> OperandRef<'tcx, Value> {
+        // XXX
+        eprintln!("load ref {:?}", ptr);
+        OperandRef {
+            val: OperandValue::Immediate(to_immediate(self, ptr.llval, ptr.layout)),
+            layout: ptr.layout
+        }
     }
 
     fn range_metadata(
         &mut self,
-        load: <Self::CodegenCx as Backend<'ll>>::Value,
+        load: Value,
         range: Range<u128>
     ) {
         unimplemented!("");
     }
-    fn nonnull_metadata(&mut self, load: <Self::CodegenCx as Backend<'ll>>::Value) {
+    fn nonnull_metadata(&mut self, load: Value) {
         unimplemented!("");
     }
 
     fn store(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
+        val: Value,
+        ptr: Value,
         align: Align
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn atomic_store(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
+        val: Value,
+        ptr: Value,
         order: AtomicOrdering,
         align: Align
     ) {
@@ -383,415 +413,420 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'll, 'tcx>
     }
     fn store_with_flags(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
+        val: Value,
+        ptr: Value,
         align: Align,
         flags: MemFlags,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
-        unimplemented!("");
+    )-> Value {
+        eprintln!("Store {:?} in {:?}", val, ptr);
+        ptr
     }
 
     fn gep(
         &mut self,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
-        indices: &[<Self::CodegenCx as Backend<'ll>>::Value]
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        ptr: Value,
+        indices: &[Value]
+    )-> Value {
         unimplemented!("");
     }
     fn inbounds_gep(
         &mut self,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
-        indices: &[<Self::CodegenCx as Backend<'ll>>::Value]
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        ptr: Value,
+        indices: &[Value]
+    )-> Value {
         unimplemented!("");
     }
     fn struct_gep(
         &mut self,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
+        ptr: Value,
         idx: u64
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
 
     fn trunc(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn sext(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn fptoui(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn fptosi(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn uitofp(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn sitofp(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn fptrunc(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn fpext(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn ptrtoint(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn inttoptr(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn bitcast(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn intcast(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type, is_signed: bool
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        dest_ty: &'ll Type, is_signed: bool
+    )-> Value {
         unimplemented!("");
     }
     fn pointercast(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
-        unimplemented!("");
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
+        eprintln!("pointercast {:?} to {:?}", val, dest_ty);
+        val
+        //unimplemented!("");
     }
 
     fn icmp(
         &mut self,
         op: IntPredicate,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value, rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value, rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn fcmp(
         &mut self,
         op: RealPredicate,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value, rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value, rhs: Value
+    )-> Value {
         unimplemented!("");
     }
 
     fn empty_phi(
         &mut self,
-        ty: <Self::CodegenCx as Backend<'ll>>::Type)-> <Self::CodegenCx as Backend<'ll>>::Value {
+        ty: &'ll Type)-> Value {
         unimplemented!("");
     }
     fn phi(
         &mut self,
-        ty: <Self::CodegenCx as Backend<'ll>>::Type,
-        vals: &[<Self::CodegenCx as Backend<'ll>>::Value],
-        bbs: &[<Self::CodegenCx as Backend<'ll>>::BasicBlock]
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        ty: &'ll Type,
+        vals: &[Value],
+        bbs: &[Value]
+    )-> Value {
         unimplemented!("");
     }
     fn inline_asm_call(
         &mut self,
         asm: *const c_char,
         cons: *const c_char,
-        inputs: &[<Self::CodegenCx as Backend<'ll>>::Value],
-        output: <Self::CodegenCx as Backend<'ll>>::Type,
+        inputs: &[Value],
+        output: &'ll Type,
         volatile: bool,
         alignstack: bool,
         dia: AsmDialect
-    )-> Option<<Self::CodegenCx as Backend<'ll>>::Value> {
+    )-> Option<Value> {
         unimplemented!("");
     }
 
     fn minnum(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn maxnum(
         &mut self,
-        lhs: <Self::CodegenCx as Backend<'ll>>::Value,
-        rhs: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        lhs: Value,
+        rhs: Value
+    )-> Value {
         unimplemented!("");
     }
     fn select(
-        &mut self, cond: <Self::CodegenCx as Backend<'ll>>::Value,
-        then_val: <Self::CodegenCx as Backend<'ll>>::Value,
-        else_val: <Self::CodegenCx as Backend<'ll>>::Value,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        &mut self, cond: Value,
+        then_val: Value,
+        else_val: Value,
+    )-> Value {
         unimplemented!("");
     }
 
     fn va_arg(
         &mut self,
-        list: <Self::CodegenCx as Backend<'ll>>::Value,
-        ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        list: Value,
+        ty: &'ll Type
+    )-> Value {
         unimplemented!("");
     }
     fn extract_element(&mut self,
-        vec: <Self::CodegenCx as Backend<'ll>>::Value,
-        idx: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        vec: Value,
+        idx: Value
+    )-> Value {
         unimplemented!("");
     }
     fn insert_element(
-        &mut self, vec: <Self::CodegenCx as Backend<'ll>>::Value,
-        elt: <Self::CodegenCx as Backend<'ll>>::Value,
-        idx: <Self::CodegenCx as Backend<'ll>>::Value,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        &mut self, vec: Value,
+        elt: Value,
+        idx: Value,
+    )-> Value {
         unimplemented!("");
     }
     fn shuffle_vector(
         &mut self,
-        v1: <Self::CodegenCx as Backend<'ll>>::Value,
-        v2: <Self::CodegenCx as Backend<'ll>>::Value,
-        mask: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        v1: Value,
+        v2: Value,
+        mask: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_splat(
         &mut self,
         num_elts: usize,
-        elt: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        elt: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_fadd_fast(
         &mut self,
-        acc: <Self::CodegenCx as Backend<'ll>>::Value,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        acc: Value,
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_fmul_fast(
         &mut self,
-        acc: <Self::CodegenCx as Backend<'ll>>::Value,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        acc: Value,
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_add(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_mul(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_and(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_or(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_xor(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_fmin(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_fmax(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_fmin_fast(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_fmax_fast(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        src: Value
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_min(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value,
+        src: Value,
         is_signed: bool
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn vector_reduce_max(
         &mut self,
-        src: <Self::CodegenCx as Backend<'ll>>::Value,
+        src: Value,
         is_signed: bool
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn extract_value(
         &mut self,
-        agg_val: <Self::CodegenCx as Backend<'ll>>::Value,
+        agg_val: Value,
         idx: u64
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn insert_value(
         &mut self,
-        agg_val: <Self::CodegenCx as Backend<'ll>>::Value,
-        elt: <Self::CodegenCx as Backend<'ll>>::Value,
+        agg_val: Value,
+        elt: Value,
         idx: u64
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
-        unimplemented!("");
+    )-> Value {
+        eprintln!("Insert {:?} into {:?} at idx {}", agg_val, elt, idx);
+        elt
+        //unimplemented!("");
     }
 
     fn landing_pad(
         &mut self,
-        ty: <Self::CodegenCx as Backend<'ll>>::Type,
-        pers_fn: <Self::CodegenCx as Backend<'ll>>::Value,
+        ty: &'ll Type,
+        pers_fn: Value,
         num_clauses: usize
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn add_clause(
         &mut self,
-        landing_pad: <Self::CodegenCx as Backend<'ll>>::Value,
-        clause: <Self::CodegenCx as Backend<'ll>>::Value
+        landing_pad: Value,
+        clause: Value
     ) {
         unimplemented!("");
     }
     fn set_cleanup(
         &mut self,
-        landing_pad: <Self::CodegenCx as Backend<'ll>>::Value
+        landing_pad: Value
     ) {
         unimplemented!("");
     }
     fn resume(
         &mut self,
-        exn: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        exn: Value
+    )-> Value {
         unimplemented!("");
     }
     fn cleanup_pad(
         &mut self,
-        parent: Option<<Self::CodegenCx as Backend<'ll>>::Value>,
-        args: &[<Self::CodegenCx as Backend<'ll>>::Value]
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        parent: Option<Value>,
+        args: &[Value]
+    )-> Value {
         unimplemented!("");
     }
     fn cleanup_ret(
-        &mut self, cleanup: <Self::CodegenCx as Backend<'ll>>::Value,
-        unwind: Option<<Self::CodegenCx as Backend<'ll>>::BasicBlock>,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        &mut self, cleanup: Value,
+        unwind: Option<Value>,
+    )-> Value {
         unimplemented!("");
     }
     fn catch_pad(
         &mut self,
-        parent: <Self::CodegenCx as Backend<'ll>>::Value,
-        args: &[<Self::CodegenCx as Backend<'ll>>::Value]
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        parent: Value,
+        args: &[Value]
+    )-> Value {
         unimplemented!("");
     }
     fn catch_ret(
         &mut self,
-        pad: <Self::CodegenCx as Backend<'ll>>::Value,
-        unwind: <Self::CodegenCx as Backend<'ll>>::BasicBlock
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        pad: Value,
+        unwind: Value
+    )-> Value {
         unimplemented!("");
     }
     fn catch_switch(
         &mut self,
-        parent: Option<<Self::CodegenCx as Backend<'ll>>::Value>,
-        unwind: Option<<Self::CodegenCx as Backend<'ll>>::BasicBlock>,
+        parent: Option<Value>,
+        unwind: Option<Value>,
         num_handlers: usize,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn add_handler(
         &mut self,
-        catch_switch: <Self::CodegenCx as Backend<'ll>>::Value,
-        handler: <Self::CodegenCx as Backend<'ll>>::BasicBlock
+        catch_switch: Value,
+        handler: Value
     ) {
         unimplemented!("");
     }
-    fn set_personality_fn(&mut self, personality: <Self::CodegenCx as Backend<'ll>>::Value) {
+    fn set_personality_fn(&mut self, personality: Value) {
         unimplemented!("");
     }
 
     fn atomic_cmpxchg(
         &mut self,
-        dst: <Self::CodegenCx as Backend<'ll>>::Value,
-        cmp: <Self::CodegenCx as Backend<'ll>>::Value,
-        src: <Self::CodegenCx as Backend<'ll>>::Value,
+        dst: Value,
+        cmp: Value,
+        src: Value,
         order: AtomicOrdering,
         failure_order: AtomicOrdering,
         weak: bool,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn atomic_rmw(
         &mut self,
         op: AtomicRmwBinOp,
-        dst: <Self::CodegenCx as Backend<'ll>>::Value,
-        src: <Self::CodegenCx as Backend<'ll>>::Value,
+        dst: Value,
+        src: Value,
         order: AtomicOrdering,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
     fn atomic_fence(&mut self, order: AtomicOrdering, scope: SynchronizationScope) {
@@ -799,30 +834,30 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'll, 'tcx>
     }
     fn add_case(
         &mut self,
-        s: <Self::CodegenCx as Backend<'ll>>::Value,
-        on_val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest: <Self::CodegenCx as Backend<'ll>>::BasicBlock
+        s: Value,
+        on_val: Value,
+        dest: Value
     ) {
         unimplemented!("");
     }
     fn add_incoming_to_phi(
         &mut self,
-        phi: <Self::CodegenCx as Backend<'ll>>::Value,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        bb: <Self::CodegenCx as Backend<'ll>>::BasicBlock
+        phi: Value,
+        val: Value,
+        bb: Value
     ) {
         unimplemented!("");
     }
-    fn set_invariant_load(&mut self, load: <Self::CodegenCx as Backend<'ll>>::Value) {
+    fn set_invariant_load(&mut self, load: Value) {
         unimplemented!("");
     }
 
     /// Returns the ptr value that should be used for storing `val`.
     fn check_store(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+        val: Value,
+        ptr: Value
+    )-> Value {
         unimplemented!("");
     }
 
@@ -830,50 +865,52 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'll, 'tcx>
     fn check_call<'b>(
         &mut self,
         typ: &str,
-        llfn: <Self::CodegenCx as Backend<'ll>>::Value,
-        args: &'b [<Self::CodegenCx as Backend<'ll>>::Value]
-    ) -> Cow<'b, [<Self::CodegenCx as Backend<'ll>>::Value]>
-        where [<Self::CodegenCx as Backend<'ll>>::Value] : ToOwned {
+        llfn: Value,
+        args: &'b [Value]
+    ) -> Cow<'b, [Value]>
+        where [Value] : ToOwned {
         unimplemented!("");
     }
 
-    fn lifetime_start(&mut self, ptr: <Self::CodegenCx as Backend<'ll>>::Value, size: Size) {
-        unimplemented!("");
+    fn lifetime_start(&mut self, ptr: Value, size: Size) {
+        //unimplemented!("");
     }
-    fn lifetime_end(&mut self, ptr: <Self::CodegenCx as Backend<'ll>>::Value, size: Size) {
-        unimplemented!("");
+    fn lifetime_end(&mut self, ptr: Value, size: Size) {
+        //unimplemented!("lifetime_end");
     }
 
-    /// If LLVM lifetime intrinsic support is enabled (i.e. optimizations
-    /// on), and `ptr` is nonzero-sized, then extracts the size of `ptr`
-    /// and the intrinsic for `lt` and passes them to `emit`, which is in
-    /// charge of generating code to call the passed intrinsic on whatever
-    /// block of generated code is targeted for the intrinsic.
-    ///
-    /// If LLVM lifetime intrinsic support is disabled (i.e.  optimizations
-    /// off) or `ptr` is zero-sized, then no-op (does not call `emit`).
     fn call_lifetime_intrinsic(
         &mut self,
         intrinsic: &str,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value, size: Size
+        ptr: Value, size: Size
     ) {
         unimplemented!("");
     }
 
     fn call(
         &mut self,
-        llfn: <Self::CodegenCx as Backend<'ll>>::Value,
-        args: &[<Self::CodegenCx as Backend<'ll>>::Value],
-        bundle: Option<&OperandBundleDef<'ll, <Self::CodegenCx as Backend<'ll>>::Value>>
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
-        unimplemented!("");
+        llfn: Value,
+        args: &[Value],
+        bundle: Option<&OperandBundleDef<'ll, Value>>
+    )-> Value {
+        eprintln!("call to {:?} with args {:?}", llfn, args);
+        let (cur_fn, cur_bb)  = match *self.cx.current_bb.borrow() {
+            Some(Value::BasicBlock(f, bb)) => (f, bb),
+            _ => bug!("Invalid insertion point")
+        };
+        let module = self.cx.module.borrow_mut();
+        // XXX store the function return type in IronOxFunction
+        //
+        //
+        //unimplemented!("Call");
+        Value::Local(222, 222)
     }
 
     fn call_memcpy(
         &mut self,
-        dst: <Self::CodegenCx as Backend<'ll>>::Value,
-        src: <Self::CodegenCx as Backend<'ll>>::Value,
-        n_bytes: <Self::CodegenCx as Backend<'ll>>::Value,
+        dst: Value,
+        src: Value,
+        n_bytes: Value,
         align: Align,
         flags: MemFlags,
     ) {
@@ -882,27 +919,34 @@ impl<'a, 'll, 'tcx> BuilderMethods<'a, 'll, 'tcx>
 
     fn call_memset(
         &mut self,
-        ptr: <Self::CodegenCx as Backend<'ll>>::Value,
-        fill_byte: <Self::CodegenCx as Backend<'ll>>::Value,
-        size: <Self::CodegenCx as Backend<'ll>>::Value,
-        align: <Self::CodegenCx as Backend<'ll>>::Value,
+        ptr: Value,
+        fill_byte: Value,
+        size: Value,
+        align: Value,
         volatile: bool,
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
+    )-> Value {
         unimplemented!("");
     }
 
     fn zext(
         &mut self,
-        val: <Self::CodegenCx as Backend<'ll>>::Value,
-        dest_ty: <Self::CodegenCx as Backend<'ll>>::Type
-    )-> <Self::CodegenCx as Backend<'ll>>::Value {
-        unimplemented!("");
+        val: Value,
+        dest_ty: &'ll Type
+    )-> Value {
+        eprintln!("zero extend {:?} as type {:?}", val, dest_ty);
+        let (cur_fn, cur_bb)  = match *self.cx.current_bb.borrow() {
+            Some(Value::BasicBlock(f, bb)) => (f, bb),
+            _ => bug!("Invalid insertion point")
+        };
+        let mut module = self.cx.module.borrow_mut();
+        let local_idx = module.functions[cur_fn].zext_local(val, dest_ty);
+        Value::Local(cur_fn, local_idx)
     }
 
-    fn delete_basic_block(&mut self, bb: <Self::CodegenCx as Backend<'ll>>::BasicBlock) {
-        unimplemented!("delete_basic_block(&mut self, bb: <Self::CodegenCx as Backend<'ll>>::BasicBlock)");
+    fn delete_basic_block(&mut self, bb: Value) {
+        unimplemented!("delete_basic_block(&mut self, bb: Value)");
     }
-    fn do_not_inline(&mut self, llret: <Self::CodegenCx as Backend<'ll>>::Value) {
-        unimplemented!("do_not_inline(&mut self, llret: <Self::CodegenCx as Backend<'ll>>::Value)");
+    fn do_not_inline(&mut self, llret: Value) {
+        unimplemented!("do_not_inline(&mut self, llret: Value)");
     }
 }
