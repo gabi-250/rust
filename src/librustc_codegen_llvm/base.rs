@@ -29,8 +29,9 @@ use rustc_codegen_ssa::base::maybe_create_entry_wrapper;
 use super::LlvmCodegenBackend;
 
 use llvm;
+use metadata;
 use rustc::mir::mono::{Linkage, Visibility, Stats};
-use rustc::middle::cstore::{self, EncodedMetadata};
+use rustc::middle::cstore::{EncodedMetadata};
 use rustc::ty::TyCtxt;
 use rustc::middle::exported_symbols;
 use rustc::session::config::{self, DebugInfo};
@@ -105,7 +106,7 @@ pub fn write_metadata<'a, 'gcx>(
     };
     unsafe {
         llvm::LLVMSetInitializer(llglobal, llconst);
-        let section_name = cstore::metadata_section_name(&tcx.sess.target.target);
+        let section_name = metadata::metadata_section_name(&tcx.sess.target.target);
         let name = SmallCStr::new(section_name);
         llvm::LLVMSetSection(llglobal, name.as_ptr());
 

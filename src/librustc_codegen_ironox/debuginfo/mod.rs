@@ -4,13 +4,14 @@ use value::Value;
 
 use rustc::hir::def_id::CrateNum;
 use rustc::mir;
+use rustc::session::config::DebugInfo;
 use rustc::ty::{self, Ty};
 use rustc_codegen_ssa::debuginfo::{FunctionDebugContext, VariableAccess, MirDebugScope,
     VariableKind};
 use rustc_codegen_ssa::traits::{DebugInfoMethods, DebugInfoBuilderMethods};
 use rustc_data_structures::indexed_vec::IndexVec;
 use rustc_mir::monomorphize::Instance;
-use syntax_pos;
+use syntax_pos::{self, BytePos};
 use syntax::ast;
 
 pub struct DIScope {}
@@ -22,17 +23,21 @@ impl DebugInfoMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         ty: Ty<'tcx>,
         vtable: Self::Value,
     ) {
-        unimplemented!("create_vtable_metadata");
+        // XXX do nothing for now
     }
 
     fn create_function_debug_context(
         &self,
         instance: Instance<'tcx>,
         sig: ty::FnSig<'tcx>,
-        llfn: &'ll Value,
+        llfn: Value,
         mir: &mir::Mir,
-    ) -> FunctionDebugContext<&'ll DIScope> {
-        return FunctionDebugContext::DebugInfoDisabled;
+    ) -> FunctionDebugContext<Self::DIScope> {
+        if self.tcx.sess.opts.debuginfo == DebugInfo::None {
+            return FunctionDebugContext::DebugInfoDisabled;
+        } else {
+            unimplemented!("create_function_debug_context");
+        }
     }
 
     fn create_mir_scopes(
@@ -40,7 +45,17 @@ impl DebugInfoMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         mir: &mir::Mir,
         debug_context: &FunctionDebugContext<&'ll DIScope>,
     ) -> IndexVec<mir::SourceScope, MirDebugScope<&'ll DIScope>> {
-        IndexVec::new()
+        let null_scope = MirDebugScope {
+            scope_metadata: None,
+            file_start_pos: BytePos(0),
+            file_end_pos: BytePos(0)
+        };
+        let scopes = IndexVec::from_elem(null_scope, &mir.source_scopes);
+        if let FunctionDebugContext::DebugInfoDisabled = *debug_context {
+            return scopes;
+        } else {
+            unimplemented!("create_mir_scopes");
+        }
     }
 
     fn extend_scope_to_file(
@@ -70,7 +85,7 @@ impl<'a, 'll: 'a, 'tcx: 'll> DebugInfoBuilderMethods<'tcx>
         variable_name: ast::Name,
         variable_type: Ty<'tcx>,
         scope_metadata: &'ll DIScope,
-        variable_access: VariableAccess<'_, &'ll Value>,
+        variable_access: VariableAccess<'_, Value>,
         variable_kind: VariableKind,
         span: syntax_pos::Span,
     ) {
@@ -83,7 +98,7 @@ impl<'a, 'll: 'a, 'tcx: 'll> DebugInfoBuilderMethods<'tcx>
         scope: Option<&'ll DIScope>,
         span: syntax_pos::Span,
     ) {
-        unimplemented!("set_source_location");
+        //unimplemented!("set_source_location");
     }
 
     fn insert_reference_to_gdb_debug_scripts_section_global(&mut self) {

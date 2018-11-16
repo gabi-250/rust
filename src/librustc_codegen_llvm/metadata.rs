@@ -20,8 +20,9 @@ use std::ptr;
 use std::slice;
 use rustc_fs_util::path2cstr;
 
-pub use rustc::middle::cstore::METADATA_FILENAME;
 pub use rustc_data_structures::sync::MetadataRef;
+
+pub const METADATA_FILENAME: &str = "rust.metadata.bin";
 
 pub struct LlvmMetadataLoader;
 
@@ -92,6 +93,28 @@ fn search_meta_section<'a>(of: &'a ObjectFile,
         }
     }
     Err(format!("metadata not found: '{}'", filename.display()))
+}
+
+pub fn metadata_section_name(target: &Target) -> &'static str {
+    // Historical note:
+    //
+    // When using link.exe it was seen that the section name `.note.rustc`
+    // was getting shortened to `.note.ru`, and according to the PE and COFF
+    // specification:
+    //
+    // > Executable images do not use a string table and do not support
+    // > section names longer than 8 characters
+    //
+    // https://msdn.microsoft.com/en-us/library/windows/hardware/gg463119.aspx
+    //
+    // As a result, we choose a slightly shorter name! As to why
+    // `.note.rustc` works on MinGW, that's another good question...
+
+    if target.options.is_like_osx {
+        "__DATA,.rustc"
+    } else {
+        ".rustc"
+    }
 }
 
 fn read_metadata_section_name(_target: &Target) -> &'static str {

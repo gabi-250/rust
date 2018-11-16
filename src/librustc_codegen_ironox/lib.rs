@@ -25,7 +25,7 @@ use rustc::dep_graph::DepGraph;
 use rustc::middle::cstore::MetadataLoader;
 use rustc::session::{CompileIncomplete, Session};
 use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
-use rustc::ty::{self, TyCtxt};
+use rustc::ty::{self, TyCtxt, PolyFnSig};
 use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
 use rustc_codegen_utils::target_features::{all_known_features, X86_WHITELIST};
@@ -64,11 +64,16 @@ mod consts;
 mod context;
 mod debuginfo;
 mod declare;
+mod function;
 mod intrinsic;
 mod ironox_type;
 mod metadata;
 mod mono_item;
+mod registers;
 mod value;
+
+use value::Value;
+use function::IronOxFunction;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -81,7 +86,7 @@ impl Clone for TargetMachineIronOx {
 
 impl ExtraBackendMethods for IronOxCodegenBackend {
     fn new_metadata(&self, _sess: &Session, _mod_name: &str) -> ModuleIronOx {
-        ModuleIronOx { asm: "".to_string() }
+        ModuleIronOx::new()
     }
 
     fn write_metadata<'b, 'gcx>(
@@ -94,20 +99,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 
     fn codegen_allocator(&self, _tcx: TyCtxt, _mods: &ModuleIronOx, _kind: AllocatorKind) {
-        eprintln!("Codegen allocator");
-        for method in ALLOCATOR_METHODS {
-            eprintln!("Name {:?}", method.name);
-            for ty in method.inputs.iter() {
-                match *ty {
-                    AllocatorTy::Layout => eprintln!("Layout"),
-                    AllocatorTy::Ptr => eprintln!("Ptr"),
-                    AllocatorTy::ResultPtr => eprintln!("ResultPtr"),
-                    AllocatorTy::Unit => eprintln!("Unit"),
-                    AllocatorTy::Usize => eprintln!("Usize"),
-
-                }
-            }
-        }
+        //unimplemented!("codegen_allocator");
     }
 
     fn compile_codegen_unit<'ll, 'tcx: 'll>(
@@ -132,7 +124,16 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 }
 
 pub struct ModuleIronOx {
-    asm: String
+    // XXX
+    asm: String,
+}
+
+impl<'ll> ModuleIronOx {
+    pub fn new() -> ModuleIronOx {
+        ModuleIronOx {
+            asm: "".to_string(),
+        }
+    }
 }
 
 pub struct ModuleBufferIronOx {}
@@ -297,21 +298,6 @@ impl CodegenBackend for IronOxCodegenBackend {
         tcx: TyCtxt<'a, 'tcx, 'tcx>,
         rx: mpsc::Receiver<Box<dyn Any + Send>>,
     ) -> Box<dyn Any> {
-        // Print the MIR
-        for mono_item in collector::collect_crate_mono_items(
-            tcx, collector::MonoItemCollectionMode::Eager).0 {
-            match mono_item {
-                MonoItem::Fn(inst) => {
-                    let def_id = inst.def_id();
-                    eprintln!("Def ID: {:?}", def_id);
-                    let mir = tcx.instance_mir(inst.def);
-                    for bb in mir.basic_blocks() {
-                        eprintln!("Statements: {:?}", bb.statements);
-                    }
-                }
-                _ => {}
-            }
-        }
         box rustc_codegen_ssa::base::codegen_crate(IronOxCodegenBackend(()), tcx, rx)
     }
 

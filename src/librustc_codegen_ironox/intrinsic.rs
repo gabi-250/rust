@@ -13,8 +13,8 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         callee_ty: Ty<'tcx>,
         fn_ty: &FnType<'tcx, Ty<'tcx>>,
-        args: &[OperandRef<'tcx, &'ll Value>],
-        llresult: &'ll Value,
+        args: &[OperandRef<'tcx, Value>],
+        llresult: Value,
         span: Span,
     ) {
         unimplemented!("codegen_intrinsic_call");
@@ -22,14 +22,14 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 }
 
 impl IntrinsicDeclarationMethods<'tcx> for CodegenCx<'b, 'tcx> {
-    fn get_intrinsic(&self, key: &str) -> &'b Value {
+    fn get_intrinsic(&self, key: &str) -> Value {
         unimplemented!("get_intrinsic");
     }
 
     fn declare_intrinsic(
         &self,
         key: &str
-    ) -> Option<&'b Value> {
+    ) -> Option<Value> {
         unimplemented!("declare_intrinsic");
     }
 }

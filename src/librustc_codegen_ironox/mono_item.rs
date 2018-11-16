@@ -23,9 +23,13 @@ impl PreDefineMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     linkage: Linkage,
                     visibility: Visibility,
                     symbol_name: &str) {
+        let mono_ty = instance.ty(self.tcx);
+        eprintln!("\nInstance {:?}\n", instance);
+        eprintln!("fn ty is {:?} {:?}", instance, mono_ty);
+        let mono_sig = instance.fn_sig(self.tcx);
 
-        // insert an empty value for now
-        self.instances.borrow_mut().insert(instance, &Value {});
-        //unimplemented!("predefine_fn");
+        let attrs = self.tcx.codegen_fn_attrs(instance.def_id());
+        let fn_decl = self.declare_fn(symbol_name, mono_sig);
+        self.instances.borrow_mut().insert(instance, fn_decl);
     }
 }
