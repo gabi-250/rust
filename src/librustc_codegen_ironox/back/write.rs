@@ -9,55 +9,13 @@ use super::super::ModuleIronOx;
 
 use std::collections::HashMap;
 
+use back::registers::GPR;
+
 macro_rules! asm {
     ($m:expr, $($args:expr)*) => {
         $(
             $m.asm.push_str(&format!("{}\n", $args));
         )*
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub enum GPR {
-    RAX,
-    RBX,
-    RCX,
-    RDX,
-    RBP,
-    RSP,
-    RSI,
-    RDI,
-    R8,
-    R9,
-    R10,
-    R11,
-    R12,
-    R13,
-    R14,
-    R15,
-}
-
-impl ToString for GPR {
-    fn to_string(&self) -> String {
-        match self {
-            GPR::RAX => "%rax".to_string(),
-            GPR::RBX => "%rbx".to_string(),
-            GPR::RCX => "%rcx".to_string(),
-            GPR::RDX => "%rdx".to_string(),
-            GPR::RBP => "%rbp".to_string(),
-            GPR::RSP => "%rsp".to_string(),
-            GPR::RSI => "%rsi".to_string(),
-            GPR::RDI => "%rdi".to_string(),
-            GPR::R8 => "%r8".to_string(),
-            GPR::R9 => "%r9".to_string(),
-            GPR::R10 => "%r10".to_string(),
-            GPR::R11 => "%r11".to_string(),
-            GPR::R12 => "%r12".to_string(),
-            GPR::R13 => "%r13".to_string(),
-            GPR::R14 => "%r14".to_string(),
-            GPR::R15 => "%r15".to_string(),
-        }
     }
 }
 
@@ -77,7 +35,6 @@ impl ToString for MachineLocal {
     }
 }
 
-
 pub fn emit_function<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
                                  module: &mut ModuleIronOx,
                                  inst: Instance<'tcx>) {
@@ -88,7 +45,6 @@ pub fn emit_function<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
     );
 
     let mir = tcx.instance_mir(inst.def);
-    eprintln!("Emitting {:?}", mangled_name);
     let mut local_map: HashMap<Local, MachineLocal> = HashMap::new();
 
     // Calculate the size of the stack
@@ -102,10 +58,8 @@ pub fn emit_function<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
                      MachineLocal::RbpOffset(stack_size as isize));
 
     // function arguments:
-
     for (local, decl) in locals.iter_enumerated().skip(1).take(mir.arg_count) {
         let ty = decl.ty;
-        eprintln!("ARG is {:?}\n\t{:?}\n\t{:?}", local, decl, ty.sty);
         let index = local.index();
         if index == 1 {
             local_map.insert(local, MachineLocal::Register(GPR::RDI));
@@ -134,7 +88,6 @@ pub fn emit_function<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
         }
     }
     emit_prologue(module, stack_size);
-    eprintln!("The locals are {:?}", local_map);
 
     for (bb, bb_data) in mir.basic_blocks().iter_enumerated() {
         emit_bb(tcx,
@@ -203,10 +156,9 @@ pub fn emit_bb<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
                 Some(d) => Some(format!("{}_{:?}", mangled_name, d.1)),
                 None => { /* this is a non-terminating call */ None }
             };
-            get_operand(tcx, &f, locals);
-            //let mangled_name = tcx.symbol_name(f).as_str();
-            //asm!(module,
-                 //"call {}", );
+            let op = get_operand(tcx, &f, locals);
+            asm!(module,
+                 format!("call {}", op));
         },
         TerminatorKind::Drop { ref location, target, unwind } => {
             target_bb = Some(format!("{}_{:?}", mangled_name, target));
@@ -263,6 +215,38 @@ pub fn get_place<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
     }
 }
 
+/*
+fn fully_evaluate<'ll, 'tcx>(
+    tcx: TyCtxt <'ll, 'tcx, 'tcx>,
+    constant: &'tcx ty::Const<'tcx>,
+) -> Result<&'tcx ty::Const<'tcx>, Lrc<ConstEvalErr<'tcx>>> {
+    match constant.val {
+        ConstValue::Unevaluated(def_id, ref substs) => {
+            let param_env = ty::ParamEnv::reveal_all();
+            let instance = ty::Instance::resolve(tcx, param_env, def_id, substs).unwrap();
+            let cid = GlobalId {
+                instance,
+                promoted: None,
+            };
+            tcx.const_eval(param_env.and(cid))
+        },
+        _ => Ok(constant),
+    }
+}
+
+pub fn eval_mir_constant<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
+                                     constant: &mir::Constant<'tcx>)
+    -> Result<&'tcx ty::Const<'tcx>, Lrc<ConstEvalErr<'tcx>>> {
+
+        let c = tcx.subst_and_normalize_erasing_regions(
+            self.param_substs, // XXX ???
+            ty::ParamEnv::reveal_all(),
+            constant,
+        )
+        let c = monomorphize(tcx, constant.literal.ty, &constant.literal);
+        fully_evaluate(tcx, &c)
+}*/
+
 pub fn get_operand<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
                                operand: &'tcx Operand,
                                locals: &HashMap<Local, MachineLocal>) -> String {
@@ -271,11 +255,17 @@ pub fn get_operand<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
             get_place(tcx, &place, locals)
         }
         Operand::Constant(ref c) => {
+            // XXX c has type parameters
+            // let c = eval_mir_constant(tcx, c).unwrap();
             match c.literal.ty.sty {
                 ty::FnDef(def_id, substs) => {
-                    let f = tcx.fn_sig(def_id);
-                    eprintln!("f is {:?}", f);
-                    "".to_string()
+                    let fn_name = tcx.def_symbol_name(def_id);
+                    eprintln!("fn name is {:?}", fn_name);
+                    let instance = Instance::mono(tcx, def_id);
+                    eprintln!("{:?}", instance);
+                    let fn_name = tcx.symbol_name(instance);
+                    eprintln!("fn name is {:?}", fn_name);
+                    fn_name.to_string()
                 },
                 _ => {
                     unimplemented!("Cannot call {:?}", c.literal.ty.sty);
@@ -315,8 +305,8 @@ pub fn emit_assign<'ll, 'tcx> (tcx: TyCtxt <'ll, 'tcx, 'tcx>,
     let place = get_place(tcx, place, locals);
     let value = get_rvalue(tcx, value, locals);
     asm!(module,
-         format!("mov {}, %rax", place)
-         format!("mov %rax, {}", value));
+         format!("mov {}, %rax", value)
+         format!("mov %rax, {}", place));
 }
 
 pub fn emit_prologue(module: &mut ModuleIronOx,
