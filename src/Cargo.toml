@@ -5,6 +5,7 @@ members = [
   "libstd",
   "libtest",
   "librustc_codegen_llvm",
+  "librustc_codegen_ironox",
   "tools/cargotest",
   "tools/clippy",
   "tools/compiletest",
