@@ -749,7 +749,7 @@ impl<'tcx> RegionConstraintCollector<'tcx> {
                 a // LUB(a,a) = a
             }
 
-            _ => self.combine_vars(tcx, Lub, a, b, origin.clone()),
+            _ => self.combine_vars(tcx, Lub, a, b, origin),
         }
     }
 
@@ -771,7 +771,7 @@ impl<'tcx> RegionConstraintCollector<'tcx> {
                 a // GLB(a,a) = a
             }
 
-            _ => self.combine_vars(tcx, Glb, a, b, origin.clone()),
+            _ => self.combine_vars(tcx, Glb, a, b, origin),
         }
     }
 
@@ -833,10 +833,6 @@ impl<'tcx> RegionConstraintCollector<'tcx> {
             ty::RePlaceholder(placeholder) => placeholder.universe,
             ty::ReClosureBound(vid) | ty::ReVar(vid) => self.var_universe(vid),
             ty::ReLateBound(..) => bug!("universe(): encountered bound region {:?}", region),
-            ty::ReCanonical(..) => bug!(
-                "region_universe(): encountered canonical region {:?}",
-                region
-            ),
         }
     }
 

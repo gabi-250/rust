@@ -29,7 +29,8 @@ use rustc::hir;
 declare_lint! {
     pub UNUSED_MUST_USE,
     Warn,
-    "unused result of a type flagged as #[must_use]"
+    "unused result of a type flagged as #[must_use]",
+    report_in_external_macro: true
 }
 
 declare_lint! {
@@ -278,14 +279,18 @@ impl UnusedParens {
                                 msg: &str,
                                 followed_by_block: bool) {
         if let ast::ExprKind::Paren(ref inner) = value.node {
-            let necessary = followed_by_block && if let ast::ExprKind::Ret(_) = inner.node {
-                true
-            } else {
-                parser::contains_exterior_struct_lit(&inner)
+            let necessary = followed_by_block && match inner.node {
+                ast::ExprKind::Ret(_) | ast::ExprKind::Break(..) => true,
+                _ => parser::contains_exterior_struct_lit(&inner),
             };
             if !necessary {
-                let pattern = pprust::expr_to_string(value);
-                Self::remove_outer_parens(cx, value.span, &pattern, msg);
+                let expr_text = if let Ok(snippet) = cx.sess().source_map()
+                    .span_to_snippet(value.span) {
+                        snippet
+                    } else {
+                        pprust::expr_to_string(value)
+                    };
+                Self::remove_outer_parens(cx, value.span, &expr_text, msg);
             }
         }
     }
@@ -295,8 +300,13 @@ impl UnusedParens {
                                 value: &ast::Pat,
                                 msg: &str) {
         if let ast::PatKind::Paren(_) = value.node {
-            let pattern = pprust::pat_to_string(value);
-            Self::remove_outer_parens(cx, value.span, &pattern, msg);
+            let pattern_text = if let Ok(snippet) = cx.sess().source_map()
+                .span_to_snippet(value.span) {
+                    snippet
+                } else {
+                    pprust::pat_to_string(value)
+                };
+            Self::remove_outer_parens(cx, value.span, &pattern_text, msg);
         }
     }
 
@@ -386,12 +396,12 @@ impl EarlyLintPass for UnusedParens {
         self.check_unused_parens_expr(cx, &value, msg, followed_by_block);
     }
 
-    fn check_pat(&mut self, cx: &EarlyContext, p: &ast::Pat) {
+    fn check_pat(&mut self, cx: &EarlyContext, p: &ast::Pat, _: &mut bool) {
         use ast::PatKind::{Paren, Range};
         // The lint visitor will visit each subpattern of `p`. We do not want to lint any range
         // pattern no matter where it occurs in the pattern. For something like `&(a..=b)`, there
         // is a recursive `check_pat` on `a` and `b`, but we will assume that if there are
-        // unnecessry parens they serve a purpose of readability.
+        // unnecessary parens they serve a purpose of readability.
         if let Paren(ref pat) = p.node {
             match pat.node {
                 Range(..) => {}

@@ -19,7 +19,7 @@ use rustc::mir::interpret::{
 use rustc::mir::CastKind;
 use rustc_apfloat::Float;
 
-use super::{EvalContext, Machine, PlaceTy, OpTy, Value};
+use super::{EvalContext, Machine, PlaceTy, OpTy, Immediate};
 
 impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> {
     fn type_is_fat_ptr(&self, ty: Ty<'tcx>) -> bool {
@@ -37,8 +37,6 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
         kind: CastKind,
         dest: PlaceTy<'tcx, M::PointerTag>,
     ) -> EvalResult<'tcx> {
-        let src_layout = src.layout;
-        let dst_layout = dest.layout;
         use rustc::mir::CastKind::*;
         match kind {
             Unsize => {
@@ -46,30 +44,33 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
             }
 
             Misc => {
-                let src = self.read_value(src)?;
-                if self.type_is_fat_ptr(src_layout.ty) {
+                let src = self.read_immediate(src)?;
+
+                if self.type_is_fat_ptr(src.layout.ty) {
                     match (*src, self.type_is_fat_ptr(dest.layout.ty)) {
                         // pointers to extern types
-                        (Value::Scalar(_),_) |
+                        (Immediate::Scalar(_),_) |
                         // slices and trait objects to other slices/trait objects
-                        (Value::ScalarPair(..), true) => {
-                            // No change to value
-                            self.write_value(*src, dest)?;
+                        (Immediate::ScalarPair(..), true) => {
+                            // No change to immediate
+                            self.write_immediate(*src, dest)?;
                         }
                         // slices and trait objects to thin pointers (dropping the metadata)
-                        (Value::ScalarPair(data, _), false) => {
+                        (Immediate::ScalarPair(data, _), false) => {
                             self.write_scalar(data, dest)?;
                         }
                     }
                 } else {
-                    match src_layout.variants {
+                    match src.layout.variants {
                         layout::Variants::Single { index } => {
-                            if let Some(def) = src_layout.ty.ty_adt_def() {
+                            if let Some(def) = src.layout.ty.ty_adt_def() {
+                                // Cast from a univariant enum
+                                assert!(src.layout.is_zst());
                                 let discr_val = def
                                     .discriminant_for_variant(*self.tcx, index)
                                     .val;
                                 return self.write_scalar(
-                                    Scalar::from_uint(discr_val, dst_layout.size),
+                                    Scalar::from_uint(discr_val, dest.layout.size),
                                     dest);
                             }
                         }
@@ -77,15 +78,14 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                         layout::Variants::NicheFilling { .. } => {},
                     }
 
-                    let src = src.to_scalar()?;
-                    let dest_val = self.cast_scalar(src, src_layout, dest.layout)?;
+                    let dest_val = self.cast_scalar(src.to_scalar()?, src.layout, dest.layout)?;
                     self.write_scalar(dest_val, dest)?;
                 }
             }
 
             ReifyFnPointer => {
                 // The src operand does not matter, just its type
-                match src_layout.ty.sty {
+                match src.layout.ty.sty {
                     ty::FnDef(def_id, substs) => {
                         if self.tcx.has_attr(def_id, "rustc_args_required_const") {
                             bug!("reifying a fn ptr that requires \
@@ -97,7 +97,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                             def_id,
                             substs,
                         ).ok_or_else(|| EvalErrorKind::TooGeneric.into());
-                        let fn_ptr = self.memory.create_fn_alloc(instance?);
+                        let fn_ptr = self.memory.create_fn_alloc(instance?).with_default_tag();
                         self.write_scalar(Scalar::Ptr(fn_ptr.into()), dest)?;
                     }
                     ref other => bug!("reify fn pointer on {:?}", other),
@@ -105,11 +105,11 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
             }
 
             UnsafeFnPointer => {
-                let src = self.read_value(src)?;
+                let src = self.read_immediate(src)?;
                 match dest.layout.ty.sty {
                     ty::FnPtr(_) => {
                         // No change to value
-                        self.write_value(*src, dest)?;
+                        self.write_immediate(*src, dest)?;
                     }
                     ref other => bug!("fn to unsafe fn cast on {:?}", other),
                 }
@@ -117,7 +117,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
 
             ClosureFnPointer => {
                 // The src operand does not matter, just its type
-                match src_layout.ty.sty {
+                match src.layout.ty.sty {
                     ty::Closure(def_id, substs) => {
                         let substs = self.tcx.subst_and_normalize_erasing_regions(
                             self.substs(),
@@ -130,9 +130,9 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                             substs,
                             ty::ClosureKind::FnOnce,
                         );
-                        let fn_ptr = self.memory.create_fn_alloc(instance);
-                        let val = Value::Scalar(Scalar::Ptr(fn_ptr.into()).into());
-                        self.write_value(val, dest)?;
+                        let fn_ptr = self.memory.create_fn_alloc(instance).with_default_tag();
+                        let val = Immediate::Scalar(Scalar::Ptr(fn_ptr.into()).into());
+                        self.write_immediate(val, dest)?;
                     }
                     ref other => bug!("closure fn pointer on {:?}", other),
                 }
@@ -245,7 +245,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
         match dest_ty.sty {
             // float -> uint
             Uint(t) => {
-                let width = t.bit_width().unwrap_or(self.pointer_size().bits() as usize);
+                let width = t.bit_width().unwrap_or_else(|| self.pointer_size().bits() as usize);
                 let v = match fty {
                     FloatTy::F32 => Single::from_bits(bits).to_u128(width).value,
                     FloatTy::F64 => Double::from_bits(bits).to_u128(width).value,
@@ -255,7 +255,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
             },
             // float -> int
             Int(t) => {
-                let width = t.bit_width().unwrap_or(self.pointer_size().bits() as usize);
+                let width = t.bit_width().unwrap_or_else(|| self.pointer_size().bits() as usize);
                 let v = match fty {
                     FloatTy::F32 => Single::from_bits(bits).to_i128(width).value,
                     FloatTy::F64 => Double::from_bits(bits).to_i128(width).value,
@@ -313,24 +313,28 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
 
         match (&src_pointee_ty.sty, &dest_pointee_ty.sty) {
             (&ty::Array(_, length), &ty::Slice(_)) => {
-                let ptr = self.read_value(src)?.to_scalar_ptr()?;
+                let ptr = self.read_immediate(src)?.to_scalar_ptr()?;
                 // u64 cast is from usize to u64, which is always good
-                let val = Value::new_slice(ptr, length.unwrap_usize(self.tcx.tcx), self.tcx.tcx);
-                self.write_value(val, dest)
+                let val = Immediate::new_slice(
+                    ptr,
+                    length.unwrap_usize(self.tcx.tcx),
+                    self,
+                );
+                self.write_immediate(val, dest)
             }
             (&ty::Dynamic(..), &ty::Dynamic(..)) => {
                 // For now, upcasts are limited to changes in marker
                 // traits, and hence never actually require an actual
                 // change to the vtable.
-                let val = self.read_value(src)?;
-                self.write_value(*val, dest)
+                let val = self.read_immediate(src)?;
+                self.write_immediate(*val, dest)
             }
             (_, &ty::Dynamic(ref data, _)) => {
                 // Initial cast from sized to dyn trait
                 let vtable = self.get_vtable(src_pointee_ty, data.principal())?;
-                let ptr = self.read_value(src)?.to_scalar_ptr()?;
-                let val = Value::new_dyn_trait(ptr, vtable);
-                self.write_value(val, dest)
+                let ptr = self.read_immediate(src)?.to_scalar_ptr()?;
+                let val = Immediate::new_dyn_trait(ptr, vtable);
+                self.write_immediate(val, dest)
             }
 
             _ => bug!("invalid unsizing {:?} -> {:?}", src.layout.ty, dest.layout.ty),
@@ -377,7 +381,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
                             src_field.into()
                         }
                         Err(..) => {
-                            let src_field_layout = src.layout.field(&self, i)?;
+                            let src_field_layout = src.layout.field(self, i)?;
                             // this must be a field covering the entire thing
                             assert_eq!(src.layout.fields.offset(i).bytes(), 0);
                             assert_eq!(src_field_layout.size, src.layout.size);

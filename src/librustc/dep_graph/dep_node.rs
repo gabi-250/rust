@@ -63,7 +63,7 @@
 use mir::interpret::GlobalId;
 use hir::def_id::{CrateNum, DefId, DefIndex, CRATE_DEF_INDEX};
 use hir::map::DefPathHash;
-use hir::{HirId, ItemLocalId};
+use hir::HirId;
 
 use ich::{Fingerprint, StableHashingContext};
 use rustc_data_structures::stable_hasher::{StableHasher, HashStable};
@@ -72,8 +72,9 @@ use std::hash::Hash;
 use syntax_pos::symbol::InternedString;
 use traits;
 use traits::query::{
-    CanonicalProjectionGoal, CanonicalTyGoal, CanonicalTypeOpEqGoal, CanonicalTypeOpSubtypeGoal,
-    CanonicalPredicateGoal, CanonicalTypeOpProvePredicateGoal, CanonicalTypeOpNormalizeGoal,
+    CanonicalProjectionGoal, CanonicalTyGoal, CanonicalTypeOpAscribeUserTypeGoal,
+    CanonicalTypeOpEqGoal, CanonicalTypeOpSubtypeGoal, CanonicalPredicateGoal,
+    CanonicalTypeOpProvePredicateGoal, CanonicalTypeOpNormalizeGoal,
 };
 use ty::{TyCtxt, FnSig, Instance, InstanceDef,
          ParamEnv, ParamEnvAnd, Predicate, PolyFnSig, PolyTraitRef, Ty};
@@ -529,6 +530,7 @@ define_dep_nodes!( <'tcx>
     [] UsedTraitImports(DefId),
     [] HasTypeckTables(DefId),
     [] ConstEval { param_env: ParamEnvAnd<'tcx, GlobalId<'tcx>> },
+    [] ConstEvalRaw { param_env: ParamEnvAnd<'tcx, GlobalId<'tcx>> },
     [] CheckMatch(DefId),
     [] SymbolName(DefId),
     [] InstanceSymbolName { instance: Instance<'tcx> },
@@ -654,6 +656,7 @@ define_dep_nodes!( <'tcx>
     [] ImpliedOutlivesBounds(CanonicalTyGoal<'tcx>),
     [] DropckOutlives(CanonicalTyGoal<'tcx>),
     [] EvaluateObligation(CanonicalPredicateGoal<'tcx>),
+    [] TypeOpAscribeUserType(CanonicalTypeOpAscribeUserTypeGoal<'tcx>),
     [] TypeOpEq(CanonicalTypeOpEqGoal<'tcx>),
     [] TypeOpSubtype(CanonicalTypeOpSubtypeGoal<'tcx>),
     [] TypeOpProvePredicate(CanonicalTypeOpProvePredicateGoal<'tcx>),
@@ -787,11 +790,11 @@ impl<'a, 'gcx: 'tcx + 'a, 'tcx: 'a> DepNodeParams<'a, 'gcx, 'tcx> for HirId {
     fn to_fingerprint(&self, tcx: TyCtxt<'_, '_, '_>) -> Fingerprint {
         let HirId {
             owner,
-            local_id: ItemLocalId(local_id),
+            local_id,
         } = *self;
 
         let def_path_hash = tcx.def_path_hash(DefId::local(owner));
-        let local_id = Fingerprint::from_smaller_hash(local_id as u64);
+        let local_id = Fingerprint::from_smaller_hash(local_id.as_u32().into());
 
         def_path_hash.0.combine(local_id)
     }

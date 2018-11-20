@@ -234,6 +234,12 @@ declare_lint! {
 }
 
 declare_lint! {
+    pub UNCONDITIONAL_RECURSION,
+    Warn,
+    "functions that cannot return without calling themselves"
+}
+
+declare_lint! {
     pub SINGLE_USE_LIFETIMES,
     Allow,
     "detects lifetime parameters that are only used once"
@@ -292,12 +298,6 @@ declare_lint! {
     pub UNUSED_LABELS,
     Allow,
     "detects labels that are never used"
-}
-
-declare_lint! {
-    pub DUPLICATE_ASSOCIATED_TYPE_BINDINGS,
-    Warn,
-    "warns about duplicate associated type bindings in generics"
 }
 
 declare_lint! {
@@ -402,6 +402,7 @@ impl LintPass for HardwiredLints {
             DEPRECATED,
             UNUSED_UNSAFE,
             UNUSED_MUT,
+            UNCONDITIONAL_RECURSION,
             SINGLE_USE_LIFETIMES,
             UNUSED_LIFETIMES,
             UNUSED_LABELS,
@@ -411,7 +412,6 @@ impl LintPass for HardwiredLints {
             ABSOLUTE_PATHS_NOT_STARTING_WITH_CRATE,
             UNSTABLE_NAME_COLLISIONS,
             IRREFUTABLE_LET_PATTERNS,
-            DUPLICATE_ASSOCIATED_TYPE_BINDINGS,
             DUPLICATE_MACRO_EXPORTS,
             INTRA_DOC_LINK_RESOLUTION_FAILURE,
             MISSING_DOC_CODE_EXAMPLES,

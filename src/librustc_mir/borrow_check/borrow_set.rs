@@ -12,14 +12,15 @@ use borrow_check::place_ext::PlaceExt;
 use dataflow::indexes::BorrowIndex;
 use dataflow::move_paths::MoveData;
 use rustc::mir::traversal;
-use rustc::mir::visit::{PlaceContext, Visitor};
+use rustc::mir::visit::{
+    PlaceContext, Visitor, NonUseContext, MutatingUseContext, NonMutatingUseContext
+};
 use rustc::mir::{self, Location, Mir, Place, Local};
 use rustc::ty::{Region, TyCtxt};
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_data_structures::indexed_vec::IndexVec;
 use rustc_data_structures::bit_set::BitSet;
 use std::fmt;
-use std::hash::Hash;
 use std::ops::Index;
 
 crate struct BorrowSet<'tcx> {
@@ -116,7 +117,7 @@ impl LocalsStateAtExit {
 
         impl<'tcx> Visitor<'tcx> for HasStorageDead {
             fn visit_local(&mut self, local: &Local, ctx: PlaceContext<'tcx>, _: Location) {
-                if ctx == PlaceContext::StorageDead {
+                if ctx == PlaceContext::NonUse(NonUseContext::StorageDead) {
                     self.0.insert(*local);
                 }
             }
@@ -231,21 +232,13 @@ impl<'a, 'gcx, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'gcx, 'tcx> {
 
             self.insert_as_pending_if_two_phase(location, &assigned_place, region, kind, idx);
 
-            insert(&mut self.region_map, &region, idx);
+            self.region_map.entry(region).or_default().insert(idx);
             if let Some(local) = borrowed_place.root_local() {
-                insert(&mut self.local_map, &local, idx);
+                self.local_map.entry(local).or_default().insert(idx);
             }
         }
 
-        return self.super_assign(block, assigned_place, rvalue, location);
-
-        fn insert<'a, K, V>(map: &'a mut FxHashMap<K, FxHashSet<V>>, k: &K, v: V)
-        where
-            K: Clone + Eq + Hash,
-            V: Eq + Hash,
-        {
-            map.entry(k.clone()).or_default().insert(v);
-        }
+        self.super_assign(block, assigned_place, rvalue, location)
     }
 
     fn visit_place(
@@ -266,7 +259,9 @@ impl<'a, 'gcx, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'gcx, 'tcx> {
 
                 // Watch out: the use of TMP in the borrow itself
                 // doesn't count as an activation. =)
-                if borrow_data.reserve_location == location && context == PlaceContext::Store {
+                if borrow_data.reserve_location == location &&
+                    context == PlaceContext::MutatingUse(MutatingUseContext::Store)
+                {
                     return;
                 }
 
@@ -287,10 +282,9 @@ impl<'a, 'gcx, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'gcx, 'tcx> {
                 borrow_data.activation_location = match context {
                     // The use of TMP in a shared borrow does not
                     // count as an actual activation.
-                    PlaceContext::Borrow { kind: mir::BorrowKind::Shared, .. }
-                    | PlaceContext::Borrow { kind: mir::BorrowKind::Shallow, .. } => {
-                        TwoPhaseActivation::NotActivated
-                    }
+                    PlaceContext::NonMutatingUse(NonMutatingUseContext::SharedBorrow(..)) |
+                    PlaceContext::NonMutatingUse(NonMutatingUseContext::ShallowBorrow(..)) =>
+                        TwoPhaseActivation::NotActivated,
                     _ => {
                         // Double check: This borrow is indeed a two-phase borrow (that is,
                         // we are 'transitioning' from `NotActivated` to `ActivatedAt`) and

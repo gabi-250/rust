@@ -14,8 +14,9 @@ use hir::def_id::{CrateNum, DefId, DefIndex};
 use mir::interpret::GlobalId;
 use traits;
 use traits::query::{
-    CanonicalPredicateGoal, CanonicalProjectionGoal, CanonicalTyGoal, CanonicalTypeOpEqGoal,
-    CanonicalTypeOpNormalizeGoal, CanonicalTypeOpProvePredicateGoal, CanonicalTypeOpSubtypeGoal,
+    CanonicalPredicateGoal, CanonicalProjectionGoal, CanonicalTyGoal,
+    CanonicalTypeOpAscribeUserTypeGoal, CanonicalTypeOpEqGoal, CanonicalTypeOpNormalizeGoal,
+    CanonicalTypeOpProvePredicateGoal, CanonicalTypeOpSubtypeGoal,
 };
 use ty::{self, ParamEnvAnd, Ty, TyCtxt};
 use ty::subst::Substs;
@@ -112,6 +113,15 @@ impl<'tcx> QueryDescription<'tcx> for queries::normalize_ty_after_erasing_region
 impl<'tcx> QueryDescription<'tcx> for queries::evaluate_obligation<'tcx> {
     fn describe(_tcx: TyCtxt<'_, '_, '_>, goal: CanonicalPredicateGoal<'tcx>) -> Cow<'static, str> {
         format!("evaluating trait selection obligation `{}`", goal.value.value).into()
+    }
+}
+
+impl<'tcx> QueryDescription<'tcx> for queries::type_op_ascribe_user_type<'tcx> {
+    fn describe(
+        _tcx: TyCtxt<'_, '_, '_>,
+        goal: CanonicalTypeOpAscribeUserTypeGoal<'tcx>,
+    ) -> Cow<'static, str> {
+        format!("evaluating `type_op_ascribe_user_type` `{:?}`", goal).into()
     }
 }
 
@@ -286,6 +296,30 @@ impl<'tcx> QueryDescription<'tcx> for queries::reachable_set<'tcx> {
 }
 
 impl<'tcx> QueryDescription<'tcx> for queries::const_eval<'tcx> {
+    fn describe(
+        tcx: TyCtxt<'_, '_, '_>,
+        key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>,
+    ) -> Cow<'static, str> {
+        format!(
+            "const-evaluating + checking `{}`",
+            tcx.item_path_str(key.value.instance.def.def_id()),
+        ).into()
+    }
+
+    #[inline]
+    fn cache_on_disk(_key: Self::Key) -> bool {
+        true
+    }
+
+    #[inline]
+    fn try_load_from_disk<'a>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
+                              id: SerializedDepNodeIndex)
+                              -> Option<Self::Value> {
+        tcx.queries.on_disk_cache.try_load_query_result(tcx, id).map(Ok)
+    }
+}
+
+impl<'tcx> QueryDescription<'tcx> for queries::const_eval_raw<'tcx> {
     fn describe(tcx: TyCtxt<'_, '_, '_>, key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>)
         -> Cow<'static, str>
     {

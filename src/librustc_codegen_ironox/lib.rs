@@ -7,6 +7,7 @@ extern crate rustc_target;
 #[macro_use]
 extern crate rustc_data_structures;
 extern crate rustc_codegen_utils;
+extern crate rustc_codegen_ssa;
 extern crate syntax_pos;
 
 mod metadata;
@@ -27,7 +28,7 @@ use rustc_mir::monomorphize::collector;
 use rustc_mir::monomorphize::item::MonoItem;
 
 mod back {
-    pub use rustc_codegen_utils::symbol_export;
+    pub use rustc_codegen_ssa::back::symbol_export;
     pub use rustc_codegen_utils::symbol_names;
 }
 

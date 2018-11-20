@@ -35,6 +35,7 @@ use std::rc::Rc;
 
 mod dump_mir;
 mod error_reporting;
+crate use self::error_reporting::{RegionName, RegionNameSource};
 mod graphviz;
 pub mod values;
 use self::values::{LivenessValues, RegionValueElements, RegionValues};
@@ -344,6 +345,13 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                     if scc_universe.can_name(placeholder.universe) {
                         self.scc_values.add_element(scc, placeholder);
                     } else {
+                        debug!(
+                            "init_free_and_bound_regions: placeholder {:?} is \
+                             not compatible with universe {:?} of its SCC {:?}",
+                            placeholder,
+                            scc_universe,
+                            scc,
+                        );
                         self.add_incompatible_universe(scc);
                     }
                 }
@@ -470,6 +478,9 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             let mut constraints: Vec<_> = self.constraints.iter().collect();
             constraints.sort();
             constraints
+                .into_iter()
+                .map(|c| (c, self.constraint_sccs.scc(c.sup), self.constraint_sccs.scc(c.sub)))
+                .collect::<Vec<_>>()
         });
 
         // To propagate constraints, we walk the DAG induced by the
@@ -559,6 +570,8 @@ impl<'tcx> RegionInferenceContext<'tcx> {
     /// `'a` with `'b` and not `'static`. But it will have to do for
     /// now.
     fn add_incompatible_universe(&mut self, scc: ConstraintSccIndex) {
+        debug!("add_incompatible_universe(scc={:?})", scc);
+
         let fr_static = self.universal_regions.fr_static;
         self.scc_values.add_all_points(scc);
         self.scc_values.add_element(scc, fr_static);
@@ -669,13 +682,19 @@ impl<'tcx> RegionInferenceContext<'tcx> {
     /// to find a good name from that. Returns `None` if we can't find
     /// one (e.g., this is just some random part of the CFG).
     pub fn to_error_region(&self, r: RegionVid) -> Option<ty::Region<'tcx>> {
+        self.to_error_region_vid(r).and_then(|r| self.definitions[r].external_name)
+    }
+
+    /// Returns the [RegionVid] corresponding to the region returned by
+    /// `to_error_region`.
+    pub fn to_error_region_vid(&self, r: RegionVid) -> Option<RegionVid> {
         if self.universal_regions.is_universal_region(r) {
-            return self.definitions[r].external_name;
+            Some(r)
         } else {
             let r_scc = self.constraint_sccs.scc(r);
             let upper_bound = self.universal_upper_bound(r);
             if self.scc_values.contains(r_scc, upper_bound) {
-                self.to_error_region(upper_bound)
+                self.to_error_region_vid(upper_bound)
             } else {
                 None
             }
@@ -1201,6 +1220,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             // to report the error. This gives better error messages
             // in some cases.
             self.report_error(mir, infcx, mir_def_id, longer_fr, shorter_fr, errors_buffer);
+            return; // continuing to iterate just reports more errors than necessary
         }
     }
 
@@ -1218,6 +1238,10 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         );
 
         let longer_fr_scc = self.constraint_sccs.scc(longer_fr);
+        debug!(
+            "check_bound_universal_region: longer_fr_scc={:?}",
+            longer_fr_scc,
+        );
 
         // If we have some bound universal region `'a`, then the only
         // elements it can contain is itself -- we don't know anything
@@ -1234,6 +1258,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             Some(v) => v,
             None => return,
         };
+        debug!("check_bound_universal_region: error_element = {:?}", error_element);
 
         // Find the region that introduced this `error_element`.
         let error_region = match error_element {

@@ -152,7 +152,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             }
 
             // We shouldn't encounter an error message with ReClosureBound.
-            ty::ReCanonical(..) | ty::ReClosureBound(..) => {
+            ty::ReClosureBound(..) => {
                 bug!("encountered unexpected ReClosureBound: {:?}", region,);
             }
         };
@@ -178,6 +178,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
                 self.msg_span_from_early_bound_and_free_regions(region)
             }
             ty::ReStatic => ("the static lifetime".to_owned(), None),
+            ty::ReEmpty => ("an empty lifetime".to_owned(), None),
             _ => bug!("{:?}", region),
         }
     }
@@ -479,17 +480,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                         err.span_label(arm_span, msg);
                     }
                 }
-                hir::MatchSource::TryDesugar => {
-                    // Issue #51632
-                    if let Ok(try_snippet) = self.tcx.sess.source_map().span_to_snippet(arm_span) {
-                        err.span_suggestion_with_applicability(
-                            arm_span,
-                            "try wrapping with a success variant",
-                            format!("Ok({})", try_snippet),
-                            Applicability::MachineApplicable,
-                        );
-                    }
-                }
+                hir::MatchSource::TryDesugar => {}
                 _ => {
                     let msg = "match arm with an incompatible type";
                     if self.tcx.sess.source_map().is_multiline(arm_span) {

@@ -80,7 +80,7 @@ impl<'a, 'tcx> MarkSymbolVisitor<'a, 'tcx> {
                 self.check_def_id(def.def_id());
             }
             _ if self.in_pat => (),
-            Def::PrimTy(..) | Def::SelfTy(..) |
+            Def::PrimTy(..) | Def::SelfTy(..) | Def::SelfCtor(..) |
             Def::Local(..) | Def::Upvar(..) => {}
             Def::Variant(variant_id) | Def::VariantCtor(variant_id, ..) => {
                 if let Some(enum_id) = self.tcx.parent_def_id(variant_id) {
@@ -291,10 +291,8 @@ fn has_allow_dead_code_or_lang_attr(tcx: TyCtxt<'_, '_, '_>,
         return true;
     }
 
-    // (To be) stable attribute for #[lang = "panic_impl"]
-    if attr::contains_name(attrs, "panic_implementation") ||
-        attr::contains_name(attrs, "panic_handler")
-    {
+    // Stable attribute for #[lang = "panic_impl"]
+    if attr::contains_name(attrs, "panic_handler") {
         return true;
     }
 

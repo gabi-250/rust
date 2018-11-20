@@ -112,7 +112,6 @@ pub struct Session {
     /// The metadata::creader module may inject an allocator/panic_runtime
     /// dependency if it didn't already find one, and this tracks what was
     /// injected.
-    pub injected_allocator: Once<Option<CrateNum>>,
     pub allocator_kind: Once<Option<AllocatorKind>>,
     pub injected_panic_runtime: Once<Option<CrateNum>>,
 
@@ -394,7 +393,7 @@ impl Session {
 
         match id.as_usize().checked_add(count) {
             Some(next) => {
-                self.next_node_id.set(ast::NodeId::new(next));
+                self.next_node_id.set(ast::NodeId::from_usize(next));
             }
             None => bug!("Input too large, ran out of node ids!"),
         }
@@ -868,7 +867,7 @@ impl Session {
                 let fuel = self.optimization_fuel_limit.get();
                 ret = fuel != 0;
                 if fuel == 0 && !self.out_of_fuel.get() {
-                    println!("optimization-fuel-exhausted: {}", msg());
+                    eprintln!("optimization-fuel-exhausted: {}", msg());
                     self.out_of_fuel.set(true);
                 } else if fuel > 0 {
                     self.optimization_fuel_limit.set(fuel - 1);
@@ -961,6 +960,10 @@ impl Session {
 
     pub fn teach(&self, code: &DiagnosticId) -> bool {
         self.opts.debugging_opts.teach && self.diagnostic().must_teach(code)
+    }
+
+    pub fn rust_2015(&self) -> bool {
+        self.opts.edition == Edition::Edition2015
     }
 
     /// Are we allowed to use features from the Rust 2018 edition?
@@ -1157,8 +1160,7 @@ pub fn build_session_(
         recursion_limit: Once::new(),
         type_length_limit: Once::new(),
         const_eval_stack_frame_limit: 100,
-        next_node_id: OneThread::new(Cell::new(NodeId::new(1))),
-        injected_allocator: Once::new(),
+        next_node_id: OneThread::new(Cell::new(NodeId::from_u32(1))),
         allocator_kind: Once::new(),
         injected_panic_runtime: Once::new(),
         imported_macro_spans: OneThread::new(RefCell::new(FxHashMap::default())),
