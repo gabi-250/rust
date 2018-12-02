@@ -3,9 +3,12 @@ use context::CodegenCx;
 use value::Value;
 use ironox_type::Type;
 
+use libc::c_uint;
+
 use rustc::ty::{self, Ty, Instance};
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
+use rustc_codegen_ssa::mir::operand::OperandValue;
 use rustc_target::abi::call::*;
 use rustc_target::abi::LayoutOf;
 use rustc_target::spec::abi::Abi;
@@ -29,7 +32,30 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         idx: &mut usize,
         dst: PlaceRef<'tcx, Value>
     ) {
-        unimplemented!("store_fn_arg");
+        match ty.mode {
+            PassMode::Ignore => {},
+            PassMode::Pair(..) => {
+                unimplemented!("PassMode::Pair");
+            }
+            PassMode::Indirect(_, Some(_)) => {
+                unimplemented!("PassMode::Indirect");
+            }
+            PassMode::Direct(_) | PassMode::Indirect(_, None) | PassMode::Cast(_) => {
+                if ty.is_ignore() {
+                    return;
+                }
+                let val = self.cx.get_param(self.llfn(), *idx as c_uint);
+                if ty.is_sized_indirect() {
+                    unimplemented!("sized indirect");
+                } else if ty.is_unsized_indirect() {
+                    bug!("unsized ArgType must be handled through store_fn_arg");
+                } else if let PassMode::Cast(cast) = ty.mode {
+                    unimplemented!("PassMode::Cast");
+                } else {
+                    OperandValue::Immediate(val).store(self, dst);
+                }
+            }
+        }
     }
 
     fn store_arg_ty(
@@ -41,7 +67,7 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("store_arg_ty");
     }
 
-    fn memory_ty(&self, ty: &ArgType<'tcx, Ty<'tcx>>) -> &'ll Type {
+    fn memory_ty(&self, ty: &ArgType<'tcx, Ty<'tcx>>) -> Type {
         unimplemented!("memory_ty");
     }
 }
@@ -93,11 +119,9 @@ impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             arg
         };
 
-
         // return the FnType
         let mut fn_ty = FnType {
             ret: arg_of(sig.output(), None),
-            // XXX
             args: sig.inputs().iter().chain(extra_args).enumerate().map(|(i, ty)| {
                 arg_of(ty, Some(i))
             }).collect(),

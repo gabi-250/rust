@@ -6,27 +6,31 @@ use rustc::mir::mono::Stats;
 
 use rustc::session::Session;
 
-use rustc::ty::{self, Ty, TyCtxt, FnSig};
+use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{LayoutOf, LayoutError, self, TyLayout, Size};
 use rustc::util::nodemap::FxHashMap;
+use rustc_codegen_ssa::base::wants_msvc_seh;
+use rustc_codegen_ssa::callee::resolve_and_get_fn;
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
 use rustc::mir::interpret::{Scalar, Allocation};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
 
-use basic_block::BasicBlock;
+use basic_block::{BasicBlock, BasicBlockData};
 use value::Value;
-use ironox_type::Type;
+use ironox_type::{Type, LLType};
 use function::IronOxFunction;
 use debuginfo::DIScope;
 
+use super::ModuleIronOx;
+
 impl BackendTypes for CodegenCx<'ll, 'tcx> {
     type Value = Value;
-    type BasicBlock = Value;
-    type Type = &'ll Type;
+    type BasicBlock = BasicBlock;
+    type Type = Type;
     type Context = ();
     type Funclet = ();
     type DIScope = &'ll DIScope;
@@ -36,56 +40,38 @@ pub struct IronOxContext<'ll> {
     pub module: &'ll mut ::ModuleIronOx
 }
 
-pub struct IronOxModule {
-    pub functions: Vec<IronOxFunction>,
-}
-
-impl IronOxModule {
-    pub fn new() -> IronOxModule {
-        IronOxModule {
-            functions: vec![],
-        }
-    }
-
-    pub fn add_function(&mut self, name: &str, sig: FnSig) -> Value {
-        self.functions.push(IronOxFunction::new(name, sig));
-        Value::Function(self.functions.len() - 1)
-    }
-
-    // XXX slow
-    pub fn get_function(&self, name: &str) -> Option<Value> {
-        for (i, f) in self.functions.iter().enumerate() {
-            if f.name == name {
-                return Some(Value::Function(i))
-            }
-        }
-        return None;
-    }
-}
-
 pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     pub stats: RefCell<Stats>,
     pub codegen_unit: Arc<CodegenUnit<'tcx>>,
     pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
-    pub module: RefCell<IronOxModule>,
-    pub current_bb: RefCell<Option<Value>>,
+    pub module: RefCell<&'ll mut ModuleIronOx>,
     pub vtables: RefCell<FxHashMap<(Ty<'tcx>, ty::PolyExistentialTraitRef<'tcx>), Value>>,
+    eh_personality: Cell<Option<Value>>,
+    // XXX
+    pub types: RefCell<Vec<LLType>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
     pub fn new(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-               codegen_unit: Arc<CodegenUnit<'tcx>>)
+               codegen_unit: Arc<CodegenUnit<'tcx>>,
+               module: &'ll mut ModuleIronOx)
                  -> CodegenCx<'ll, 'tcx> {
         CodegenCx {
             tcx,
             codegen_unit,
             stats: RefCell::new(Stats::default()),
             instances: Default::default(),
-            module: RefCell::new(IronOxModule::new()),
-            current_bb: RefCell::new(None),
+            module: RefCell::new(module),
             vtables: Default::default(),
+            eh_personality: Default::default(),
+            types: Default::default(),
         }
+    }
+
+    pub fn ty_size(&self, ty: Type) -> u64 {
+        // XXX implement
+        8
     }
 }
 
@@ -162,7 +148,27 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn eh_personality(&self) -> Value {
-        unimplemented!("eh_personality");
+        if let Some(llpersonality) = self.eh_personality.get() {
+            return llpersonality
+        }
+        let tcx = self.tcx;
+        let llfn = match tcx.lang_items().eh_personality() {
+            Some(def_id) if !wants_msvc_seh(self.sess()) => {
+                resolve_and_get_fn(self, def_id, tcx.intern_substs(&[]))
+            }
+            _ => {
+                let name = if wants_msvc_seh(self.sess()) {
+                    unimplemented!("Unsupported platform: MSVC")
+                } else {
+                    "rust_eh_personality"
+                };
+                let fty = self.type_variadic_func(&[], self.type_i32());
+                self.declare_cfn(name, fty)
+            }
+        };
+        //attributes::apply_target_cpu_attr(self, llfn);
+        self.eh_personality.set(Some(llfn));
+        llfn
     }
 
     fn eh_unwind_resume(&self) -> Value {
@@ -198,11 +204,11 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn set_frame_pointer_elimination(&self, llfn: Value) {
-        unimplemented!("set_frame_pointer_elimination");
+        // XXX
     }
 
     fn apply_target_cpu_attr(&self, llfn: Value) {
-        unimplemented!("apply_target_cpu_attr");
+        // XXX
     }
 
     fn create_used_variable(&self) {
@@ -217,24 +223,24 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 // common?
 impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
-    fn const_null(&self, t: &'ll Type) -> Value {
+    fn const_null(&self, t: Type) -> Value {
         Value::Const(0)
     }
 
-    fn const_undef(&self, t: &'ll Type) -> Value {
+    fn const_undef(&self, t: Type) -> Value {
         Value::ConstUndef
     }
 
-    fn const_int(&self, t: &'ll Type, i: i64) -> Value {
+    fn const_int(&self, t: Type, i: i64) -> Value {
         unimplemented!("");
     }
 
-    fn const_uint(&self, t: &'ll Type, i: u64) -> Value {
+    fn const_uint(&self, t: Type, i: u64) -> Value {
         unimplemented!("");
     }
 
-    fn const_uint_big(&self, t: &'ll Type, u: u128) -> Value {
-        unimplemented!("");
+    fn const_uint_big(&self, t: Type, u: u128) -> Value {
+        Value::BigConst(u)
     }
 
     fn const_bool(&self, val: bool) -> Value {
@@ -286,11 +292,12 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
+        unimplemented!("const struct {:?}", elts);
         // XXX calculate the size of the struct
         Value::Const(19)
     }
 
-    fn const_array(&self, ty: &'ll Type, elts: &[Value]) -> Value {
+    fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
         unimplemented!("");
     }
 
@@ -330,9 +337,24 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         cv: Scalar,
         layout: &layout::Scalar,
-        llty: &'ll Type,
+        llty: Type,
     ) -> Value {
-        unimplemented!("scalar_to_backend");
+        let bitsize = if layout.is_bool() { 1 } else { layout.value.size(self).bits() };
+        match cv {
+            Scalar::Bits { size: 0, .. } => {
+                assert_eq!(0, layout.value.size(self).bytes());
+                self.const_undef(self.type_ix(0))
+            },
+            Scalar::Bits { bits, size } => {
+                assert_eq!(size as u64, layout.value.size(self).bytes());
+                let llval = self.const_uint_big(self.type_ix(bitsize), bits);
+                // XXX
+                llval
+            },
+            Scalar::Ptr(ptr) => {
+                unimplemented!("Scalar::Ptr");
+            }
+        }
     }
 
     fn from_const_alloc(

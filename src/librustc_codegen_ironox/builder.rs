@@ -12,11 +12,12 @@ use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{Align, Size, TyLayout};
 use rustc_codegen_ssa::traits::*;
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::ffi::CStr;
 use std::ops::Range;
 use syntax;
 
-use basic_block::BasicBlock;
+use basic_block::{BasicBlock, BasicBlockData};
 use ironox_type::Type;
 use registers::GPR;
 
@@ -30,8 +31,14 @@ impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type DIScope = <CodegenCx<'ll, 'tcx> as BackendTypes>::DIScope;
 }
 
+
+/// Identifies the current insertion point: function index, basic block index,
+/// instruction index.
+pub struct BuilderPosition(usize, usize, usize);
+
 pub struct Builder<'a, 'll: 'a, 'tcx: 'll> {
     pub cx: &'a CodegenCx<'ll, 'tcx>,
+    pub builder: RefCell<BuilderPosition>,
 }
 
 impl ty::layout::LayoutOf for Builder<'_, '_, 'tcx> {
@@ -59,28 +66,40 @@ impl HasCodegen<'tcx> for Builder<'a, 'll, 'tcx> {
     type CodegenCx = CodegenCx<'ll, 'tcx>;
 }
 
+impl Builder<'a, 'll, 'tcx> {
+
+    fn emit_instr(&mut self, asm: String) {
+        let mut builder = self.builder.borrow_mut();
+        let llfn = builder.0;
+        let llbb = builder.1;
+        let instr = builder.2;
+        let mut module = self.cx.module.borrow_mut();
+        module.functions[llfn].basic_blocks[llbb].instrs
+            .insert(instr, asm);
+        // move to the next instruction
+        builder.2 += 1;
+    }
+}
+
 impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn new_block<'b>(
         cx: &'a Self::CodegenCx,
         llfn: Value,
         name: &'b str
     )-> Self {
-        let bb = BasicBlock::new(cx, name, llfn);
+        let mut bx = Builder::with_cx(cx);
+        let bb = BasicBlockData::new(cx, name, llfn);
         eprintln!("Create a new block in llfn {:?} named {}", llfn, name);
         eprintln!("Function count {}", cx.module.borrow().functions.len());
-        let bx = Builder::with_cx(cx);
-        let (llfn, bb) = match bb {
-            Value::BasicBlock(f, b) => (f, b),
-            _ => bug!("Invalid basic block or function")
-        };
-
-        cx.current_bb.replace(Some(Value::BasicBlock(llfn, bb)));
+        bx.position_at_end(bb);
         bx
     }
 
     fn with_cx(cx: &'a Self::CodegenCx) -> Self {
+        // XXX this is an invalid position and must be overwritten
         Builder {
             cx,
+            builder: RefCell::new(BuilderPosition(0, 0, 0))
         }
     }
 
@@ -93,49 +112,53 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn llfn(&self) -> Value {
+        let bb = self.builder.borrow();
         // the parent of the current basic block
-        let bb = self.cx.current_bb.borrow().expect("Invalid insertion point");
-        let fn_index = match bb {
-            Value::BasicBlock(fn_index, _) => fn_index,
-            _ => bug!("expected basic block, found {:?}", bb)
-        };
+        let fn_index = bb.0;
         Value::Function(fn_index)
     }
 
-    fn llbb(&self) -> Value {
-        self.cx.current_bb.borrow().expect("Invalid insertion point")
+    fn llbb(&self) -> BasicBlock {
+        BasicBlock(self.builder.borrow().0,
+                   self.builder.borrow().1)
     }
 
     fn count_insn(&self, category: &str) {
         unimplemented!("count_insn");
     }
 
-
     fn set_value_name(&mut self, value: Value, name: &str) {
         eprintln!("rename value {:?} to {:?}", value, name);
     }
 
-    fn position_at_end(&mut self, llbb: Value) {
-        match llbb {
-            Value::BasicBlock(f, bb) => self.cx.current_bb.replace(Some(llbb)),
-            _ => bug!("Not a basic block!")
-        };
+    fn position_at_end(&mut self, llbb: BasicBlock) {
+        let llfn = llbb.0;
+        let llbb = llbb.1;
+        let instr =
+            self.cx.module.borrow().functions[llfn].basic_blocks[llbb].instrs.len();
+        self.builder.replace(BuilderPosition(llfn, llbb, instr));
     }
 
-    fn position_at_start(&mut self, llbb: <Self::CodegenCx as BackendTypes>::BasicBlock) {
+    fn position_at_start(&mut self, llbb: BasicBlock) {
         unimplemented!("position_at_start");
     }
 
     fn ret_void(&mut self) {
-        unimplemented!("ret_void(&mut self)");
+        self.emit_instr("ret".to_string());
     }
 
     fn ret(&mut self, v: Value) {
          eprintln!("ret {:?}", v);
     }
 
-    fn br(&mut self, dest: <Self::CodegenCx as BackendTypes>::BasicBlock) {
-         eprintln!("br to {:?}", dest);
+    fn br(&mut self, dest: BasicBlock) {
+        let br_instr = {
+            let module = self.cx.module.borrow();
+            format!(
+                "jmp {}",
+                module.functions[dest.0].basic_blocks[dest.1].label)
+        };
+        self.emit_instr(br_instr);
     }
 
     fn cond_br(
@@ -164,11 +187,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         catch: <Self::CodegenCx as BackendTypes>::BasicBlock,
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        unimplemented!("");
+        unimplemented!("invoke");
     }
 
     fn unreachable(&mut self) {
-        unimplemented!();
+        // XXX
     }
 
     fn add(
@@ -392,19 +415,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("");
     }
 
-
     fn alloca(
         &mut self,
-        ty: <Self::CodegenCx as BackendTypes>::Type,
+        ty: Type,
         name: &str, align: Align
     )-> Value {
-        let (cur_fn, cur_bb)  = match *self.cx.current_bb.borrow() {
-            Some(Value::BasicBlock(f, bb)) => (f, bb),
-            _ => bug!("Invalid insertion point")
-        }
-;
+        let cur_fn = self.builder.borrow().0;
         let mut module = self.cx.module.borrow_mut();
-        let local_idx = module.functions[cur_fn].alloca(ty, name, align);
+        let local_idx = module.functions[cur_fn].alloca(self.cx, ty, name, align);
         Value::Local(cur_fn, local_idx)
     }
 
@@ -425,7 +443,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     )-> Value {
         unimplemented!("");
     }
-
 
     fn load(
         &mut self,
@@ -493,7 +510,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr
     }
 
-
     fn gep(
         &mut self,
         ptr: Value,
@@ -515,9 +531,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         idx: u64
     )-> Value {
-        unimplemented!("");
+        unimplemented!("struct_gep");
     }
-
 
     fn trunc(
         &mut self,
@@ -538,7 +553,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn fptoui(
         &mut self,
         val: Value,
-        dest_ty: &'ll Type
+        dest_ty: Type
     )-> Value {
         unimplemented!("");
     }
@@ -610,9 +625,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn intcast(
         &mut self,
         val: Value,
-        dest_ty: <Self::CodegenCx as BackendTypes>::Type, is_signed: bool
+        dest_ty: Type,
+        is_signed: bool
     )-> Value {
-        unimplemented!("");
+        val
     }
 
     fn pointercast(
@@ -624,7 +640,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         eprintln!("pointercast");
         val
     }
-
 
     fn icmp(
         &mut self,
@@ -641,7 +656,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     )-> Value {
         unimplemented!("");
     }
-
 
     fn empty_phi(
         &mut self,
@@ -662,12 +676,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         asm: &CStr,
         cons: &CStr,
-        inputs: &[Value], output: &'ll Type,
+        inputs: &[Value], output: Type,
         volatile: bool, alignstack: bool,
         dia: syntax::ast::AsmDialect) -> Option<Value> {
         unimplemented!("");
     }
-
 
     fn minnum(
         &mut self,
@@ -692,7 +705,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     )-> Value {
         unimplemented!("");
     }
-
 
     fn va_arg(
         &mut self,
@@ -834,7 +846,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         agg_val: Value,
         idx: u64
     )-> Value {
-        unimplemented!("");
+        unimplemented!("extract_value");
     }
 
     fn insert_value(
@@ -847,14 +859,13 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         elt
     }
 
-
     fn landing_pad(
         &mut self,
         ty: <Self::CodegenCx as BackendTypes>::Type,
         pers_fn: Value,
         num_clauses: usize
     )-> Value {
-        unimplemented!("");
+        unimplemented!("landing_pad");
     }
 
     fn add_clause(
@@ -869,14 +880,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         landing_pad: Value
     ) {
-        unimplemented!("");
+        unimplemented!("set_cleanup");
     }
 
     fn resume(
         &mut self,
         exn: Value
     )-> Value {
-        unimplemented!("");
+        unimplemented!("resume");
     }
 
     fn cleanup_pad(
@@ -929,9 +940,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn set_personality_fn(&mut self, personality: Value) {
-        unimplemented!("");
+        unimplemented!("set_personality_fn");
     }
-
 
     fn atomic_cmpxchg(
         &mut self,
@@ -981,7 +991,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("");
     }
 
-
     /// Returns the ptr value that should be used for storing `val`.
     fn check_store(
         &mut self,
@@ -990,7 +999,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     )-> Value {
         unimplemented!("");
     }
-
 
     /// Returns the args that should be used for a call to `llfn`.
     fn check_call<'b>(
@@ -1003,7 +1011,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("");
     }
 
-
     fn lifetime_start(&mut self, ptr: Value, size: Size) {
         // XXX nothing to do for now
     }
@@ -1011,7 +1018,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn lifetime_end(&mut self, ptr: Value, size: Size) {
         // XXX nothing to do for now
     }
-
 
     fn call_lifetime_intrinsic(
         &mut self,
@@ -1021,7 +1027,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("");
     }
 
-
     fn call(
         &mut self,
         llfn: Value,
@@ -1029,38 +1034,24 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         funclet: Option<&Self::Funclet>,
     )-> Value {
         eprintln!("call to {:?} with args {:?}", llfn, args);
-        let (cur_fn, cur_bb)  = match *self.cx.current_bb.borrow() {
-            Some(Value::BasicBlock(f, bb)) => (f, bb),
-            _ => bug!("Invalid insertion point")
-        };
-        let module = self.cx.module.borrow_mut();
-        // XXX store the function return type in IronOxFunction
+        // XXX emit call
         Value::Register(GPR::RAX)
     }
-
 
     fn zext(
         &mut self,
         val: Value,
-        dest_ty: &'ll Type
+        dest_ty: Type
     )-> Value {
-        eprintln!("zero extend {:?} as type {:?}", val, dest_ty);
-        let (cur_fn, cur_bb)  = match *self.cx.current_bb.borrow() {
-            Some(Value::BasicBlock(f, bb)) => (f, bb),
-            _ => bug!("Invalid insertion point")
-        };
-        let mut module = self.cx.module.borrow_mut();
-        let local_idx = module.functions[cur_fn].zext_local(val, dest_ty);
-        Value::Local(cur_fn, local_idx)
+        unimplemented!("zext");
     }
 
-
-    unsafe fn delete_basic_block(&mut self, bb: <Self::CodegenCx as BackendTypes>::BasicBlock) {
-        unimplemented!("delete_basic_block(&mut self, bb: <Self::CodegenCx as BackendTypes>::BasicBlock)");
+    unsafe fn delete_basic_block(&mut self, bb: BasicBlock) {
+        unimplemented!("delete_basic_block");
     }
 
     fn do_not_inline(&mut self, llret: Value) {
-        unimplemented!("do_not_inline(&mut self, llret: Value)");
+        unimplemented!("do_not_inline");
     }
 
     fn memcpy(
@@ -1101,7 +1092,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn load_operand(&mut self, place: PlaceRef<'tcx, Value>)
         -> OperandRef<'tcx, Value> {
         // XXX
+        eprintln!("load ref {:?}", place);
         let imm = to_immediate(self, place.llval, place.layout);
+        eprintln!("imm is {:?}", imm);
+        eprintln!("layout is {:?}", place.layout);
         OperandRef {
             val: OperandValue::Immediate(imm),
             layout: place.layout,

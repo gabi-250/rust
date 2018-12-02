@@ -17,6 +17,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         llresult: Value,
         span: Span,
     ) {
+        eprintln!("{:?} {:?} {:?}", callee_ty, fn_ty, llresult);
         unimplemented!("codegen_intrinsic_call");
     }
 }

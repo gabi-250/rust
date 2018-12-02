@@ -5,14 +5,14 @@ use registers::GPR;
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Value {
     Function(usize),
-    BasicBlock(usize, usize),
+    // (function index, local index)
     Local(usize, usize),
     Register(GPR),
     RbpOffset(isize),
     ConstUndef,
     Const(u64),
+    BigConst(u128),
     Global,
-    None,
 }
 
 impl Eq for Value {}

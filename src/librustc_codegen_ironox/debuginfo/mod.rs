@@ -102,6 +102,6 @@ impl<'a, 'll: 'a, 'tcx: 'll> DebugInfoBuilderMethods<'tcx>
     }
 
     fn insert_reference_to_gdb_debug_scripts_section_global(&mut self) {
-        unimplemented!("insert_reference_to_gdb_debug_scripts_section_global");
+        //unimplemented!("insert_reference_to_gdb_debug_scripts_section_global");
     }
 }

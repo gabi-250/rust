@@ -35,9 +35,10 @@ fn codegen_ironox_module<'ll, 'tcx>(
 ) -> (Stats, ModuleCodegen<ModuleIronOx>) {
     let backend = IronOxCodegenBackend(());
     let cgu = tcx.codegen_unit(cgu_name);
-    let ironox_module = backend.new_metadata(tcx.sess, &cgu_name.as_str());
+    let mut ironox_module = backend.new_metadata(tcx.sess, &cgu_name.as_str());
+    //let module;
     let stats = {
-        let cx = CodegenCx::new(tcx, cgu);
+        let cx = CodegenCx::new(tcx, cgu, &mut ironox_module);
         let mono_items = cx.codegen_unit
                            .items_in_deterministic_order(cx.tcx);
         for &(mono_item, (linkage, visibility)) in &mono_items {
@@ -58,9 +59,7 @@ fn codegen_ironox_module<'ll, 'tcx>(
         }
 
         maybe_create_entry_wrapper::<Builder>(&cx);
-
         // XXX fill out the rest
-
         cx.consume_stats().into_inner()
     };
     (stats, ModuleCodegen {

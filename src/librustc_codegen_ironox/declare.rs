@@ -8,7 +8,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn declare_global(
         &self,
-        name: &str, ty: &'ll Type
+        name: &str, ty: Type
     ) -> Value {
         unimplemented!("declare_global");
     }
@@ -16,9 +16,11 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn declare_cfn(
         &self,
         name: &str,
-        fn_type: &'ll Type
+        fn_type: Type
     ) -> Value {
-        unimplemented!("declare_cfn");
+        // XXX
+        eprintln!("Declare cfun of type {:?}", fn_type);
+        self.module.borrow_mut().add_function_with_type(self, name, fn_type)
     }
 
     fn declare_fn(
@@ -30,18 +32,19 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             ty::ParamEnv::reveal_all(),
             &sig);
         let val = self.module.borrow_mut().add_function(name, sig);
+        eprintln!("val is {:?}", val);
         val
     }
 
     fn define_global(
         &self,
         name: &str,
-        ty: &'ll Type
+        ty: Type
     ) -> Option<Value> {
         unimplemented!("define_global");
     }
 
-    fn define_private_global(&self, ty: &'ll Type) -> Value {
+    fn define_private_global(&self, ty: Type) -> Value {
         unimplemented!("define_private_global");
     }
 
@@ -66,6 +69,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_defined_value(&self, name: &str) -> Option<Value> {
-        unimplemented!("get_defined_value");
+        // XXX
+        self.get_declared_value(name)
     }
 }

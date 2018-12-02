@@ -24,8 +24,8 @@ use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::dep_graph::DepGraph;
 use rustc::middle::cstore::MetadataLoader;
 use rustc::session::{CompileIncomplete, Session};
-use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
-use rustc::ty::{self, TyCtxt, PolyFnSig};
+use rustc::session::config::{OutputFilenames, PrintRequest};
+use rustc::ty::{self, TyCtxt, PolyFnSig, FnSig};
 use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
 use rustc_codegen_utils::target_features::{all_known_features, X86_WHITELIST};
@@ -72,6 +72,8 @@ mod mono_item;
 mod registers;
 mod value;
 
+use context::CodegenCx;
+use ironox_type::Type;
 use value::Value;
 use function::IronOxFunction;
 
@@ -123,16 +125,44 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 }
 
+#[derive(Debug)]
 pub struct ModuleIronOx {
-    // XXX
-    asm: String,
+    pub functions: Vec<IronOxFunction>,
 }
 
-impl<'ll> ModuleIronOx {
+impl ModuleIronOx {
     pub fn new() -> ModuleIronOx {
         ModuleIronOx {
-            asm: "".to_string(),
+            functions: vec![],
         }
+    }
+
+    pub fn add_function(&mut self, name: &str, sig: FnSig) -> Value {
+        self.functions.push(IronOxFunction::new(name, sig));
+        Value::Function(self.functions.len() - 1)
+    }
+
+    pub fn add_function_with_type(
+        &mut self,
+        cx: &CodegenCx,
+        name: &str,
+        fn_type: Type) -> Value {
+        self.functions.push(IronOxFunction::new_with_type(cx, name, fn_type));
+        Value::Function(self.functions.len() - 1)
+    }
+
+    // XXX slow
+    pub fn get_function(&self, name: &str) -> Option<Value> {
+        for (i, f) in self.functions.iter().enumerate() {
+            if f.name == name {
+                return Some(Value::Function(i))
+            }
+        }
+        return None;
+    }
+
+    pub fn asm(&self) -> String {
+        "not actual asm".to_string()
     }
 }
 
@@ -196,34 +226,12 @@ impl WriteBackendMethods for IronOxCodegenBackend {
 
     unsafe fn codegen(
         cgcx: &CodegenContext<Self>,
-        _diag_handler: &Handler,
+        diag_handler: &Handler,
         module: ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
-        _timeline: &mut Timeline
+        timeline: &mut Timeline
     ) -> Result<CompiledModule, FatalError> {
-        // XXX fix this
-        if true || config.no_integrated_as {
-            let object = cgcx.output_filenames
-                .temp_path(OutputType::Object, Some(&module.name));
-            let filename = object.to_str().unwrap().to_string();
-            eprintln!("Compiling {:?}", object);
-            let mut cmd = Command::new("as").arg("-o").arg(filename)
-                .stdin(Stdio::piped()).spawn().expect("failed to run as");
-            {
-                let stdin = cmd.stdin.as_mut().expect("failed to open stdin");
-                stdin.write_all(module.module_llvm.asm.as_bytes())
-                    .expect("failed to write to stdin");
-            }
-            Ok(CompiledModule {
-                name: module.name.clone(),
-                kind: module.kind,
-                object: Some(object),
-                bytecode: None,
-                bytecode_compressed: None,
-            })
-        } else {
-            unimplemented!("ironox does not have an integrated assembler!");
-        }
+        back::write::codegen(cgcx, diag_handler, module, config, timeline)
     }
 
     fn run_lto_pass_manager(

@@ -11,22 +11,28 @@ macro_rules! asm {
     }
 }
 
+/// The index of the parent function, and the index of the basic block
+/// in the function.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct BasicBlock(pub usize, pub usize);
+
 #[derive(Debug, PartialEq)]
-pub struct BasicBlock {
+pub struct BasicBlockData {
     pub label: String,
     pub instrs: Vec<String>,
     pub parent: Value,
     pub terminator: Option<String>,
 }
 
-impl BasicBlock {
-    pub fn new(cx: &CodegenCx, label: &str, parent: Value) -> Value {
-        let mut bb = BasicBlock {
+impl BasicBlockData {
+    pub fn new(cx: &CodegenCx, label: &str, parent: Value) -> BasicBlock {
+        let mut bb = BasicBlockData {
             label: label.to_string(),
             instrs: vec![],
             parent: parent,
             terminator: None,
         };
+        eprintln!("parent {:?}", parent);
         asm!(bb,
              format!("{}:", label));
         let parent = match parent {
@@ -34,6 +40,10 @@ impl BasicBlock {
             _ => bug!("The parent of a basic block has to be a function")
         };
         let bb_index = cx.module.borrow_mut().functions[parent].add_bb(bb);
-        Value::BasicBlock(parent, bb_index)
+        BasicBlock(parent, bb_index)
+    }
+
+    pub fn br(label: &str) {
+
     }
 }

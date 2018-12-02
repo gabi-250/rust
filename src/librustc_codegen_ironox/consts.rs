@@ -8,7 +8,7 @@ use rustc::ty::layout::Align;
 
 
 impl StaticMethods<'tcx> for CodegenCx<'ll, 'tcx> {
-    fn static_ptrcast(&self, val: Value, ty: &'ll Type) -> Value {
+    fn static_ptrcast(&self, val: Value, ty: Type) -> Value {
         // XXX
         val
     }
@@ -16,7 +16,7 @@ impl StaticMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn static_bitcast(
         &self,
         val: Value,
-        ty: &'ll Type
+        ty: Type
     ) -> <CodegenCx as BackendTypes>::Value {
         unimplemented!("");
     }
@@ -36,8 +36,16 @@ impl StaticMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         align: Align,
         kind: Option<&str>,
     ) -> <CodegenCx as BackendTypes>::Value {
-        // XXX implement this
-        Value::Local(112, 112)
+        match cv {
+            Value::Local(fn_idx, idx) => {
+                let mut module = self.module.borrow_mut();
+                let rbp_offset = module.functions[fn_idx].rbp_offset(idx);
+                Value::RbpOffset(rbp_offset as isize)
+            },
+            _ => {
+                unimplemented!("addr_of {:?}", cv);
+            }
+        }
     }
 
     fn get_static(&self, def_id: DefId) -> <CodegenCx as BackendTypes>::Value {
