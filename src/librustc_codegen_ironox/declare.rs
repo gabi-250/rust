@@ -22,7 +22,9 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str, ty: Type
     ) -> Value {
-        unimplemented!("declare_global");
+        let value = Value::Global(ty);
+        self.named_globals.borrow_mut().insert(name.to_string(), value);
+        value
     }
 
     fn declare_cfn(
@@ -32,7 +34,10 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     ) -> Value {
         // XXX
         eprintln!("Declare cfun of type {:?}", fn_type);
-        self.module.borrow_mut().add_function(self, name, fn_type)
+        let fn_val =
+            self.module.borrow_mut().add_function(self, name, fn_type);
+        self.named_globals.borrow_mut().insert(name.to_string(), fn_val);
+        fn_val
     }
 
     fn declare_fn(
@@ -45,6 +50,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             &sig);
         let fn_type = self.new_fn_type(sig, &[]).ironox_type(self);
         let fn_val = self.declare_cfn(name, fn_type);
+        self.named_globals.borrow_mut().insert(name.to_string(), fn_val);
         fn_val
     }
 
@@ -53,11 +59,17 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         ty: Type
     ) -> Option<Value> {
-        unimplemented!("define_global");
+        if self.get_defined_value(name).is_some() {
+            None
+        } else {
+            Some(self.declare_global(name, ty))
+        }
     }
 
     fn define_private_global(&self, ty: Type) -> Value {
-        unimplemented!("define_private_global");
+        let value = Value::Global(ty);
+        self.private_globals.borrow_mut().insert(ty, value);
+        value
     }
 
     fn define_fn(
@@ -77,11 +89,13 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_declared_value(&self, name: &str) -> Option<Value> {
-        self.module.borrow().get_function(name)
+        // get the Value that corresponds to name
+        self.named_globals.borrow().get(name).map(|x| *x)
     }
 
     fn get_defined_value(&self, name: &str) -> Option<Value> {
-        // XXX
+        // FIXME: check if the value is a declaration (defined outside
+        // of the current translation unit)
         self.get_declared_value(name)
     }
 }

@@ -173,15 +173,6 @@ impl ModuleIronOx {
         Value::Function(self.functions.len() - 1)
     }
 
-    pub fn get_function(&self, name: &str) -> Option<Value> {
-        for (i, f) in self.functions.iter().enumerate() {
-            if f.name == name {
-                return Some(Value::Function(i))
-            }
-        }
-        return None;
-    }
-
     pub fn asm(&self) -> String {
         "nop".to_string()
     }

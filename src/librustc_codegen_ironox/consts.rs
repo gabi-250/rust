@@ -25,16 +25,19 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
         align: Align,
         kind: Option<&str>,
     ) -> Value {
-        match cv {
-            Value::Local(fn_idx, idx) => {
-                let mut module = self.module.borrow_mut();
-                let rbp_offset = module.functions[fn_idx].rbp_offset(idx);
-                Value::RbpOffset(rbp_offset as isize)
+        if let Some(&global) = self.global_cache.borrow().get(&cv) {
+            return global;
+        }
+        let global = match kind {
+            Some(kind) if !self.tcx.sess.fewer_names() => {
+                unimplemented!("static_addr_of_mut");
             },
             _ => {
-                unimplemented!("addr_of {:?}", cv);
+                self.define_private_global(self.val_ty(cv))
             }
-        }
+        };
+        self.global_cache.borrow_mut().insert(cv, global);
+        global
     }
 
     fn codegen_static(

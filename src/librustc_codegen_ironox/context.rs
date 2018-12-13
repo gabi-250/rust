@@ -60,6 +60,10 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     eh_personality: Cell<Option<Value>>,
     // XXX
     pub types: RefCell<Vec<LLType>>,
+    /// Maps symbols to Values (indices in either `functions` or `structs`).
+    pub named_globals: RefCell<FxHashMap<String, Value>>,
+    pub private_globals: RefCell<FxHashMap<Type, Value>>,
+    pub global_cache: RefCell<FxHashMap<Value, Value>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -76,11 +80,14 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             vtables: Default::default(),
             eh_personality: Default::default(),
             types: Default::default(),
+            named_globals: Default::default(),
+            private_globals: Default::default(),
+            global_cache: Default::default(),
         }
     }
 
     pub fn ty_size(&self, ty: Type) -> u64 {
-        // XXX implement
+        // FIXME: implement
         8
     }
 }
@@ -124,8 +131,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self.instances
     }
 
-    fn get_fn(&self, instance: Instance<'tcx>) ->
-        Value {
+    fn get_fn(&self, instance: Instance<'tcx>) -> Value {
         eprintln!("Trying to get {:?}", instance);
         if let Some(ref llfn) = self.instances.borrow().get(&instance) {
             // The function has already been defined
@@ -148,7 +154,6 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_param(&self, llfn: Value, index: c_uint) -> Value {
-        // XXX return a dummy local
         eprintln!("get local {:?} of {:?}", index, llfn);
         let llfn_index = match llfn {
             Value::Function(i) => i,
@@ -210,11 +215,11 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn set_frame_pointer_elimination(&self, llfn: Value) {
-        // XXX
+        // FIXME
     }
 
     fn apply_target_cpu_attr(&self, llfn: Value) {
-        // XXX
+        // FIXME
     }
 
     fn create_used_variable(&self) {
@@ -295,9 +300,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
-        unimplemented!("const struct {:?}", elts);
-        // XXX calculate the size of the struct
-        Value::Const(19)
+        self.module.borrow_mut().add_struct(elts)
     }
 
     fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
