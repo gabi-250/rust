@@ -8,6 +8,7 @@
 
 use std::hash::{Hash, Hasher};
 use registers::GPR;
+use type_::Type;
 
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Value {
@@ -19,7 +20,10 @@ pub enum Value {
     ConstUndef,
     Const(u64),
     BigConst(u128),
-    Global,
+    Global(Type),
+    // the position in the structs Vec from ModuleIronOx
+    ConstStruct(usize),
+    Param(Type),
 }
 
 impl Eq for Value {}

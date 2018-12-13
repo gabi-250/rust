@@ -32,6 +32,7 @@ extern crate syntax;
 
 use std::sync::{mpsc, Arc};
 use rustc::hir::def_id::LOCAL_CRATE;
+use rustc::util::nodemap::FxHashMap;
 use rustc::dep_graph::DepGraph;
 use rustc::middle::cstore::MetadataLoader;
 use rustc::session::{CompileIncomplete, Session};
@@ -66,27 +67,33 @@ mod back {
     pub mod write;
 }
 
+mod ir {
+    pub mod basic_block;
+    pub mod function;
+    pub mod struct_;
+}
+
 mod abi;
 mod asm;
 mod base;
-mod basic_block;
 mod builder;
 mod consts;
 mod context;
 mod debuginfo;
 mod declare;
-mod function;
 mod intrinsic;
-mod ironox_type;
+mod type_;
+mod type_of;
 mod metadata;
 mod mono_item;
 mod registers;
 mod value;
 
 use context::CodegenCx;
-use ironox_type::Type;
+use type_::Type;
 use value::Value;
-use function::IronOxFunction;
+use ir::function::IronOxFunction;
+use ir::struct_::IronOxStruct;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -138,31 +145,34 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 
 #[derive(Debug)]
 pub struct ModuleIronOx {
+    /// The functions defined in this module
     pub functions: Vec<IronOxFunction>,
+    /// All the structs in the module
+    pub structs: Vec<IronOxStruct>,
 }
 
 impl ModuleIronOx {
     pub fn new() -> ModuleIronOx {
         ModuleIronOx {
-            functions: vec![],
+            functions: Default::default(),
+            structs: Default::default(),
         }
     }
 
-    pub fn add_function(&mut self, name: &str, sig: FnSig) -> Value {
-        self.functions.push(IronOxFunction::new(name, sig));
-        Value::Function(self.functions.len() - 1)
+    pub fn add_struct(&mut self, components: &[Value]) -> Value {
+        self.structs.push(IronOxStruct::new(components));
+        Value::ConstStruct(self.structs.len() - 1)
     }
 
-    pub fn add_function_with_type(
+    pub fn add_function(
         &mut self,
         cx: &CodegenCx,
         name: &str,
         fn_type: Type) -> Value {
-        self.functions.push(IronOxFunction::new_with_type(cx, name, fn_type));
+        self.functions.push(IronOxFunction::new(cx, name, fn_type));
         Value::Function(self.functions.len() - 1)
     }
 
-    // XXX slow
     pub fn get_function(&self, name: &str) -> Option<Value> {
         for (i, f) in self.functions.iter().enumerate() {
             if f.name == name {
@@ -173,7 +183,7 @@ impl ModuleIronOx {
     }
 
     pub fn asm(&self) -> String {
-        "not actual asm".to_string()
+        "nop".to_string()
     }
 }
 

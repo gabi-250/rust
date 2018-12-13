@@ -8,11 +8,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use abi::FnTypeExt;
 use context::CodegenCx;
-use ironox_type::Type;
+use type_::Type;
+use value::Value;
+
 use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
-use value::Value;
 
 impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
@@ -30,7 +32,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     ) -> Value {
         // XXX
         eprintln!("Declare cfun of type {:?}", fn_type);
-        self.module.borrow_mut().add_function_with_type(self, name, fn_type)
+        self.module.borrow_mut().add_function(self, name, fn_type)
     }
 
     fn declare_fn(
@@ -41,9 +43,9 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         let sig = self.tcx.normalize_erasing_late_bound_regions(
             ty::ParamEnv::reveal_all(),
             &sig);
-        let val = self.module.borrow_mut().add_function(name, sig);
-        eprintln!("val is {:?}", val);
-        val
+        let fn_type = self.new_fn_type(sig, &[]).ironox_type(self);
+        let fn_val = self.declare_cfn(name, fn_type);
+        fn_val
     }
 
     fn define_global(

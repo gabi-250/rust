@@ -10,7 +10,7 @@
 
 use context::CodegenCx;
 use value::Value;
-use ironox_type::Type;
+use type_::Type;
 
 use rustc_codegen_ssa::traits::*;
 use rustc::hir::def_id::DefId;

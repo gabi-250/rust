@@ -11,7 +11,8 @@
 use builder::Builder;
 use context::CodegenCx;
 use value::Value;
-use ironox_type::Type;
+use type_::Type;
+use type_of::LayoutIronOxExt;
 
 use libc::c_uint;
 
@@ -19,9 +20,10 @@ use rustc::ty::{self, Ty, Instance};
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_codegen_ssa::mir::operand::OperandValue;
-use rustc_target::abi::call::*;
 use rustc_target::abi::LayoutOf;
-use rustc_target::spec::abi::Abi;
+
+pub use rustc_target::spec::abi::Abi;
+pub use rustc_target::abi::call::*;
 
 impl AbiBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn apply_attrs_callsite(
@@ -29,7 +31,7 @@ impl AbiBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         ty: &FnType<'tcx, Ty<'tcx>>,
         callsite: Value
     ) {
-        unimplemented!("apply_attrs_callsite");
+        // FIXME?
     }
 }
 
@@ -53,6 +55,7 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
                     return;
                 }
                 let val = self.cx.get_param(self.llfn(), *idx as c_uint);
+                *idx += 1;
                 if ty.is_sized_indirect() {
                     unimplemented!("sized indirect");
                 } else if ty.is_unsized_indirect() {
@@ -80,11 +83,19 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 }
 
-impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx> {
-    fn new_fn_type(&self, sig: ty::FnSig<'tcx>, extra_args: &[Ty<'tcx>])
-        -> FnType<'tcx, Ty<'tcx>> {
+pub trait FnTypeExt<'tcx> {
+    fn new(cx: &CodegenCx<'_, 'tcx>, sig: ty::FnSig<'tcx>,
+           extra_args: &[Ty<'tcx>]) -> Self;
+    fn ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type;
+}
+
+impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
+    fn new(
+        cx: &CodegenCx<'_, 'tcx>,
+        sig: ty::FnSig<'tcx>,
+        extra_args: &[Ty<'tcx>]) -> Self {
         use self::Abi::*;
-        let conv = match self.tcx.sess.target.target.adjust_abi(sig.abi) {
+        let conv = match cx.tcx.sess.target.target.adjust_abi(sig.abi) {
             RustIntrinsic | PlatformIntrinsic |
             Rust | RustCall => Conv::C,
             System => bug!("system abi should be selected elsewhere"),
@@ -93,7 +104,6 @@ impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Cdecl => Conv::C,
             _ => unimplemented!("Unknown calling convention")
         };
-        let cx = self;
         let mk_arg_type = |ty, _| {
             ArgType::new(cx.layout_of(ty))
         };
@@ -136,6 +146,42 @@ impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         };
 
         fn_ty
+    }
+
+    fn ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type {
+        let mut arg_tys = vec![];
+
+        let ret_ty = match self.ret.mode {
+            PassMode::Ignore => cx.type_void(),
+            PassMode::Direct(_) => {
+                self.ret.layout.immediate_ironox_type(cx)
+            },
+            mode => unimplemented!("{:?}", mode)
+        };
+
+        for arg in &self.args {
+            let arg_ty = match arg.mode {
+                PassMode::Ignore => continue,
+                PassMode::Direct(_) => {
+                    arg.layout.immediate_ironox_type(cx)
+                },
+                mode => unimplemented!("{:?}", mode),
+            };
+            arg_tys.push(arg_ty);
+        }
+
+        if self.variadic {
+            cx.type_variadic_func(&arg_tys, ret_ty)
+        } else {
+            cx.type_func(&arg_tys, ret_ty)
+        }
+    }
+}
+
+impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx> {
+    fn new_fn_type(&self, sig: ty::FnSig<'tcx>, extra_args: &[Ty<'tcx>])
+        -> FnType<'tcx, Ty<'tcx>> {
+        FnType::new(&self, sig, extra_args)
     }
 
     fn new_vtable(

@@ -28,8 +28,8 @@ use std::ffi::CStr;
 use std::ops::{Deref, Range};
 use syntax;
 
-use basic_block::{BasicBlock, BasicBlockData};
-use ironox_type::Type;
+use ir::basic_block::{BasicBlock, BasicBlockData};
+use type_::Type;
 use registers::GPR;
 
 impl BackendTypes for Builder<'_, 'll, 'tcx> {
@@ -539,8 +539,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         flags: MemFlags,
     )-> Value {
-        eprintln!("Store {:?} in {:?}", val, ptr);
-        ptr
+        unimplemented!("store_with_flags");
     }
 
     fn gep(
