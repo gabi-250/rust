@@ -52,6 +52,12 @@ pub(in borrow_check) enum LaterUseKind {
 }
 
 impl BorrowExplanation {
+    pub(in borrow_check) fn is_explained(&self) -> bool {
+        match self {
+            BorrowExplanation::Unexplained => false,
+            _ => true,
+        }
+    }
     pub(in borrow_check) fn add_explanation_to_diagnostic<'cx, 'gcx, 'tcx>(
         &self,
         tcx: TyCtxt<'cx, 'gcx, 'tcx>,
@@ -206,7 +212,7 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
         let mir = self.mir;
         let tcx = self.infcx.tcx;
 
-        let borrow_region_vid = regioncx.to_region_vid(borrow.region);
+        let borrow_region_vid = borrow.region;
         debug!(
             "explain_why_borrow_contains_point: borrow_region_vid={:?}",
             borrow_region_vid
@@ -271,13 +277,17 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
                         borrow_region_vid,
                         region,
                     );
-                let opt_place_desc = self.describe_place(&borrow.borrowed_place);
-                BorrowExplanation::MustBeValidFor {
-                    category,
-                    from_closure,
-                    span,
-                    region_name,
-                    opt_place_desc,
+                if let Some(region_name) = region_name {
+                    let opt_place_desc = self.describe_place(&borrow.borrowed_place);
+                    BorrowExplanation::MustBeValidFor {
+                        category,
+                        from_closure,
+                        span,
+                        region_name,
+                        opt_place_desc,
+                    }
+                } else {
+                    BorrowExplanation::Unexplained
                 }
             } else {
                 BorrowExplanation::Unexplained

@@ -8,13 +8,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::Backend;
+use super::BackendTypes;
 use rustc::hir::def_id::DefId;
 use rustc::mir::mono::{Linkage, Visibility};
 use rustc::ty;
 use rustc_mir::monomorphize::Instance;
 
-pub trait DeclareMethods<'tcx>: Backend<'tcx> {
+pub trait DeclareMethods<'tcx>: BackendTypes {
     /// Declare a global value.
     ///
     /// If there’s a value with the same name already declared, the function will
@@ -41,7 +41,7 @@ pub trait DeclareMethods<'tcx>: Backend<'tcx> {
     /// Use this function when you intend to define a global. This function will
     /// return None if the name already has a definition associated with it. In that
     /// case an error should be reported to the user, because it usually happens due
-    /// to user’s fault (e.g. misuse of #[no_mangle] or #[export_name] attributes).
+    /// to user’s fault (e.g., misuse of #[no_mangle] or #[export_name] attributes).
     fn define_global(&self, name: &str, ty: Self::Type) -> Option<Self::Value>;
 
     /// Declare a private global
@@ -71,7 +71,7 @@ pub trait DeclareMethods<'tcx>: Backend<'tcx> {
     fn get_defined_value(&self, name: &str) -> Option<Self::Value>;
 }
 
-pub trait PreDefineMethods<'tcx>: Backend<'tcx> {
+pub trait PreDefineMethods<'tcx>: BackendTypes {
     fn predefine_static(
         &self,
         def_id: DefId,

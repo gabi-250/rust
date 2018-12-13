@@ -127,9 +127,8 @@ fn calculate_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
             sess.crt_static() => Linkage::Static,
         config::CrateType::Executable => Linkage::Dynamic,
 
-        // proc-macro crates are required to be dylibs, and they're currently
-        // required to link to libsyntax as well.
-        config::CrateType::ProcMacro => Linkage::Dynamic,
+        // proc-macro crates are mostly cdylibs, but we also need metadata.
+        config::CrateType::ProcMacro => Linkage::Static,
 
         // No linkage happens with rlibs, we just needed the metadata (which we
         // got long ago), so don't bother with anything.
@@ -202,7 +201,7 @@ fn calculate_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
     // static libraries.
     //
     // If the crate hasn't been included yet and it's not actually required
-    // (e.g. it's an allocator) then we skip it here as well.
+    // (e.g., it's an allocator) then we skip it here as well.
     for &cnum in tcx.crates().iter() {
         let src = tcx.used_crate_source(cnum);
         if src.dylib.is_none() &&
@@ -307,7 +306,7 @@ fn attempt_static<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) -> Option<DependencyLis
 
 // Given a list of how to link upstream dependencies so far, ensure that an
 // injected dependency is activated. This will not do anything if one was
-// transitively included already (e.g. via a dylib or explicitly so).
+// transitively included already (e.g., via a dylib or explicitly so).
 //
 // If an injected dependency was not found then we're guaranteed the
 // metadata::creader module has injected that dependency (not listed as

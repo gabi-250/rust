@@ -20,7 +20,6 @@
        test(attr(deny(warnings))))]
 
 #![feature(crate_visibility_modifier)]
-#![feature(macro_at_most_once_rep)]
 #![feature(nll)]
 #![feature(rustc_attrs)]
 #![feature(rustc_diagnostic_macros)]
@@ -135,7 +134,7 @@ pub mod diagnostics {
     pub mod metadata;
 }
 
-// NB: This module needs to be declared first so diagnostics are
+// N.B., this module needs to be declared first so diagnostics are
 // registered before they are used.
 pub mod diagnostic_list;
 
@@ -174,7 +173,6 @@ pub mod parse;
 pub mod ptr;
 pub mod show_span;
 pub mod std_inject;
-pub mod str;
 pub use syntax_pos::edition;
 pub use syntax_pos::symbol;
 pub mod test;

@@ -63,7 +63,7 @@ pub use context::CodegenCx;
 ///
 /// Each `Block` may contain an instance of this, indicating whether the block
 /// is part of a landing pad or not. This is used to make decision about whether
-/// to emit `invoke` instructions (e.g. in a landing pad we don't continue to
+/// to emit `invoke` instructions (e.g., in a landing pad we don't continue to
 /// use `invoke`) and also about various function call metadata.
 ///
 /// For GNU exceptions (`landingpad` + `resume` instructions) this structure is
@@ -98,7 +98,6 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
     type Value = &'ll Value;
     type BasicBlock = &'ll BasicBlock;
     type Type = &'ll Type;
-    type Context = &'ll llvm::Context;
     type Funclet = Funclet<'ll>;
 
     type DIScope = &'ll llvm::debuginfo::DIScope;
@@ -313,7 +312,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 if layout.value == layout::Pointer {
                     unsafe { llvm::LLVMConstIntToPtr(llval, llty) }
                 } else {
-                    self.static_bitcast(llval, llty)
+                    self.const_bitcast(llval, llty)
                 }
             },
             Scalar::Ptr(ptr) => {
@@ -337,14 +336,14 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     None => bug!("missing allocation {:?}", ptr.alloc_id),
                 };
                 let llval = unsafe { llvm::LLVMConstInBoundsGEP(
-                    self.static_bitcast(base_addr, self.type_i8p()),
+                    self.const_bitcast(base_addr, self.type_i8p()),
                     &self.const_usize(ptr.offset.bytes()),
                     1,
                 ) };
                 if layout.value != layout::Pointer {
                     unsafe { llvm::LLVMConstPtrToInt(llval, llty) }
                 } else {
-                    self.static_bitcast(llval, llty)
+                    self.const_bitcast(llval, llty)
                 }
             }
         }
@@ -357,15 +356,19 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         offset: Size,
     ) -> PlaceRef<'tcx, &'ll Value> {
         let init = const_alloc_to_llvm(self, alloc);
-        let base_addr = self.static_addr_of(init, layout.align, None);
+        let base_addr = self.static_addr_of(init, layout.align.abi, None);
 
         let llval = unsafe { llvm::LLVMConstInBoundsGEP(
-            self.static_bitcast(base_addr, self.type_i8p()),
+            self.const_bitcast(base_addr, self.type_i8p()),
             &self.const_usize(offset.bytes()),
             1,
         )};
-        let llval = self.static_bitcast(llval, self.type_ptr_to(layout.llvm_type(self)));
+        let llval = self.const_bitcast(llval, self.type_ptr_to(layout.llvm_type(self)));
         PlaceRef::new_sized(llval, layout, alloc.align)
+    }
+
+    fn const_ptrcast(&self, val: &'ll Value, ty: &'ll Type) -> &'ll Value {
+        consts::ptrcast(val, ty)
     }
 }
 

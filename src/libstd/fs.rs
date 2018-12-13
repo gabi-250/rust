@@ -256,7 +256,7 @@ fn initial_buffer_size(file: &File) -> usize {
 /// use std::fs;
 /// use std::net::SocketAddr;
 ///
-/// fn main() -> Result<(), Box<std::error::Error + 'static>> {
+/// fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 ///     let foo: SocketAddr = String::from_utf8_lossy(&fs::read("address.txt")?).parse()?;
 ///     Ok(())
 /// }
@@ -298,7 +298,7 @@ pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
 /// use std::fs;
 /// use std::net::SocketAddr;
 ///
-/// fn main() -> Result<(), Box<std::error::Error + 'static>> {
+/// fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
 ///     let foo: SocketAddr = fs::read_to_string("address.txt")?.parse()?;
 ///     Ok(())
 /// }
@@ -1406,7 +1406,7 @@ impl AsInner<fs_imp::DirEntry> for DirEntry {
 /// Removes a file from the filesystem.
 ///
 /// Note that there is no
-/// guarantee that the file is immediately deleted (e.g. depending on
+/// guarantee that the file is immediately deleted (e.g., depending on
 /// platform, other open file descriptors may prevent immediate removal).
 ///
 /// # Platform-specific behavior
@@ -2065,7 +2065,7 @@ impl DirBuilder {
             Err(e) => return Err(e),
         }
         match path.parent() {
-            Some(p) => try!(self.create_dir_all(p)),
+            Some(p) => self.create_dir_all(p)?,
             None => return Err(io::Error::new(io::ErrorKind::Other, "failed to create whole tree")),
         }
         match self.inner.mkdir(path) {
@@ -2089,7 +2089,7 @@ mod tests {
     use fs::{self, File, OpenOptions};
     use io::{ErrorKind, SeekFrom};
     use path::Path;
-    use rand::{StdRng, FromEntropy, RngCore};
+    use rand::{rngs::StdRng, FromEntropy, RngCore};
     use str;
     use sys_common::io::test::{TempDir, tmpdir};
     use thread;

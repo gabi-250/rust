@@ -54,12 +54,10 @@ pub mod target_features;
 /// reporting an error.
 pub fn check_for_rustc_errors_attr(tcx: TyCtxt) {
     if let Some((id, span, _)) = *tcx.sess.entry_fn.borrow() {
-        let main_def_id = tcx.hir.local_def_id(id);
+        let main_def_id = tcx.hir().local_def_id(id);
 
         if tcx.has_attr(main_def_id, "rustc_error") {
             tcx.sess.span_fatal(span, "compilation successful");
         }
     }
 }
-
-__build_diagnostic_array! { librustc_codegen_utils, DIAGNOSTICS }

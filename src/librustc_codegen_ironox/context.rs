@@ -35,7 +35,6 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
     type Value = &'ll Value;
     type BasicBlock = &'ll BasicBlock;
     type Type = &'ll Type;
-    type Context = ();
     type Funclet = ();
 
     type DIScope = &'ll DIScope;
@@ -133,10 +132,6 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn codegen_unit(&self) -> &Arc<CodegenUnit<'tcx>> {
         &self.codegen_unit
-    }
-
-    fn statics_to_rauw(&self) -> &RefCell<Vec<(&'ll Value, &'ll Value)>> {
-        unimplemented!("statics_to_rauw");
     }
 
     fn used_statics(&self) -> &RefCell<Vec<&'ll Value>> {
@@ -270,6 +265,10 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn const_to_opt_u128(&self, v: &'ll Value, sign_ext: bool) -> Option<u128> {
         unimplemented!("const_to_opt_u128");
+    }
+
+    fn const_ptrcast(&self, val: &'ll Value, ty: &'ll Type) -> &'ll Value {
+        unimplemented!("const_ptrcast");
     }
 
     fn scalar_to_backend(

@@ -21,7 +21,7 @@
 //! Rust represents owned strings with the [`String`] type, and
 //! borrowed slices of strings with the [`str`] primitive. Both are
 //! always in UTF-8 encoding, and may contain nul bytes in the middle,
-//! i.e. if you look at the bytes that make up the string, there may
+//! i.e., if you look at the bytes that make up the string, there may
 //! be a `\0` among them. Both `String` and `str` store their length
 //! explicitly; there are no nul terminators at the end of strings
 //! like in C.
@@ -44,7 +44,7 @@
 //! code point]'.
 //!
 //! * **Nul terminators and implicit string lengths** - Often, C
-//! strings are nul-terminated, i.e. they have a `\0` character at the
+//! strings are nul-terminated, i.e., they have a `\0` character at the
 //! end. The length of a string buffer is not stored, but has to be
 //! calculated; to compute the length of a string, C code must
 //! manually call a function like `strlen()` for `char`-based strings,
@@ -112,12 +112,12 @@
 //! ## On Unix
 //!
 //! On Unix, [`OsStr`] implements the
-//! `std::os::unix:ffi::`[`OsStrExt`][unix.OsStrExt] trait, which
+//! `std::os::unix::ffi::`[`OsStrExt`][unix.OsStrExt] trait, which
 //! augments it with two methods, [`from_bytes`] and [`as_bytes`].
 //! These do inexpensive conversions from and to UTF-8 byte slices.
 //!
 //! Additionally, on Unix [`OsString`] implements the
-//! `std::os::unix:ffi::`[`OsStringExt`][unix.OsStringExt] trait,
+//! `std::os::unix::ffi::`[`OsStringExt`][unix.OsStringExt] trait,
 //! which provides [`from_vec`] and [`into_vec`] methods that consume
 //! their arguments, and take or produce vectors of [`u8`].
 //!
@@ -173,6 +173,13 @@ pub use self::os_str::{OsString, OsStr};
 
 #[stable(feature = "raw_os", since = "1.1.0")]
 pub use core::ffi::c_void;
+
+#[cfg(not(stage0))]
+#[unstable(feature = "c_variadic",
+           reason = "the `c_variadic` feature has not been properly tested on \
+                     all supported platforms",
+           issue = "27745")]
+pub use core::ffi::VaList;
 
 mod c_str;
 mod os_str;

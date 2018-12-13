@@ -24,6 +24,16 @@ pub struct Type {
     size: u64
 }
 
+impl CodegenCx<'ll, 'tcx> {
+    crate fn type_named_struct(&self, name: &str) -> &'ll Type {
+        unimplemented!("type_named_struct");
+    }
+
+    crate fn set_struct_body(&self, ty: &'ll Type, els: &[&'ll Type], packed: bool) {
+        unimplemented!("set_struct_body");
+    }
+}
+
 impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn type_void(&self) -> &'ll Type {
         unimplemented!("type_void");
@@ -102,10 +112,6 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         unimplemented!("type_struct");
     }
 
-    fn type_named_struct(&self, name: &str) -> &'ll Type {
-        unimplemented!("type_named_struct");
-    }
-
     fn type_array(&self, ty: &'ll Type, len: u64) -> &'ll Type {
         unimplemented!("type_array");
     }
@@ -116,10 +122,6 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn type_kind(&self, ty: &'ll Type) -> TypeKind {
         unimplemented!("type_kind");
-    }
-
-    fn set_struct_body(&self, ty: &'ll Type, els: &[&'ll Type], packed: bool) {
-        unimplemented!("set_struct_body");
     }
 
     fn type_ptr_to(&self, ty: &'ll Type) -> &'ll Type {

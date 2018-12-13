@@ -55,7 +55,7 @@ impl ClauseVisitor<'set, 'a, 'tcx> {
                     ty::ReLateBound(ty::INNERMOST, ty::BoundRegion::BrAnon(0))
                 );
                 let ty = self.tcx.mk_ty(
-                    ty::Bound(ty::BoundTy::new(ty::INNERMOST, ty::BoundVar::from_u32(1)))
+                    ty::Bound(ty::INNERMOST, ty::BoundVar::from_u32(1).into())
                 );
 
                 let ref_ty = self.tcx.mk_ref(region, ty::TypeAndMut {
@@ -114,6 +114,7 @@ impl ClauseVisitor<'set, 'a, 'tcx> {
             ty::Tuple(..) |
             ty::Never |
             ty::Infer(..) |
+            ty::Placeholder(..) |
             ty::Bound(..) => (),
 
             ty::GeneratorWitness(..) |
@@ -227,8 +228,8 @@ crate fn environment<'a, 'tcx>(
         // could bound lifetimes.
         .map(Clause::ForAll);
 
-    let node_id = tcx.hir.as_local_node_id(def_id).unwrap();
-    let node = tcx.hir.get(node_id);
+    let node_id = tcx.hir().as_local_node_id(def_id).unwrap();
+    let node = tcx.hir().get(node_id);
 
     let mut is_fn = false;
     let mut is_impl = false;

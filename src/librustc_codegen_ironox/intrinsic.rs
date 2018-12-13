@@ -13,7 +13,7 @@ use context::CodegenCx;
 use value::Value;
 
 use rustc::ty::Ty;
-use rustc_codegen_ssa::traits::{IntrinsicCallMethods, IntrinsicDeclarationMethods};
+use rustc_codegen_ssa::traits::IntrinsicCallMethods;
 use rustc_codegen_ssa::mir::operand::OperandRef;
 use rustc_target::abi::call::FnType;
 use syntax_pos::Span;
@@ -29,17 +29,16 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     ) {
         unimplemented!("codegen_intrinsic_call");
     }
-}
 
-impl IntrinsicDeclarationMethods<'tcx> for CodegenCx<'b, 'tcx> {
-    fn get_intrinsic(&self, key: &str) -> &'b Value {
-        unimplemented!("get_intrinsic");
+    fn abort(&mut self) {
+        unimplemented!("abort");
     }
 
-    fn declare_intrinsic(
-        &self,
-        key: &str
-    ) -> Option<&'b Value> {
-        unimplemented!("declare_intrinsic");
+    fn assume(&mut self, val: &'ll Value) {
+        unimplemented!("assume");
+    }
+
+    fn expect(&mut self, cond: &'ll Value, expected: bool) -> &'ll Value {
+        unimplemented!("expect");
     }
 }

@@ -30,7 +30,7 @@
 //!
 //! For more information about how rustc works, see the [rustc guide].
 //!
-//! [rustc guide]: https://rust-lang-nursery.github.io/rustc-guide/
+//! [rustc guide]: https://rust-lang.github.io/rustc-guide/
 //!
 //! # Note
 //!
@@ -67,7 +67,6 @@
 #![feature(integer_atomics)]
 #![feature(test)]
 #![feature(in_band_lifetimes)]
-#![feature(macro_at_most_once_rep)]
 #![feature(crate_visibility_modifier)]
 #![feature(transpose_result)]
 
@@ -120,7 +119,7 @@ extern crate test;
 #[macro_use]
 mod macros;
 
-// NB: This module needs to be declared first so diagnostics are
+// N.B., this module needs to be declared first so diagnostics are
 // registered before they are used.
 pub mod diagnostics;
 

@@ -16,8 +16,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::fmt;
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs;
 use std::iter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -833,18 +832,6 @@ host_test!(RunFailFullDeps {
     suite: "run-fail-fulldeps"
 });
 
-host_test!(CompileFailFullDeps {
-    path: "src/test/compile-fail-fulldeps",
-    mode: "compile-fail",
-    suite: "compile-fail-fulldeps"
-});
-
-host_test!(IncrementalFullDeps {
-    path: "src/test/incremental-fulldeps",
-    mode: "incremental",
-    suite: "incremental-fulldeps"
-});
-
 host_test!(Rustdoc {
     path: "src/test/rustdoc",
     mode: "rustdoc",
@@ -977,10 +964,15 @@ impl Step for Compiletest {
         }
 
         if builder.no_std(target) == Some(true) {
-            // for no_std run-make (e.g. thumb*),
+            // for no_std run-make (e.g., thumb*),
             // we need a host compiler which is called by cargo.
             builder.ensure(compile::Std { compiler, target: compiler.host });
         }
+
+        // HACK(eddyb) ensure that `libproc_macro` is available on the host.
+        builder.ensure(compile::Test { compiler, target: compiler.host });
+        // Also provide `rust_test_helpers` for the host.
+        builder.ensure(native::TestHelpers { target: compiler.host });
 
         builder.ensure(native::TestHelpers { target });
         builder.ensure(RemoteCopyLibs { compiler, target });
@@ -1023,7 +1015,13 @@ impl Step for Compiletest {
             cmd.arg("--bless");
         }
 
-        let compare_mode = builder.config.cmd.compare_mode().or(self.compare_mode);
+        let compare_mode = builder.config.cmd.compare_mode().or_else(|| {
+            if builder.config.test_compare_mode {
+                self.compare_mode
+            } else {
+                None
+            }
+        });
 
         if let Some(ref nodejs) = builder.config.nodejs {
             cmd.arg("--nodejs").arg(nodejs);
@@ -1049,7 +1047,11 @@ impl Step for Compiletest {
             cmd.arg("--linker").arg(linker);
         }
 
-        let hostflags = flags.clone();
+        let mut hostflags = flags.clone();
+        hostflags.push(format!(
+            "-Lnative={}",
+            builder.test_helpers_out(compiler.host).display()
+        ));
         cmd.arg("--host-rustcflags").arg(hostflags.join(" "));
 
         let mut targetflags = flags;
@@ -1268,7 +1270,7 @@ impl Step for DocTest {
 
     /// Run `rustdoc --test` for all documentation in `src/doc`.
     ///
-    /// This will run all tests in our markdown documentation (e.g. the book)
+    /// This will run all tests in our markdown documentation (e.g., the book)
     /// located in `src/doc`. The `rustdoc` that's run is the one that sits next to
     /// `compiler`.
     fn run(self, builder: &Builder) {
@@ -1418,10 +1420,8 @@ impl Step for ErrorIndex {
 }
 
 fn markdown_test(builder: &Builder, compiler: Compiler, markdown: &Path) -> bool {
-    match File::open(markdown) {
-        Ok(mut file) => {
-            let mut contents = String::new();
-            t!(file.read_to_string(&mut contents));
+    match fs::read_to_string(markdown) {
+        Ok(contents) => {
             if !contents.contains("```") {
                 return true;
             }
@@ -1558,10 +1558,7 @@ impl Step for Crate {
         let builder = run.builder;
         run = run.krate("test");
         for krate in run.builder.in_tree_crates("std") {
-            if krate.is_local(&run.builder)
-                && !(krate.name.starts_with("rustc_") && krate.name.ends_with("san"))
-                && krate.name != "dlmalloc"
-            {
+            if !(krate.name.starts_with("rustc_") && krate.name.ends_with("san")) {
                 run = run.path(krate.local_path(&builder).to_str().unwrap());
             }
         }

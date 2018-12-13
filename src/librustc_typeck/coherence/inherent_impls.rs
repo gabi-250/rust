@@ -22,7 +22,6 @@ use rustc::hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
 use rustc::hir;
 use rustc::hir::itemlikevisit::ItemLikeVisitor;
 use rustc::ty::{self, CrateInherentImpls, TyCtxt};
-use rustc::util::nodemap::DefIdMap;
 
 use rustc_data_structures::sync::Lrc;
 use syntax::ast;
@@ -34,12 +33,10 @@ pub fn crate_inherent_impls<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                                       -> Lrc<CrateInherentImpls> {
     assert_eq!(crate_num, LOCAL_CRATE);
 
-    let krate = tcx.hir.krate();
+    let krate = tcx.hir().krate();
     let mut collect = InherentCollect {
         tcx,
-        impls_map: CrateInherentImpls {
-            inherent_impls: DefIdMap()
-        }
+        impls_map: Default::default(),
     };
     krate.visit_all_item_likes(&mut collect);
     Lrc::new(collect.impls_map)
@@ -98,7 +95,7 @@ impl<'a, 'tcx, 'v> ItemLikeVisitor<'v> for InherentCollect<'a, 'tcx> {
             _ => return
         };
 
-        let def_id = self.tcx.hir.local_def_id(item.id);
+        let def_id = self.tcx.hir().local_def_id(item.id);
         let self_ty = self.tcx.type_of(def_id);
         let lang_items = self.tcx.lang_items();
         match self_ty.sty {
@@ -301,7 +298,7 @@ impl<'a, 'tcx> InherentCollect<'a, 'tcx> {
             // Add the implementation to the mapping from implementation to base
             // type def ID, if there is a base type for this implementation and
             // the implementation does not have any associated traits.
-            let impl_def_id = self.tcx.hir.local_def_id(item.id);
+            let impl_def_id = self.tcx.hir().local_def_id(item.id);
             let mut rc_vec = self.impls_map.inherent_impls
                                            .entry(def_id)
                                            .or_default();

@@ -219,7 +219,7 @@ pub struct InferCtxt<'a, 'gcx: 'a + 'tcx, 'tcx: 'a> {
     /// `UniverseIndex::root()` but grows from there as we enter
     /// universal quantifiers.
     ///
-    /// NB: At present, we exclude the universal quantifiers on the
+    /// N.B., at present, we exclude the universal quantifiers on the
     /// item we are type-checking, and just consider those names as
     /// part of the root universe. So this would only get incremented
     /// when we enter into a higher-ranked (`for<..>`) type or trait
@@ -227,7 +227,7 @@ pub struct InferCtxt<'a, 'gcx: 'a + 'tcx, 'tcx: 'a> {
     universe: Cell<ty::UniverseIndex>,
 }
 
-/// A map returned by `replace_late_bound_regions_with_placeholders()`
+/// A map returned by `replace_bound_vars_with_placeholders()`
 /// indicating the placeholder region that each late-bound region was
 /// replaced with.
 pub type PlaceholderMap<'tcx> = BTreeMap<ty::BoundRegion, ty::Region<'tcx>>;
@@ -411,7 +411,7 @@ pub enum NLLRegionVariableOrigin {
 
     /// "Universal" instantiation of a higher-ranked region (e.g.,
     /// from a `for<'a> T` binder). Meant to represent "any region".
-    Placeholder(ty::Placeholder),
+    Placeholder(ty::PlaceholderRegion),
 
     Existential,
 }
@@ -732,7 +732,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
             region_obligations_snapshot: self.region_obligations.borrow().len(),
             universe: self.universe(),
             was_in_snapshot: in_snapshot,
-            // Borrow tables "in progress" (i.e. during typeck)
+            // Borrow tables "in progress" (i.e., during typeck)
             // to ban writes from within a snapshot to them.
             _in_progress_tables: self.in_progress_tables.map(|tables| tables.borrow()),
         }
@@ -790,7 +790,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
 
         self.projection_cache
             .borrow_mut()
-            .commit(&projection_cache_snapshot);
+            .commit(projection_cache_snapshot);
         self.type_variables.borrow_mut().commit(type_snapshot);
         self.int_unification_table.borrow_mut().commit(int_snapshot);
         self.float_unification_table
@@ -935,7 +935,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                     b,
                 },
                 placeholder_map,
-            ) = self.replace_late_bound_regions_with_placeholders(predicate);
+            ) = self.replace_bound_vars_with_placeholders(predicate);
 
             let cause_span = cause.span;
             let ok = self.at(cause, param_env).sub_exp(a_is_expected, a, b)?;
@@ -952,7 +952,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
     ) -> UnitResult<'tcx> {
         self.commit_if_ok(|snapshot| {
             let (ty::OutlivesPredicate(r_a, r_b), placeholder_map) =
-                self.replace_late_bound_regions_with_placeholders(predicate);
+                self.replace_bound_vars_with_placeholders(predicate);
             let origin = SubregionOrigin::from_obligation_cause(cause, || {
                 RelateRegionParamBound(cause.span)
             });
@@ -970,6 +970,17 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
 
     pub fn next_ty_var(&self, origin: TypeVariableOrigin) -> Ty<'tcx> {
         self.tcx.mk_var(self.next_ty_var_id(false, origin))
+    }
+
+    pub fn next_ty_var_in_universe(
+        &self,
+        origin: TypeVariableOrigin,
+        universe: ty::UniverseIndex
+    ) -> Ty<'tcx> {
+        let vid = self.type_variables
+            .borrow_mut()
+            .new_var(universe, false, origin);
+        self.tcx.mk_var(vid)
     }
 
     pub fn next_diverging_ty_var(&self, origin: TypeVariableOrigin) -> Ty<'tcx> {
@@ -1036,7 +1047,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                 // type parameter definition. The substitutions are
                 // for actual parameters that may be referred to by
                 // the default of this type parameter, if it exists.
-                // E.g. `struct Foo<A, B, C = (A, B)>(...);` when
+                // e.g., `struct Foo<A, B, C = (A, B)>(...);` when
                 // used in a path such as `Foo::<T, U>::new()` will
                 // use an inference variable for `C` with `[T, U]`
                 // as the substitutions for the default, `(T, U)`.
@@ -1227,6 +1238,17 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         }
     }
 
+    /// If `TyVar(vid)` resolves to a type, return that type. Else, return the
+    /// universe index of `TyVar(vid)`.
+    pub fn probe_ty_var(&self, vid: TyVid) -> Result<Ty<'tcx>, ty::UniverseIndex> {
+        use self::type_variable::TypeVariableValue;
+
+        match self.type_variables.borrow_mut().probe(vid) {
+            TypeVariableValue::Known { value } => Ok(value),
+            TypeVariableValue::Unknown { universe } => Err(universe),
+        }
+    }
+
     pub fn shallow_resolve(&self, typ: Ty<'tcx>) -> Ty<'tcx> {
         self.inlined_shallow_resolve(typ)
     }
@@ -1239,7 +1261,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
          * Where possible, replaces type/int/float variables in
          * `value` with their final value. Note that region variables
          * are unaffected. If a type variable has not been unified, it
-         * is left as is.  This is an idempotent operation that does
+         * is left as is. This is an idempotent operation that does
          * not affect inference state in any way and so you can do it
          * at will.
          */
@@ -1276,7 +1298,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         /*!
          * Attempts to resolve all type/region variables in
          * `value`. Region inference must have been run already (e.g.,
-         * by calling `resolve_regions_and_report_errors`).  If some
+         * by calling `resolve_regions_and_report_errors`). If some
          * variable was never unified, an `Err` results.
          *
          * This method is idempotent, but it not typically not invoked
@@ -1309,7 +1331,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         let actual_ty = self.resolve_type_vars_if_possible(&actual_ty);
         debug!("type_error_struct_with_diag({:?}, {:?})", sp, actual_ty);
 
-        // Don't report an error if actual type is Error.
+        // Don't report an error if actual type is `Error`.
         if actual_ty.references_error() {
             return self.tcx.sess.diagnostic().struct_dummy();
         }

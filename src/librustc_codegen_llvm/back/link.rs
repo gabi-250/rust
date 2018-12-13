@@ -19,7 +19,7 @@ use super::rpath::RPathConfig;
 use super::rpath;
 use metadata::METADATA_FILENAME;
 use rustc::session::config::{self, DebugInfo, OutputFilenames, OutputType, PrintRequest};
-use rustc::session::config::{RUST_CGU_EXT, Lto};
+use rustc::session::config::{RUST_CGU_EXT, Lto, Sanitizer};
 use rustc::session::filesearch;
 use rustc::session::search_paths::PathKind;
 use rustc::session::Session;
@@ -72,12 +72,12 @@ pub(crate) fn link_binary(sess: &Session,
            bug!("invalid output type `{:?}` for target os `{}`",
                 crate_type, sess.opts.target_triple);
         }
-        let mut out_files = link_binary_output(sess,
-                                               codegen_results,
-                                               crate_type,
-                                               outputs,
-                                               crate_name);
-        out_filenames.append(&mut out_files);
+        let out_files = link_binary_output(sess,
+                                           codegen_results,
+                                           crate_type,
+                                           outputs,
+                                           crate_name);
+        out_filenames.extend(out_files);
     }
 
     // Remove the temporary object file and metadata if we aren't saving temps
@@ -491,6 +491,14 @@ fn link_natively(sess: &Session,
     }
     cmd.args(&sess.opts.debugging_opts.pre_link_arg);
 
+    if sess.target.target.options.is_like_fuchsia {
+        let prefix = match sess.opts.debugging_opts.sanitizer {
+            Some(Sanitizer::Address) => "asan/",
+            _ => "",
+        };
+        cmd.arg(format!("--dynamic-linker={}ld.so.1", prefix));
+    }
+
     let pre_link_objects = if crate_type == config::CrateType::Executable {
         &sess.target.target.options.pre_link_objects_exe
     } else {
@@ -692,6 +700,11 @@ fn link_natively(sess: &Session,
 
     if sess.opts.target_triple.triple() == "wasm32-unknown-unknown" {
         wasm::rewrite_imports(&out_filename, &codegen_results.crate_info.wasm_imports);
+        wasm::add_producer_section(
+            &out_filename,
+            &sess.edition().to_string(),
+            option_env!("CFG_VERSION").unwrap_or("unknown"),
+        );
     }
 }
 
@@ -981,7 +994,7 @@ fn link_args(cmd: &mut dyn Linker,
     //
     // The rationale behind this ordering is that those items lower down in the
     // list can't depend on items higher up in the list. For example nothing can
-    // depend on what we just generated (e.g. that'd be a circular dependency).
+    // depend on what we just generated (e.g., that'd be a circular dependency).
     // Upstream rust libraries are not allowed to depend on our local native
     // libraries as that would violate the structure of the DAG, in that
     // scenario they are required to link to them as well in a shared fashion.
@@ -990,7 +1003,7 @@ fn link_args(cmd: &mut dyn Linker,
     // well, but they also can't depend on what we just started to add to the
     // link line. And finally upstream native libraries can't depend on anything
     // in this DAG so far because they're only dylibs and dylibs can only depend
-    // on other dylibs (e.g. other native deps).
+    // on other dylibs (e.g., other native deps).
     add_local_native_libraries(cmd, sess, codegen_results);
     add_upstream_rust_crates(cmd, sess, codegen_results, crate_type, tmpdir);
     add_upstream_native_libraries(cmd, sess, codegen_results, crate_type);
@@ -1192,7 +1205,7 @@ fn add_upstream_rust_crates(cmd: &mut dyn Linker,
     // compiler-builtins are always placed last to ensure that they're
     // linked correctly.
     // We must always link the `compiler_builtins` crate statically. Even if it
-    // was already "included" in a dylib (e.g. `libstd` when `-C prefer-dynamic`
+    // was already "included" in a dylib (e.g., `libstd` when `-C prefer-dynamic`
     // is used)
     if let Some(cnum) = compiler_builtins {
         add_static_crate(cmd, sess, codegen_results, tmpdir, crate_type, cnum);
@@ -1372,7 +1385,7 @@ fn add_upstream_rust_crates(cmd: &mut dyn Linker,
             // because a `dylib` can be reused as an intermediate artifact.
             //
             // Note, though, that we don't want to include the whole of a
-            // compiler-builtins crate (e.g. compiler-rt) because it'll get
+            // compiler-builtins crate (e.g., compiler-rt) because it'll get
             // repeatedly linked anyway.
             if crate_type == config::CrateType::Dylib &&
                 codegen_results.crate_info.compiler_builtins != Some(cnum) {

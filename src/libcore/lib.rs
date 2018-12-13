@@ -92,8 +92,8 @@
 #![feature(link_llvm_intrinsics)]
 #![feature(never_type)]
 #![feature(nll)]
+#![feature(bind_by_move_pattern_guards)]
 #![feature(exhaustive_patterns)]
-#![feature(macro_at_most_once_rep)]
 #![feature(no_core)]
 #![feature(on_unimplemented)]
 #![feature(optin_builtin_traits)]
@@ -251,9 +251,7 @@ macro_rules! vector_impl { ($([$f:ident, $($args:tt)*]),*) => { $($f!($($args)*)
 #[path = "../stdsimd/coresimd/mod.rs"]
 #[allow(missing_docs, missing_debug_implementations, dead_code, unused_imports)]
 #[unstable(feature = "stdsimd", issue = "48556")]
-#[cfg(not(stage0))] // allow changes to how stdsimd works in stage0
 mod coresimd;
 
 #[stable(feature = "simd_arch", since = "1.27.0")]
-#[cfg(not(stage0))]
 pub use coresimd::arch;

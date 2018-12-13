@@ -18,8 +18,7 @@
 //! `rustdoc`.
 
 use std::collections::HashSet;
-use std::fs::{self, File};
-use std::io::prelude::*;
+use std::fs;
 use std::io;
 use std::path::{PathBuf, Path};
 
@@ -70,6 +69,7 @@ macro_rules! book {
 book!(
     Nomicon, "src/doc/nomicon", "nomicon";
     Reference, "src/doc/reference", "reference";
+    EditionGuide, "src/doc/edition-guide", "edition-guide";
     RustdocBook, "src/doc/rustdoc", "rustdoc";
     RustcBook, "src/doc/rustc", "rustc";
     RustByExample, "src/doc/rust-by-example", "rust-by-example";
@@ -260,22 +260,31 @@ impl Step for TheBook {
         let compiler = self.compiler;
         let target = self.target;
         let name = self.name;
-        // build book first edition
+
+        // build book
         builder.ensure(Rustbook {
             target,
-            name: INTERNER.intern_string(format!("{}/first-edition", name)),
+            name: INTERNER.intern_string(name.to_string()),
         });
 
-        // build book second edition
+        // building older edition redirects
+
+        let source_name = format!("{}/first-edition", name);
         builder.ensure(Rustbook {
             target,
-            name: INTERNER.intern_string(format!("{}/second-edition", name)),
+            name: INTERNER.intern_string(source_name),
         });
 
-        // build book 2018 edition
+        let source_name = format!("{}/second-edition", name);
         builder.ensure(Rustbook {
             target,
-            name: INTERNER.intern_string(format!("{}/2018-edition", name)),
+            name: INTERNER.intern_string(source_name),
+        });
+
+        let source_name = format!("{}/2018-edition", name);
+        builder.ensure(Rustbook {
+            target,
+            name: INTERNER.intern_string(source_name),
         });
 
         // build the version info page and CSS
@@ -283,11 +292,6 @@ impl Step for TheBook {
             compiler,
             target,
         });
-
-        // build the index page
-        let index = format!("{}/index.md", name);
-        builder.info(&format!("Documenting book index ({})", target));
-        invoke_rustdoc(builder, compiler, target, &index);
 
         // build the redirect pages
         builder.info(&format!("Documenting book redirect pages ({})", target));
@@ -374,12 +378,11 @@ impl Step for Standalone {
         let version_info = out.join("version_info.html");
 
         if !builder.config.dry_run && !up_to_date(&version_input, &version_info) {
-            let mut info = String::new();
-            t!(t!(File::open(&version_input)).read_to_string(&mut info));
-            let info = info.replace("VERSION", &builder.rust_release())
-                           .replace("SHORT_HASH", builder.rust_info.sha_short().unwrap_or(""))
-                           .replace("STAMP", builder.rust_info.sha().unwrap_or(""));
-            t!(t!(File::create(&version_info)).write_all(info.as_bytes()));
+            let info = t!(fs::read_to_string(&version_input))
+                .replace("VERSION", &builder.rust_release())
+                .replace("SHORT_HASH", builder.rust_info.sha_short().unwrap_or(""))
+                .replace("STAMP", builder.rust_info.sha().unwrap_or(""));
+            t!(fs::write(&version_info, &info));
         }
 
         for file in t!(fs::read_dir(builder.src.join("src/doc"))) {
@@ -692,9 +695,6 @@ impl Step for Rustc {
             return;
         }
 
-        // Build libstd docs so that we generate relative links.
-        builder.ensure(Std { stage, target });
-
         // Build rustc.
         builder.ensure(compile::Rustc { compiler, target });
 
@@ -713,12 +713,16 @@ impl Step for Rustc {
 
         // Find dependencies for top level crates.
         let mut compiler_crates = HashSet::new();
-        for root_crate in &["rustc", "rustc_driver", "rustc_codegen_llvm"] {
+        for root_crate in &["rustc_driver", "rustc_codegen_llvm", "rustc_codegen_ssa"] {
             let interned_root_crate = INTERNER.intern_str(root_crate);
             find_compiler_crates(builder, &interned_root_crate, &mut compiler_crates);
         }
 
         for krate in &compiler_crates {
+            // Create all crate output directories first to make sure rustdoc uses
+            // relative links.
+            // FIXME: Cargo should probably do this itself.
+            t!(fs::create_dir_all(out_dir.join(krate)));
             cargo.arg("-p").arg(krate);
         }
 
@@ -792,8 +796,8 @@ impl Step for Rustdoc {
             return;
         }
 
-        // Build libstd docs so that we generate relative links.
-        builder.ensure(Std { stage, target });
+        // Build rustc docs so that we generate relative links.
+        builder.ensure(Rustc { stage, target });
 
         // Build rustdoc.
         builder.ensure(tool::Rustdoc { host: compiler.host });
@@ -816,6 +820,10 @@ impl Step for Rustdoc {
             SourceType::InTree,
             &[]
         );
+
+        // Only include compiler crates, no dependencies of those, such as `libc`.
+        cargo.arg("--no-deps");
+        cargo.arg("-p").arg("rustdoc");
 
         cargo.env("RUSTDOCFLAGS", "--document-private-items");
         builder.run(&mut cargo);
@@ -910,13 +918,13 @@ fn symlink_dir_force(config: &Config, src: &Path, dst: &Path) -> io::Result<()> 
     }
     if let Ok(m) = fs::symlink_metadata(dst) {
         if m.file_type().is_dir() {
-            try!(fs::remove_dir_all(dst));
+            fs::remove_dir_all(dst)?;
         } else {
             // handle directory junctions on windows by falling back to
             // `remove_dir`.
-            try!(fs::remove_file(dst).or_else(|_| {
+            fs::remove_file(dst).or_else(|_| {
                 fs::remove_dir(dst)
-            }));
+            })?;
         }
     }
 

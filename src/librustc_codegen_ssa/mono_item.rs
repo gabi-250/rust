@@ -8,12 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Walks the crate looking for items/impl-items/trait-items that have
-//! either a `rustc_symbol_name` or `rustc_item_path` attribute and
-//! generates an error giving, respectively, the symbol name or
-//! item-path. This is used for unit testing the code that generates
-//! paths etc in all kinds of annoying scenarios.
-
 use base;
 use rustc::hir;
 use rustc::hir::def::Def;
@@ -48,7 +42,7 @@ pub trait MonoItemExt<'a, 'tcx: 'a>: fmt::Debug + BaseMonoItemExt<'a, 'tcx> {
                 cx.codegen_static(def_id, is_mutable);
             }
             MonoItem::GlobalAsm(node_id) => {
-                let item = cx.tcx().hir.expect_item(node_id);
+                let item = cx.tcx().hir().expect_item(node_id);
                 if let hir::ItemKind::GlobalAsm(ref ga) = item.node {
                     cx.codegen_global_asm(ga);
                 } else {

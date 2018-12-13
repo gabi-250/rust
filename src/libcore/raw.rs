@@ -21,14 +21,10 @@
 /// The representation of a trait object like `&SomeTrait`.
 ///
 /// This struct has the same layout as types like `&SomeTrait` and
-/// `Box<AnotherTrait>`. The [Trait Objects chapter of the
-/// Book][moreinfo] contains more details about the precise nature of
-/// these internals.
-///
-/// [moreinfo]: ../../book/first-edition/trait-objects.html#representation
+/// `Box<dyn AnotherTrait>`.
 ///
 /// `TraitObject` is guaranteed to match layouts, but it is not the
-/// type of trait objects (e.g. the fields are not directly accessible
+/// type of trait objects (e.g., the fields are not directly accessible
 /// on a `&SomeTrait`) nor does it control that layout (changing the
 /// definition will not change the layout of a `&SomeTrait`). It is
 /// only designed to be used by unsafe code that needs to manipulate

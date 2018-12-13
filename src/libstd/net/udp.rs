@@ -752,7 +752,7 @@ impl UdpSocket {
     /// Moves this UDP socket into or out of nonblocking mode.
     ///
     /// This will result in `recv`, `recv_from`, `send`, and `send_to`
-    /// operations becoming nonblocking, i.e. immediately returning from their
+    /// operations becoming nonblocking, i.e., immediately returning from their
     /// calls. If the IO operation is successful, `Ok` is returned and no
     /// further action is required. If the IO operation could not be completed
     /// and needs to be retried, an error with kind
@@ -1030,8 +1030,14 @@ mod tests {
         let mut buf = [0; 10];
 
         let start = Instant::now();
-        let kind = stream.recv_from(&mut buf).err().expect("expected error").kind();
-        assert!(kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut);
+        loop {
+            let kind = stream.recv_from(&mut buf).err().expect("expected error").kind();
+            if kind != ErrorKind::Interrupted {
+                assert!(kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut,
+                        "unexpected_error: {:?}", kind);
+                break;
+            }
+        }
         assert!(start.elapsed() > Duration::from_millis(400));
     }
 
@@ -1049,8 +1055,14 @@ mod tests {
         assert_eq!(b"hello world", &buf[..]);
 
         let start = Instant::now();
-        let kind = stream.recv_from(&mut buf).err().expect("expected error").kind();
-        assert!(kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut);
+        loop {
+            let kind = stream.recv_from(&mut buf).err().expect("expected error").kind();
+            if kind != ErrorKind::Interrupted {
+                assert!(kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut,
+                        "unexpected_error: {:?}", kind);
+                break;
+            }
+        }
         assert!(start.elapsed() > Duration::from_millis(400));
     }
 

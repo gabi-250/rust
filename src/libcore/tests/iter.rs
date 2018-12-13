@@ -1001,6 +1001,8 @@ fn test_cycle() {
     let mut it = (0..).step_by(1).take(0).cycle();
     assert_eq!(it.size_hint(), (0, Some(0)));
     assert_eq!(it.next(), None);
+
+    assert_eq!(empty::<i32>().cycle().fold(0, |acc, x| acc + x), 0);
 }
 
 #[test]
@@ -1247,6 +1249,23 @@ fn test_cloned() {
     assert_eq!(it.next_back(), Some(6));
     assert_eq!(it.len(), 0);
     assert_eq!(it.next_back(), None);
+}
+
+#[test]
+fn test_cloned_side_effects() {
+    let mut count = 0;
+    {
+        let iter = [1, 2, 3]
+            .iter()
+            .map(|x| {
+                count += 1;
+                x
+            })
+            .cloned()
+            .zip(&[1]);
+        for _ in iter {}
+    }
+    assert_eq!(count, 2);
 }
 
 #[test]
@@ -1619,6 +1638,13 @@ fn test_range_step() {
 }
 
 #[test]
+fn test_step_by_skip() {
+    assert_eq!((0..640).step_by(128).skip(1).collect::<Vec<_>>(), [128, 256, 384, 512]);
+    assert_eq!((0..=50).step_by(10).nth(3), Some(30));
+    assert_eq!((200..=255u8).step_by(10).nth(3), Some(230));
+}
+
+#[test]
 fn test_range_inclusive_step() {
     assert_eq!((0..=50).step_by(10).collect::<Vec<_>>(), [0, 10, 20, 30, 40, 50]);
     assert_eq!((0..=5).step_by(1).collect::<Vec<_>>(), [0, 1, 2, 3, 4, 5]);
@@ -1750,6 +1776,17 @@ fn test_repeat_with_take_collect() {
     let v: Vec<_> = repeat_with(|| { let tmp = curr; curr *= 2; tmp })
                       .take(5).collect();
     assert_eq!(v, vec![1, 2, 4, 8, 16]);
+}
+
+#[test]
+fn test_successors() {
+    let mut powers_of_10 = successors(Some(1_u16), |n| n.checked_mul(10));
+    assert_eq!(powers_of_10.by_ref().collect::<Vec<_>>(), &[1, 10, 100, 1_000, 10_000]);
+    assert_eq!(powers_of_10.next(), None);
+
+    let mut empty = successors(None::<u32>, |_| unimplemented!());
+    assert_eq!(empty.next(), None);
+    assert_eq!(empty.next(), None);
 }
 
 #[test]

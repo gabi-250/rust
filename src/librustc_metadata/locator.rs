@@ -661,7 +661,7 @@ impl<'a> Context<'a> {
             // Ok so at this point we've determined that `(lib, kind)` above is
             // a candidate crate to load, and that `slot` is either none (this
             // is the first crate of its kind) or if some the previous path has
-            // the exact same hash (e.g. it's the exact same crate).
+            // the exact same hash (e.g., it's the exact same crate).
             //
             // In principle these two candidate crates are exactly the same so
             // we can choose either of them to link. As a stupidly gross hack,
@@ -713,7 +713,7 @@ impl<'a> Context<'a> {
 
         let root = metadata.get_root();
         if let Some(is_proc_macro) = self.is_proc_macro {
-            if root.macro_derive_registrar.is_some() != is_proc_macro {
+            if root.proc_macro_decls_static.is_some() != is_proc_macro {
                 return None;
             }
         }

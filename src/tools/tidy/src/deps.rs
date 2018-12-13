@@ -8,11 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Check license of third-party deps by inspecting src/vendor
+//! Check license of third-party deps by inspecting vendor
 
 use std::collections::{BTreeSet, HashSet, HashMap};
-use std::fs::File;
-use std::io::Read;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -52,6 +51,9 @@ const EXCEPTIONS: &[&str] = &[
     "cloudabi",           // BSD-2-Clause, (rls -> crossbeam-channel 0.2 -> rand 0.5)
     "ryu",                // Apache-2.0, rls/cargo/... (b/c of serde)
     "bytesize",           // Apache-2.0, cargo
+    "im-rc",              // MPL-2.0+, cargo
+    "adler32",            // BSD-3-Clause AND Zlib, cargo dep that isn't used
+    "fortanix-sgx-abi",   // MPL-2.0+, libstd but only for sgx target
 ];
 
 /// Which crates to check against the whitelist?
@@ -62,12 +64,14 @@ const WHITELIST_CRATES: &[CrateVersion] = &[
 
 /// Whitelist of crates rustc is allowed to depend on. Avoid adding to the list if possible.
 const WHITELIST: &[Crate] = &[
+    Crate("adler32"),
     Crate("aho-corasick"),
     Crate("arrayvec"),
     Crate("atty"),
     Crate("backtrace"),
     Crate("backtrace-sys"),
     Crate("bitflags"),
+    Crate("build_const"),
     Crate("byteorder"),
     Crate("cc"),
     Crate("cfg-if"),
@@ -75,6 +79,8 @@ const WHITELIST: &[Crate] = &[
     Crate("chalk-macros"),
     Crate("cloudabi"),
     Crate("cmake"),
+    Crate("crc"),
+    Crate("crc32fast"),
     Crate("crossbeam-deque"),
     Crate("crossbeam-epoch"),
     Crate("crossbeam-utils"),
@@ -100,6 +106,8 @@ const WHITELIST: &[Crate] = &[
     Crate("memmap"),
     Crate("memoffset"),
     Crate("miniz-sys"),
+    Crate("miniz_oxide"),
+    Crate("miniz_oxide_c_api"),
     Crate("nodrop"),
     Crate("num_cpus"),
     Crate("owning_ref"),
@@ -109,7 +117,12 @@ const WHITELIST: &[Crate] = &[
     Crate("polonius-engine"),
     Crate("quick-error"),
     Crate("rand"),
+    Crate("rand_chacha"),
     Crate("rand_core"),
+    Crate("rand_hc"),
+    Crate("rand_isaac"),
+    Crate("rand_pcg"),
+    Crate("rand_xorshift"),
     Crate("redox_syscall"),
     Crate("redox_termios"),
     Crate("regex"),
@@ -119,8 +132,12 @@ const WHITELIST: &[Crate] = &[
     Crate("rustc-hash"),
     Crate("rustc-rayon"),
     Crate("rustc-rayon-core"),
+    Crate("rustc_version"),
     Crate("scoped-tls"),
     Crate("scopeguard"),
+    Crate("semver"),
+    Crate("semver-parser"),
+    Crate("serde"),
     Crate("smallvec"),
     Crate("stable_deref_trait"),
     Crate("tempfile"),
@@ -132,9 +149,9 @@ const WHITELIST: &[Crate] = &[
     Crate("unicode-width"),
     Crate("unreachable"),
     Crate("utf8-ranges"),
+    Crate("vcpkg"),
     Crate("version_check"),
     Crate("void"),
-    Crate("vcpkg"),
     Crate("winapi"),
     Crate("winapi-build"),
     Crate("winapi-i686-pc-windows-gnu"),
@@ -203,7 +220,7 @@ impl<'a> From<CrateVersion<'a>> for Crate<'a> {
 /// Specifically, this checks that the license is correct.
 pub fn check(path: &Path, bad: &mut bool) {
     // Check licences
-    let path = path.join("vendor");
+    let path = path.join("../vendor");
     assert!(path.exists(), "vendor directory missing");
     let mut saw_dir = false;
     for dir in t!(path.read_dir()) {
@@ -215,7 +232,7 @@ pub fn check(path: &Path, bad: &mut bool) {
             dir.path()
                 .to_str()
                 .unwrap()
-                .contains(&format!("src/vendor/{}", exception))
+                .contains(&format!("vendor/{}", exception))
         });
         if is_exception {
             continue;
@@ -261,8 +278,7 @@ fn check_license(path: &Path) -> bool {
     if !path.exists() {
         panic!("{} does not exist", path.display());
     }
-    let mut contents = String::new();
-    t!(t!(File::open(path)).read_to_string(&mut contents));
+    let contents = t!(fs::read_to_string(&path));
 
     let mut found_license = false;
     for line in contents.lines() {
@@ -304,7 +320,7 @@ fn get_deps(path: &Path, cargo: &Path) -> Resolve {
         .arg("--format-version")
         .arg("1")
         .arg("--manifest-path")
-        .arg(path.join("Cargo.toml"))
+        .arg(path.join("../Cargo.toml"))
         .output()
         .expect("Unable to run `cargo metadata`")
         .stdout;

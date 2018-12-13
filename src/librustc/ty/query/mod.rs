@@ -27,7 +27,7 @@ use middle::stability::{self, DeprecationEntry};
 use middle::lib_features::LibFeatures;
 use middle::lang_items::{LanguageItems, LangItem};
 use middle::exported_symbols::{SymbolExportLevel, ExportedSymbol};
-use mir::interpret::ConstEvalResult;
+use mir::interpret::{ConstEvalRawResult, ConstEvalResult};
 use mir::mono::CodegenUnit;
 use mir;
 use mir::interpret::GlobalId;
@@ -166,21 +166,21 @@ define_queries! { <'tcx>
         ) -> Result<DtorckConstraint<'tcx>, NoSolution>,
 
         /// True if this is a const fn, use the `is_const_fn` to know whether your crate actually
-        /// sees it as const fn (e.g. the const-fn-ness might be unstable and you might not have
+        /// sees it as const fn (e.g., the const-fn-ness might be unstable and you might not have
         /// the feature gate active)
         ///
-        /// DO NOT CALL MANUALLY, it is only meant to cache the base data for the `is_const_fn`
-        /// function
+        /// **Do not call this function manually.** It is only meant to cache the base data for the
+        /// `is_const_fn` function.
         [] fn is_const_fn_raw: IsConstFn(DefId) -> bool,
 
 
         /// Returns true if calls to the function may be promoted
         ///
-        /// This is either because the function is e.g. a tuple-struct or tuple-variant constructor,
-        /// or because it has the `#[rustc_promotable]` attribute. The attribute should be removed
-        /// in the future in favour of some form of check which figures out whether the function
-        /// does not inspect the bits of any of its arguments (so is essentially just a constructor
-        /// function)
+        /// This is either because the function is e.g., a tuple-struct or tuple-variant
+        /// constructor, or because it has the `#[rustc_promotable]` attribute. The attribute should
+        /// be removed in the future in favour of some form of check which figures out whether the
+        /// function does not inspect the bits of any of its arguments (so is essentially just a
+        /// constructor function).
         [] fn is_promotable_const_fn: IsPromotableConstFn(DefId) -> bool,
 
         /// True if this is a foreign item (i.e., linked via `extern { ... }`).
@@ -309,7 +309,7 @@ define_queries! { <'tcx>
         /// validation. Please add a comment to every use site explaining why using `const_eval`
         /// isn't sufficient
         [] fn const_eval_raw: const_eval_raw_dep_node(ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>)
-            -> ConstEvalResult<'tcx>,
+            -> ConstEvalRawResult<'tcx>,
 
         /// Results of evaluating const items or constants embedded in
         /// other items (such as enum variant explicit discriminants).
@@ -470,7 +470,7 @@ define_queries! { <'tcx>
         [] fn foreign_modules: ForeignModules(CrateNum) -> Lrc<Vec<ForeignModule>>,
 
         [] fn plugin_registrar_fn: PluginRegistrarFn(CrateNum) -> Option<DefId>,
-        [] fn derive_registrar_fn: DeriveRegistrarFn(CrateNum) -> Option<DefId>,
+        [] fn proc_macro_decls_static: ProcMacroDeclsStatic(CrateNum) -> Option<DefId>,
         [] fn crate_disambiguator: CrateDisambiguator(CrateNum) -> CrateDisambiguator,
         [] fn crate_hash: CrateHash(CrateNum) -> Svh,
         [] fn original_crate_name: OriginalCrateName(CrateNum) -> Symbol,
@@ -539,7 +539,7 @@ define_queries! { <'tcx>
         [] fn all_crate_nums: all_crate_nums_node(CrateNum) -> Lrc<Vec<CrateNum>>,
 
         /// A vector of every trait accessible in the whole crate
-        /// (i.e. including those from subcrates). This is used only for
+        /// (i.e., including those from subcrates). This is used only for
         /// error reporting.
         [] fn all_traits: all_traits_node(CrateNum) -> Lrc<Vec<DefId>>,
     },

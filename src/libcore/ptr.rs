@@ -58,7 +58,7 @@
 //! [`NonNull::dangling`] in such cases.
 //!
 //! [aliasing]: ../../nomicon/aliasing.html
-//! [book]: ../../book/second-edition/ch19-01-unsafe-rust.html#dereferencing-a-raw-pointer
+//! [book]: ../../book/ch19-01-unsafe-rust.html#dereferencing-a-raw-pointer
 //! [ub]: ../../reference/behavior-considered-undefined.html
 //! [null]: ./fn.null.html
 //! [zst]: ../../nomicon/exotic-sizes.html#zero-sized-types-zsts
@@ -79,7 +79,7 @@ use ops::{CoerceUnsized, DispatchFromDyn};
 use fmt;
 use hash;
 use marker::{PhantomData, Unsize};
-use mem;
+use mem::{self, MaybeUninit};
 use nonzero::NonZero;
 
 use cmp::Ordering::{self, Less, Equal, Greater};
@@ -103,7 +103,7 @@ pub use intrinsics::write_bytes;
 ///   dropped normally.
 ///
 /// * It is friendlier to the optimizer to do this over [`ptr::read`] when
-///   dropping manually allocated memory (e.g. when writing Box/Rc/Vec),
+///   dropping manually allocated memory (e.g., when writing Box/Rc/Vec),
 ///   as the compiler doesn't need to prove that it's sound to elide the
 ///   copy.
 ///
@@ -189,12 +189,22 @@ pub use intrinsics::write_bytes;
 /// i.e., you do not usually have to worry about such issues unless you call `drop_in_place`
 /// manually.
 #[stable(feature = "drop_in_place", since = "1.8.0")]
+#[inline(always)]
+pub unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T) {
+    real_drop_in_place(&mut *to_drop)
+}
+
+// The real `drop_in_place` -- the one that gets called implicitly when variables go
+// out of scope -- should have a safe reference and not a raw pointer as argument
+// type.  When we drop a local variable, we access it with a pointer that behaves
+// like a safe reference; transmuting that to a raw pointer does not mean we can
+// actually access it with raw pointers.
 #[lang = "drop_in_place"]
 #[allow(unconditional_recursion)]
-pub unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T) {
+unsafe fn real_drop_in_place<T: ?Sized>(to_drop: &mut T) {
     // Code here does not matter - this is replaced by the
     // real drop glue by the compiler.
-    drop_in_place(to_drop);
+    real_drop_in_place(to_drop)
 }
 
 /// Creates a null raw pointer.
@@ -295,17 +305,14 @@ pub const fn null_mut<T>() -> *mut T { 0 as *mut T }
 #[inline]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub unsafe fn swap<T>(x: *mut T, y: *mut T) {
-    // Give ourselves some scratch space to work with
-    let mut tmp: T = mem::uninitialized();
+    // Give ourselves some scratch space to work with.
+    // We do not have to worry about drops: `MaybeUninit` does nothing when dropped.
+    let mut tmp = MaybeUninit::<T>::uninitialized();
 
     // Perform the swap
-    copy_nonoverlapping(x, &mut tmp, 1);
+    copy_nonoverlapping(x, tmp.as_mut_ptr(), 1);
     copy(y, x, 1); // `x` and `y` may overlap
-    copy_nonoverlapping(&tmp, y, 1);
-
-    // y and t now point to the same thing, but we need to completely forget `tmp`
-    // because it's no longer relevant.
-    mem::forget(tmp);
+    copy_nonoverlapping(tmp.get_ref(), y, 1);
 }
 
 /// Swaps `count * size_of::<T>()` bytes between the two regions of memory
@@ -392,8 +399,8 @@ unsafe fn swap_nonoverlapping_bytes(x: *mut u8, y: *mut u8, len: usize) {
     while i + block_size <= len {
         // Create some uninitialized memory as scratch space
         // Declaring `t` here avoids aligning the stack when this loop is unused
-        let mut t: Block = mem::uninitialized();
-        let t = &mut t as *mut _ as *mut u8;
+        let mut t = mem::MaybeUninit::<Block>::uninitialized();
+        let t = t.as_mut_ptr() as *mut u8;
         let x = x.add(i);
         let y = y.add(i);
 
@@ -407,10 +414,10 @@ unsafe fn swap_nonoverlapping_bytes(x: *mut u8, y: *mut u8, len: usize) {
 
     if i < len {
         // Swap any remaining bytes
-        let mut t: UnalignedBlock = mem::uninitialized();
+        let mut t = mem::MaybeUninit::<UnalignedBlock>::uninitialized();
         let rem = len - i;
 
-        let t = &mut t as *mut _ as *mut u8;
+        let t = t.as_mut_ptr() as *mut u8;
         let x = x.add(i);
         let y = y.add(i);
 
@@ -575,9 +582,9 @@ pub unsafe fn replace<T>(dst: *mut T, mut src: T) -> T {
 #[inline]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub unsafe fn read<T>(src: *const T) -> T {
-    let mut tmp: T = mem::uninitialized();
-    copy_nonoverlapping(src, &mut tmp, 1);
-    tmp
+    let mut tmp = MaybeUninit::<T>::uninitialized();
+    copy_nonoverlapping(src, tmp.as_mut_ptr(), 1);
+    tmp.into_inner()
 }
 
 /// Reads the value from `src` without moving it. This leaves the
@@ -642,11 +649,11 @@ pub unsafe fn read<T>(src: *const T) -> T {
 #[inline]
 #[stable(feature = "ptr_unaligned", since = "1.17.0")]
 pub unsafe fn read_unaligned<T>(src: *const T) -> T {
-    let mut tmp: T = mem::uninitialized();
+    let mut tmp = MaybeUninit::<T>::uninitialized();
     copy_nonoverlapping(src as *const u8,
-                        &mut tmp as *mut T as *mut u8,
+                        tmp.as_mut_ptr() as *mut u8,
                         mem::size_of::<T>());
-    tmp
+    tmp.into_inner()
 }
 
 /// Overwrites a memory location with the given value without reading or
@@ -829,7 +836,7 @@ pub unsafe fn write_unaligned<T>(dst: *mut T, src: T) {
 ///
 /// The compiler shouldn't change the relative order or number of volatile
 /// memory operations. However, volatile memory operations on zero-sized types
-/// (e.g. if a zero-sized type is passed to `read_volatile`) are no-ops
+/// (e.g., if a zero-sized type is passed to `read_volatile`) are no-ops
 /// and may be ignored.
 ///
 /// [c11]: http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf
@@ -906,7 +913,7 @@ pub unsafe fn read_volatile<T>(src: *const T) -> T {
 ///
 /// The compiler shouldn't change the relative order or number of volatile
 /// memory operations. However, volatile memory operations on zero-sized types
-/// (e.g. if a zero-sized type is passed to `write_volatile`) are no-ops
+/// (e.g., if a zero-sized type is passed to `write_volatile`) are no-ops
 /// and may be ignored.
 ///
 /// [c11]: http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf
@@ -1028,7 +1035,7 @@ impl<T: ?Sized> *const T {
 
     /// Calculates the offset from a pointer.
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1082,7 +1089,7 @@ impl<T: ?Sized> *const T {
 
     /// Calculates the offset from a pointer using wrapping arithmetic.
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1246,7 +1253,7 @@ impl<T: ?Sized> *const T {
 
     /// Calculates the offset from a pointer (convenience for `.offset(count as isize)`).
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1303,7 +1310,7 @@ impl<T: ?Sized> *const T {
     /// Calculates the offset from a pointer (convenience for
     /// `.offset((count as isize).wrapping_neg())`).
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1360,7 +1367,7 @@ impl<T: ?Sized> *const T {
     /// Calculates the offset from a pointer using wrapping arithmetic.
     /// (convenience for `.wrapping_offset(count as isize)`)
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1401,7 +1408,7 @@ impl<T: ?Sized> *const T {
     /// Calculates the offset from a pointer using wrapping arithmetic.
     /// (convenience for `.wrapping_offset((count as isize).wrapping_sub())`)
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1648,7 +1655,7 @@ impl<T: ?Sized> *mut T {
 
     /// Calculates the offset from a pointer.
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1701,7 +1708,7 @@ impl<T: ?Sized> *mut T {
     }
 
     /// Calculates the offset from a pointer using wrapping arithmetic.
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1884,7 +1891,7 @@ impl<T: ?Sized> *mut T {
 
     /// Calculates the offset from a pointer (convenience for `.offset(count as isize)`).
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1941,7 +1948,7 @@ impl<T: ?Sized> *mut T {
     /// Calculates the offset from a pointer (convenience for
     /// `.offset((count as isize).wrapping_neg())`).
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -1998,7 +2005,7 @@ impl<T: ?Sized> *mut T {
     /// Calculates the offset from a pointer using wrapping arithmetic.
     /// (convenience for `.wrapping_offset(count as isize)`)
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -2039,7 +2046,7 @@ impl<T: ?Sized> *mut T {
     /// Calculates the offset from a pointer using wrapping arithmetic.
     /// (convenience for `.wrapping_offset((count as isize).wrapping_sub())`)
     ///
-    /// `count` is in units of T; e.g. a `count` of 3 represents a pointer
+    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
     /// offset of `3 * size_of::<T>()` bytes.
     ///
     /// # Safety
@@ -2368,7 +2375,7 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     fn mod_inv(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
         ///
-        /// Note, that this table does not contain values where inverse does not exist (i.e. for
+        /// Note, that this table does not contain values where inverse does not exist (i.e., for
         /// `0⁻¹ mod 16`, `2⁻¹ mod 16`, etc.)
         const INV_TABLE_MOD_16: [u8; 8] = [1, 11, 13, 7, 9, 3, 5, 15];
         /// Modulo for which the `INV_TABLE_MOD_16` is intended.
@@ -2391,7 +2398,7 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
                 // y = y * (2 - xy) mod n
                 //
                 // Note, that we use wrapping operations here intentionally – the original formula
-                // uses e.g. subtraction `mod n`. It is entirely fine to do them `mod
+                // uses e.g., subtraction `mod n`. It is entirely fine to do them `mod
                 // usize::max_value()` instead, because we take the result `mod n` at the end
                 // anyway.
                 inverse = inverse.wrapping_mul(
@@ -2507,6 +2514,39 @@ impl<T: ?Sized> Eq for *mut T {}
 #[inline]
 pub fn eq<T: ?Sized>(a: *const T, b: *const T) -> bool {
     a == b
+}
+
+/// Hash a raw pointer.
+///
+/// This can be used to hash a `&T` reference (which coerces to `*const T` implicitly)
+/// by its address rather than the value it points to
+/// (which is what the `Hash for &T` implementation does).
+///
+/// # Examples
+///
+/// ```
+/// #![feature(ptr_hash)]
+/// use std::collections::hash_map::DefaultHasher;
+/// use std::hash::{Hash, Hasher};
+/// use std::ptr;
+///
+/// let five = 5;
+/// let five_ref = &five;
+///
+/// let mut hasher = DefaultHasher::new();
+/// ptr::hash(five_ref, &mut hasher);
+/// let actual = hasher.finish();
+///
+/// let mut hasher = DefaultHasher::new();
+/// (five_ref as *const i32).hash(&mut hasher);
+/// let expected = hasher.finish();
+///
+/// assert_eq!(actual, expected);
+/// ```
+#[unstable(feature = "ptr_hash", reason = "newly added", issue = "56286")]
+pub fn hash<T, S: hash::Hasher>(hashee: *const T, into: &mut S) {
+    use hash::Hash;
+    hashee.hash(into);
 }
 
 // Impls for function pointers
@@ -2752,7 +2792,7 @@ impl<T: ?Sized> Unique<T> {
     /// Creates a new `Unique` if `ptr` is non-null.
     pub fn new(ptr: *mut T) -> Option<Self> {
         if !ptr.is_null() {
-            Some(Unique { pointer: NonZero(ptr as _), _marker: PhantomData })
+            Some(Unique { pointer: unsafe { NonZero(ptr as _) }, _marker: PhantomData })
         } else {
             None
         }
@@ -2808,14 +2848,14 @@ impl<T: ?Sized> fmt::Pointer for Unique<T> {
 #[unstable(feature = "ptr_internals", issue = "0")]
 impl<'a, T: ?Sized> From<&'a mut T> for Unique<T> {
     fn from(reference: &'a mut T) -> Self {
-        Unique { pointer: NonZero(reference as _), _marker: PhantomData }
+        Unique { pointer: unsafe { NonZero(reference as _) }, _marker: PhantomData }
     }
 }
 
 #[unstable(feature = "ptr_internals", issue = "0")]
 impl<'a, T: ?Sized> From<&'a T> for Unique<T> {
     fn from(reference: &'a T) -> Self {
-        Unique { pointer: NonZero(reference as _), _marker: PhantomData }
+        Unique { pointer: unsafe { NonZero(reference as _) }, _marker: PhantomData }
     }
 }
 
@@ -2850,12 +2890,12 @@ pub struct NonNull<T: ?Sized> {
 }
 
 /// `NonNull` pointers are not `Send` because the data they reference may be aliased.
-// NB: This impl is unnecessary, but should provide better error messages.
+// N.B., this impl is unnecessary, but should provide better error messages.
 #[stable(feature = "nonnull", since = "1.25.0")]
 impl<T: ?Sized> !Send for NonNull<T> { }
 
 /// `NonNull` pointers are not `Sync` because the data they reference may be aliased.
-// NB: This impl is unnecessary, but should provide better error messages.
+// N.B., this impl is unnecessary, but should provide better error messages.
 #[stable(feature = "nonnull", since = "1.25.0")]
 impl<T: ?Sized> !Sync for NonNull<T> { }
 
@@ -2888,7 +2928,7 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[inline]
     pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
-        NonNull { pointer: NonZero(ptr as _) }
+        NonNull { pointer: unsafe { NonZero(ptr as _) } }
     }
 
     /// Creates a new `NonNull` if `ptr` is non-null.
@@ -2896,7 +2936,7 @@ impl<T: ?Sized> NonNull<T> {
     #[inline]
     pub fn new(ptr: *mut T) -> Option<Self> {
         if !ptr.is_null() {
-            Some(NonNull { pointer: NonZero(ptr as _) })
+            Some(unsafe { Self::new_unchecked(ptr) })
         } else {
             None
         }
@@ -3018,7 +3058,7 @@ impl<T: ?Sized> From<Unique<T>> for NonNull<T> {
 impl<'a, T: ?Sized> From<&'a mut T> for NonNull<T> {
     #[inline]
     fn from(reference: &'a mut T) -> Self {
-        NonNull { pointer: NonZero(reference as _) }
+        NonNull { pointer: unsafe { NonZero(reference as _) } }
     }
 }
 
@@ -3026,6 +3066,6 @@ impl<'a, T: ?Sized> From<&'a mut T> for NonNull<T> {
 impl<'a, T: ?Sized> From<&'a T> for NonNull<T> {
     #[inline]
     fn from(reference: &'a T) -> Self {
-        NonNull { pointer: NonZero(reference as _) }
+        NonNull { pointer: unsafe { NonZero(reference as _) } }
     }
 }

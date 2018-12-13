@@ -52,16 +52,13 @@ impl RemoveNoopLandingPads {
                 StatementKind::FakeRead(..) |
                 StatementKind::StorageLive(_) |
                 StatementKind::StorageDead(_) |
-                StatementKind::EndRegion(_) |
                 StatementKind::AscribeUserType(..) |
                 StatementKind::Nop => {
-                    // These are all nops in a landing pad (there's some
-                    // borrowck interaction between EndRegion and storage
-                    // instructions, but this should all run after borrowck).
+                    // These are all nops in a landing pad
                 }
 
                 StatementKind::Assign(Place::Local(_), box Rvalue::Use(_)) => {
-                    // Writing to a local (e.g. a drop flag) does not
+                    // Writing to a local (e.g., a drop flag) does not
                     // turn a landing pad to a non-nop
                 }
 

@@ -19,8 +19,8 @@
 //! pieces of `rustup.rs`!
 
 use std::env;
-use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::fs;
+use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::process::{Command, Stdio};
 
@@ -353,7 +353,7 @@ impl Step for Mingw {
     /// Build the `rust-mingw` installer component.
     ///
     /// This contains all the bits and pieces to run the MinGW Windows targets
-    /// without any extra installed software (e.g. we bundle gcc, libraries, etc).
+    /// without any extra installed software (e.g., we bundle gcc, libraries, etc).
     fn run(self, builder: &Builder) -> Option<PathBuf> {
         let host = self.host;
 
@@ -851,18 +851,15 @@ impl Step for Src {
         t!(fs::create_dir_all(&dst_src));
 
         let src_files = [
-            "src/Cargo.lock",
+            "Cargo.lock",
         ];
         // This is the reduced set of paths which will become the rust-src component
         // (essentially libstd and all of its path dependencies)
         let std_src_dirs = [
             "src/build_helper",
-            "src/dlmalloc",
             "src/liballoc",
             "src/libbacktrace",
-            "src/libcompiler_builtins",
             "src/libcore",
-            "src/liblibc",
             "src/libpanic_abort",
             "src/libpanic_unwind",
             "src/librustc_asan",
@@ -871,20 +868,15 @@ impl Step for Src {
             "src/librustc_tsan",
             "src/libstd",
             "src/libunwind",
-            "src/rustc/compiler_builtins_shim",
-            "src/rustc/libc_shim",
-            "src/rustc/dlmalloc_shim",
             "src/libtest",
             "src/libterm",
             "src/libprofiler_builtins",
             "src/stdsimd",
             "src/libproc_macro",
-        ];
-        let std_src_dirs_exclude = [
-            "src/libcompiler_builtins/compiler-rt/test",
+            "src/tools/rustc-std-workspace-core",
         ];
 
-        copy_src_dirs(builder, &std_src_dirs[..], &std_src_dirs_exclude[..], &dst_src);
+        copy_src_dirs(builder, &std_src_dirs[..], &[], &dst_src);
         for file in src_files.iter() {
             builder.copy(&builder.src.join(file), &dst_src.join(file));
         }
@@ -908,7 +900,7 @@ impl Step for Src {
     }
 }
 
-const CARGO_VENDOR_VERSION: &str = "0.1.19";
+const CARGO_VENDOR_VERSION: &str = "0.1.22";
 
 #[derive(Debug, PartialOrd, Ord, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct PlainSourceTarball;
@@ -949,6 +941,8 @@ impl Step for PlainSourceTarball {
             "configure",
             "x.py",
             "config.toml.example",
+            "Cargo.toml",
+            "Cargo.lock",
         ];
         let src_dirs = [
             "src",
@@ -992,7 +986,7 @@ impl Step for PlainSourceTarball {
             // Vendor all Cargo dependencies
             let mut cmd = Command::new(&builder.initial_cargo);
             cmd.arg("vendor")
-               .current_dir(&plain_dst_src.join("src"));
+               .current_dir(&plain_dst_src);
             builder.run(&mut cmd);
         }
 
@@ -1508,8 +1502,7 @@ impl Step for Extended {
         }
 
         let xform = |p: &Path| {
-            let mut contents = String::new();
-            t!(t!(File::open(p)).read_to_string(&mut contents));
+            let mut contents = t!(fs::read_to_string(p));
             if rls_installer.is_none() {
                 contents = filter(&contents, "rls");
             }
@@ -1520,8 +1513,8 @@ impl Step for Extended {
                 contents = filter(&contents, "rustfmt");
             }
             let ret = tmp.join(p.file_name().unwrap());
-            t!(t!(File::create(&ret)).write_all(contents.as_bytes()));
-            return ret
+            t!(fs::write(&ret, &contents));
+            ret
         };
 
         if target.contains("apple-darwin") {
@@ -1866,8 +1859,7 @@ impl Step for HashSign {
         let file = builder.config.dist_gpg_password_file.as_ref().unwrap_or_else(|| {
             panic!("\n\nfailed to specify `dist.gpg-password-file` in `config.toml`\n\n")
         });
-        let mut pass = String::new();
-        t!(t!(File::open(&file)).read_to_string(&mut pass));
+        let pass = t!(fs::read_to_string(&file));
 
         let today = output(Command::new("date").arg("+%Y-%m-%d"));
 
