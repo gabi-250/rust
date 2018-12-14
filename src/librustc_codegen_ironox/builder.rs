@@ -1057,9 +1057,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         args: &[Value],
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        eprintln!("call to {:?} with args {:?}", llfn, args);
-        // FIXME? emit call
-        Value::Register(GPR::RAX)
+        //unimplemented!("call to {:?} with args {:?}", llfn, args);
+        Value::None
     }
 
     fn zext(

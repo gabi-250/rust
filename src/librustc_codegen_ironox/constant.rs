@@ -9,7 +9,15 @@
 use type_::Type;
 
 #[derive(Debug)]
-pub struct BigConstant {
+pub struct UnsignedConst {
     pub ty: Type,
     pub value: u128,
+    pub allowed_range: (u128, u128),
+}
+
+#[derive(Debug)]
+pub struct SignedConst {
+    pub ty: Type,
+    pub value: i128,
+    pub allowed_range: (i128, i128),
 }

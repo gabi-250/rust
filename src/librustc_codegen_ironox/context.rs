@@ -24,6 +24,7 @@ use rustc_codegen_ssa::callee::resolve_and_get_fn;
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
+use rustc_target::abi::HasDataLayout;
 use rustc::mir::interpret::{Scalar, Allocation};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
@@ -32,9 +33,9 @@ use syntax::symbol::LocalInternedString;
 use debuginfo::DIScope;
 use ir::basic_block::{BasicBlock, BasicBlockData};
 use ir::function::IronOxFunction;
-use constant::BigConstant;
+use constant::{UnsignedConst, SignedConst};
 use value::Value;
-use type_::{Type, LLType};
+use type_::{Type, LLType, IxLlcx};
 
 use super::ModuleIronOx;
 
@@ -63,9 +64,10 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub types: RefCell<Vec<LLType>>,
     /// Maps symbols to Values (indices in either `functions` or `structs`).
     pub named_globals: RefCell<FxHashMap<String, Value>>,
-    pub private_globals: RefCell<FxHashMap<Type, Value>>,
+    pub private_globals: RefCell<Vec<Type>>,
     pub global_cache: RefCell<FxHashMap<Value, Value>>,
-    pub big_consts: RefCell<Vec<BigConstant>>,
+    pub u_consts: RefCell<Vec<UnsignedConst>>,
+    pub i_consts: RefCell<Vec<SignedConst>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -85,7 +87,8 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             named_globals: Default::default(),
             private_globals: Default::default(),
             global_cache: Default::default(),
-            big_consts: Default::default(),
+            u_consts: Default::default(),
+            i_consts: Default::default(),
         }
     }
 
@@ -231,15 +234,47 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
 }
 
+impl CodegenCx<'ll, 'tcx> {
+    fn const_signed(
+        &self,
+        ty: Type,
+        value: i128,
+        allowed_range: (i128, i128)) -> Value {
+        let iconst = SignedConst {
+            ty,
+            value,
+            allowed_range,
+        };
+        let mut borrowed_consts = self.i_consts.borrow_mut();
+        borrowed_consts.push(iconst);
+        Value::ConstUint(borrowed_consts.len() - 1)
+    }
+
+    fn const_unsigned(
+        &self,
+        ty: Type,
+        value: u128,
+        allowed_range: (u128, u128)) -> Value {
+        let uconst = UnsignedConst {
+            ty,
+            value,
+            allowed_range,
+        };
+        let mut borrowed_consts = self.u_consts.borrow_mut();
+        borrowed_consts.push(uconst);
+        Value::ConstUint(borrowed_consts.len() - 1)
+    }
+}
+
 // common?
 impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn const_null(&self, t: Type) -> Value {
-        Value::Const(0)
+        self.const_unsigned(t, 0u128, (u128::min_value(), u128::max_value()))
     }
 
     fn const_undef(&self, t: Type) -> Value {
-        Value::ConstUndef
+        Value::ConstUndef(t)
     }
 
     fn const_int(&self, t: Type, i: i64) -> Value {
@@ -251,13 +286,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_uint_big(&self, t: Type, u: u128) -> Value {
-        let big_const = BigConstant {
-            ty: t,
-            value: u,
-        };
-        let mut borrowed_consts = self.big_consts.borrow_mut();
-        borrowed_consts.push(big_const);
-        Value::BigConst(borrowed_consts.len() - 1)
+        self.const_unsigned(t, u, (u128::min_value(), u128::max_value()))
     }
 
     fn const_bool(&self, val: bool) -> Value {
@@ -277,7 +306,15 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_usize(&self, i: u64) -> Value {
-        Value::Const(i)
+        let bit_size = self.data_layout().pointer_size.bits();
+        if bit_size < 64 {
+            // make sure it doesn't overflow
+            assert!(i < (1<<bit_size));
+        }
+        // FIXME: isize_ty should be cached in CodegenCx
+        let isize_ty = Type::ix_llcx(self, self.tcx.data_layout.pointer_size.bits());
+        self.const_unsigned(isize_ty, i as u128,
+                            (0u128, (1<<bit_size - 1) as u128))
     }
 
     fn const_u8(&self, i: u8) -> Value {
