@@ -30,7 +30,11 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         fn_type: Type
     ) -> Value {
-        self.module.borrow_mut().add_function(self, name, fn_type)
+        eprintln!("Declare cfun of type {:?}", fn_type);
+        let fn_val =
+            self.module.borrow_mut().add_function(self, name, fn_type);
+        self.named_globals.borrow_mut().insert(name.to_string(), fn_val);
+        fn_val
     }
 
     fn declare_fn(
@@ -58,7 +62,9 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn define_private_global(&self, ty: Type) -> Value {
-        unimplemented!("define_private_global");
+        let mut borrowed_globals = self.private_globals.borrow_mut();
+        borrowed_globals.push(ty);
+        Value::Global(borrowed_globals.len() -1)
     }
 
     fn define_fn(

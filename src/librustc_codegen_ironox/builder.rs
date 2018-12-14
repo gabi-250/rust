@@ -1059,7 +1059,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         args: &[Value],
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        // FIXME: return a call instruction
         Value::None
     }
 

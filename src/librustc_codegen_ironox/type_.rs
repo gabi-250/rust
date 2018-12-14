@@ -100,6 +100,16 @@ impl CodegenCx<'ll, 'tcx> {
     }
 }
 
+pub trait IxLlcx {
+    fn ix_llcx(cx: &CodegenCx, num_bits: u64) -> Type;
+}
+
+impl IxLlcx for Type {
+    fn ix_llcx(cx: &CodegenCx, num_bits: u64) -> Type {
+        cx.add_type(LLType::Scalar(ScalarType::Ix(num_bits)))
+    }
+}
+
 impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn type_void(&self) -> Type {
         self.add_type(LLType::Void)
@@ -134,7 +144,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_ix(&self, num_bits: u64) -> Type {
-        self.add_type(LLType::Scalar(ScalarType::Ix(num_bits)))
+        Type::ix_llcx(self, num_bits)
     }
 
     fn type_isize(&self) -> Type {
@@ -233,8 +243,11 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::Local(fn_index, local_index) => {
                 self.module.borrow().functions[fn_index].local_ty(local_index)
             },
-            Value::BigConst(const_idx) => {
-                self.big_consts.borrow()[const_idx].ty
+            Value::ConstUint(const_idx) => {
+                self.u_consts.borrow()[const_idx].ty
+            },
+            Value::ConstInt(const_idx) => {
+                self.i_consts.borrow()[const_idx].ty
             },
             x => {
                 unimplemented!("type of {:?}", x);
