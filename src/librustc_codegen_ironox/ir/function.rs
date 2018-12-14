@@ -21,7 +21,8 @@ pub struct IronOxFunction {
     pub ironox_type: Type,
     pub basic_blocks: Vec<BasicBlockData>,
     pub stack_size: u64,
-    pub locals: Vec<u64>,
+    // Type, offset from rbp
+    pub locals: Vec<(Type, u64)>,
     pub params: Vec<Value>,
     pub ret: Value,
 }
@@ -85,15 +86,21 @@ impl IronOxFunction {
         name: &str) -> usize {
         // XXX ignore the alignment and name for now
         // map the local to its offset from rbp
-        self.locals.push(self.stack_size);
+        self.locals.push((ty, self.stack_size));
         self.stack_size += cx.ty_size(ty);
         self.locals.len() - 1
+    }
+
+    pub fn local_ty(
+        &self,
+        local_idx: usize) -> Type {
+        self.locals[local_idx].0
     }
 
     pub fn rbp_offset(
         &self,
         local_idx: usize) -> u64 {
-        self.locals[local_idx]
+        self.locals[local_idx].1
     }
 
     pub fn add_bb(&mut self, bb: BasicBlockData) -> usize {

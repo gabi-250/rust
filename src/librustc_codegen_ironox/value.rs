@@ -19,7 +19,8 @@ pub enum Value {
     RbpOffset(isize),
     ConstUndef,
     Const(u64),
-    BigConst(u128),
+    // the index in the big_consts
+    BigConst(usize),
     Global(Type),
     // the position in the structs Vec from ModuleIronOx
     ConstStruct(usize),

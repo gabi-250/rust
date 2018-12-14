@@ -78,6 +78,7 @@ mod asm;
 mod base;
 mod builder;
 mod consts;
+mod constant;
 mod context;
 mod debuginfo;
 mod declare;

@@ -32,6 +32,7 @@ use syntax::symbol::LocalInternedString;
 use debuginfo::DIScope;
 use ir::basic_block::{BasicBlock, BasicBlockData};
 use ir::function::IronOxFunction;
+use constant::BigConstant;
 use value::Value;
 use type_::{Type, LLType};
 
@@ -64,6 +65,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub named_globals: RefCell<FxHashMap<String, Value>>,
     pub private_globals: RefCell<FxHashMap<Type, Value>>,
     pub global_cache: RefCell<FxHashMap<Value, Value>>,
+    pub big_consts: RefCell<Vec<BigConstant>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -83,6 +85,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             named_globals: Default::default(),
             private_globals: Default::default(),
             global_cache: Default::default(),
+            big_consts: Default::default(),
         }
     }
 
@@ -248,7 +251,13 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_uint_big(&self, t: Type, u: u128) -> Value {
-        Value::BigConst(u)
+        let big_const = BigConstant {
+            ty: t,
+            value: u,
+        };
+        let mut borrowed_consts = self.big_consts.borrow_mut();
+        borrowed_consts.push(big_const);
+        Value::BigConst(borrowed_consts.len() - 1)
     }
 
     fn const_bool(&self, val: bool) -> Value {
