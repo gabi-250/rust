@@ -23,6 +23,9 @@ pub struct IronOxFunction {
     pub ironox_type: Type,
     /// The basic blocks of the function.
     pub basic_blocks: Vec<BasicBlockData>,
+    pub stack_size: u64,
+    // Type, offset from rbp
+    pub locals: Vec<(Type, u64)>,
     /// The parameters of the function.
     pub params: Vec<Value>,
     /// The return type of the function.
@@ -47,6 +50,8 @@ impl IronOxFunction {
                     basic_blocks: vec![],
                     params,
                     ret,
+                    locals: Default::default(),
+                    stack_size: 8,
                 }
             },
             _ => bug!("Expected LLFnType, found {}", fn_type)
@@ -69,6 +74,34 @@ impl IronOxFunction {
     /// Return the specified parameter.
     pub fn get_param(&self, index: usize) -> Value {
         self.params[index]
+    }
+
+    pub fn alloca(
+        &mut self,
+        cx: &CodegenCx,
+        ty: Type,
+        name: &str,
+        align: Align) -> usize {
+        eprintln!("alloca {:?} of type {:?}", name, ty);
+        self.insert_local(cx, ty, name)
+    }
+
+    fn insert_local(
+        &mut self,
+        cx: &CodegenCx,
+        ty: Type,
+        name: &str) -> usize {
+        // XXX ignore the alignment and name for now
+        // map the local to its offset from rbp
+        self.locals.push((ty, self.stack_size));
+        self.stack_size += cx.ty_size(ty);
+        self.locals.len() - 1
+    }
+
+    pub fn local_ty(
+        &self,
+        local_idx: usize) -> Type {
+        self.locals[local_idx].0
     }
 
     /// Add a new basic block to this function.

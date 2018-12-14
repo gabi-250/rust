@@ -228,7 +228,18 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn val_ty(&self, v: Value) -> Type {
-        unimplemented!("val_ty({:?})", v);
+        let mut borrowed_types = self.types.borrow_mut();
+        match v {
+            Value::Local(fn_index, local_index) => {
+                self.module.borrow().functions[fn_index].local_ty(local_index)
+            },
+            Value::BigConst(const_idx) => {
+                self.big_consts.borrow()[const_idx].ty
+            },
+            x => {
+                unimplemented!("type of {:?}", x);
+            }
+        }
     }
 
     fn scalar_lltypes(&self) -> &RefCell<FxHashMap<Ty<'tcx>, Self::Type>> {

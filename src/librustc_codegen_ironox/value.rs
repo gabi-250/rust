@@ -22,7 +22,9 @@ pub enum Value {
     Local(usize, usize),
     /// An unspecified constant. This is just a wrapper around a `Type`.
     ConstUndef,
-    BigConst(u128),
+    Const(u64),
+    // the index in the big_consts
+    BigConst(usize),
     Global(Type),
     /// The index of an `IronOxStruct` in the `structs` vec from `ModuleIronOx`.
     ConstStruct(usize),
