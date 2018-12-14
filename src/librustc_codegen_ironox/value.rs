@@ -20,10 +20,12 @@ pub enum Value {
     /// A `(function index, local index)` pair that can be used to retrieve a
     /// local value.
     Local(usize, usize),
-    /// An unspecified constant. This is just a wrapper around a `Type`.
-    ConstUndef,
-    BigConst(u128),
-    Global(Type),
+    /// An uninitialized constant. This is just a wrapper around a `Type`.
+    ConstUndef(Type),
+    /// The index of an `UnsignedConst` in `u_consts`.
+    ConstUint(usize),
+    /// The index of a `SignedConst` in `i_consts`.
+    ConstInt(usize),
     /// The index of an `IronOxStruct` in the `structs` vec from `ModuleIronOx`.
     ConstStruct(usize),
     /// The parameter of an `IronOxFunction`. This is just a wrapper around a `Type`.

@@ -76,6 +76,7 @@ mod abi;
 mod asm;
 mod base;
 mod builder;
+mod constant;
 mod consts;
 mod context;
 mod debuginfo;

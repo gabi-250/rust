@@ -24,6 +24,7 @@ use rustc_codegen_ssa::callee::resolve_and_get_fn;
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
+use rustc_target::abi::HasDataLayout;
 use rustc::mir::interpret::{Scalar, Allocation};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
@@ -32,6 +33,7 @@ use syntax::symbol::LocalInternedString;
 use debuginfo::DIScope;
 use ir::basic_block::{BasicBlock, BasicBlockData};
 use ir::function::IronOxFunction;
+use constant::{UnsignedConst, SignedConst};
 use value::Value;
 use type_::{Type, LLType};
 
@@ -62,6 +64,10 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub types: RefCell<Vec<LLType>>,
     /// The index of an `LLType` in `types`.
     pub type_cache: RefCell<FxHashMap<LLType, Type>>,
+    /// The unsigned constants defined in this context.
+    pub u_consts: RefCell<Vec<UnsignedConst>>,
+    /// The signed constants defined in this context.
+    pub i_consts: RefCell<Vec<SignedConst>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -79,6 +85,8 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             eh_personality: Default::default(),
             types: Default::default(),
             type_cache: Default::default(),
+            u_consts: Default::default(),
+            i_consts: Default::default(),
         }
     }
 
@@ -189,7 +197,8 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn check_overflow(&self) -> bool {
-        unimplemented!("check_overflow");
+        // Don't check for overflow (for now).
+        false
     }
 
     fn stats(&self) -> &RefCell<Stats> {
@@ -222,15 +231,39 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
 }
 
+impl CodegenCx<'ll, 'tcx> {
+    /// Return a signed constant which has the specified type, and value.
+    fn const_signed(&self, ty: Type, value: i128) -> Value {
+        let iconst = SignedConst {
+            ty,
+            value,
+        };
+        let mut consts = self.i_consts.borrow_mut();
+        consts.push(iconst);
+        Value::ConstUint(consts.len() - 1)
+    }
+
+    /// Return an unsigned constant which has the specified type, and value.
+    fn const_unsigned(&self, ty: Type, value: u128) -> Value {
+        let uconst = UnsignedConst {
+            ty,
+            value,
+        };
+        let mut consts = self.u_consts.borrow_mut();
+        consts.push(uconst);
+        Value::ConstUint(consts.len() - 1)
+    }
+}
+
 // common?
 impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn const_null(&self, t: Type) -> Value {
-        unimplemented!("const_null");
+        self.const_unsigned(t, 0u128)
     }
 
     fn const_undef(&self, t: Type) -> Value {
-        unimplemented!("const_undef");
+        Value::ConstUndef(t)
     }
 
     fn const_int(&self, t: Type, i: i64) -> Value {
@@ -242,11 +275,11 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_uint_big(&self, t: Type, u: u128) -> Value {
-        unimplemented!("const_uint_big");
+        self.const_unsigned(t, u)
     }
 
     fn const_bool(&self, val: bool) -> Value {
-        unimplemented!("const_bool");
+        self.const_unsigned(self.type_i1(), val as u128)
     }
 
     fn const_i32(&self, i: i32) -> Value {
@@ -296,7 +329,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     ) -> Value {
         unimplemented!("const struct {:?}", elts);
         // FIXME calculate the size of the struct
-        Value::ConstUndef
+        Value::None
     }
 
     fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
@@ -332,7 +365,11 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_to_opt_u128(&self, v: Value, sign_ext: bool) -> Option<u128> {
-        unimplemented!("const_to_opt_u128");
+        match v {
+            Value::ConstUint(i) => Some(self.u_consts.borrow()[i].value),
+            Value::ConstInt(i) => unimplemented!("signed integers"),
+            _ =>  None
+        }
     }
 
     fn const_ptrcast(&self, val: Value, ty: Type) -> Value {
