@@ -9,6 +9,7 @@
 // except according to those terms.
 
 #![feature(box_syntax)]
+#![feature(crate_visibility_modifier)]
 #![feature(libc)]
 #![feature(in_band_lifetimes)]
 #![feature(optin_builtin_traits)]
@@ -163,13 +164,20 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         unimplemented!("print_pass_timings");
     }
 
-    fn run_lto(
-        _cgcx: &CodegenContext<Self>,
-        _modules: Vec<ModuleCodegen<Self::Module>>,
-        _cached_modules: Vec<(SerializedModule<Self::ModuleBuffer>, WorkProduct)>,
-        _timeline: &mut Timeline
+    fn run_fat_lto(
+        cgcx: &CodegenContext<Self>,
+        modules: Vec<ModuleCodegen<Self::Module>>,
+        timeline: &mut Timeline
+    ) -> Result<LtoModuleCodegen<Self>, FatalError> {
+        unimplemented!("run_fat_lto");
+    }
+    fn run_thin_lto(
+        cgcx: &CodegenContext<Self>,
+        modules: Vec<(String, Self::ThinBuffer)>,
+        cached_modules: Vec<(SerializedModule<Self::ModuleBuffer>, WorkProduct)>,
+        timeline: &mut Timeline
     ) -> Result<(Vec<LtoModuleCodegen<Self>>, Vec<WorkProduct>), FatalError> {
-        unimplemented!("run_lto");
+        unimplemented!("run_thin_lto");
     }
 
     unsafe fn optimize(
@@ -219,6 +227,13 @@ impl WriteBackendMethods for IronOxCodegenBackend {
         } else {
             unimplemented!("ironox does not have an integrated assembler!");
         }
+    }
+
+    fn prepare_thin(
+        cgcx: &CodegenContext<Self>,
+        module: ModuleCodegen<Self::Module>
+    ) -> (String, Self::ThinBuffer) {
+        unimplemented!("prepare_thin");
     }
 
     fn run_lto_pass_manager(

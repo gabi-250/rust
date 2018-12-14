@@ -15,7 +15,7 @@ use abi::call::{ArgType, CastTarget, FnType, Reg, RegKind};
 use abi::{self, Abi, HasDataLayout, LayoutOf, Size, TyLayout, TyLayoutMethods};
 
 /// Classification of "eightbyte" components.
-// NB: the order of the variants is from general to specific,
+// N.B., the order of the variants is from general to specific,
 // such that `unify(a, b)` is the "smaller" of `a` and `b`.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum Class {
@@ -41,7 +41,7 @@ fn classify_arg<'a, Ty, C>(cx: &C, arg: &ArgType<'a, Ty>)
         where Ty: TyLayoutMethods<'a, C> + Copy,
             C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout
     {
-        if !off.is_abi_aligned(layout.align) {
+        if !off.is_aligned(layout.align.abi) {
             if !layout.is_zst() {
                 return Err(Memory);
             }

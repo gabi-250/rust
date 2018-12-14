@@ -29,7 +29,9 @@ use rustc::ty::layout::{
 };
 
 use interpret::{self, EvalContext, ScalarMaybeUndef, Immediate, OpTy, MemoryKind};
-use const_eval::{CompileTimeInterpreter, error_to_const_error, eval_promoted, mk_borrowck_eval_cx};
+use const_eval::{
+    CompileTimeInterpreter, const_to_op, error_to_const_error, eval_promoted, mk_borrowck_eval_cx
+};
 use transform::{MirPass, MirSource};
 
 pub struct ConstProp;
@@ -45,10 +47,10 @@ impl MirPass for ConstProp {
         }
 
         use rustc::hir::map::blocks::FnLikeNode;
-        let node_id = tcx.hir.as_local_node_id(source.def_id)
+        let node_id = tcx.hir().as_local_node_id(source.def_id)
                              .expect("Non-local call to local provider is_const_fn");
 
-        let is_fn_like = FnLikeNode::from_node(tcx.hir.get(node_id)).is_some();
+        let is_fn_like = FnLikeNode::from_node(tcx.hir().get(node_id)).is_some();
         let is_assoc_const = match tcx.describe_def(source.def_id) {
             Some(Def::AssociatedConst(_)) => true,
             _ => false,
@@ -197,6 +199,7 @@ impl<'a, 'mir, 'tcx> ConstPropagator<'a, 'mir, 'tcx> {
                     | CalledClosureAsFunction
                     | VtableForArgumentlessMethod
                     | ModifiedConstantMemory
+                    | ModifiedStatic
                     | AssumptionNotHeld
                     // FIXME: should probably be removed and turned into a bug! call
                     | TypeNotPrimitive(_)
@@ -262,7 +265,7 @@ impl<'a, 'mir, 'tcx> ConstPropagator<'a, 'mir, 'tcx> {
         source_info: SourceInfo,
     ) -> Option<Const<'tcx>> {
         self.ecx.tcx.span = source_info.span;
-        match self.ecx.const_to_op(c.literal) {
+        match const_to_op(&self.ecx, c.literal) {
             Ok(op) => {
                 Some((op, c.span))
             },
@@ -286,7 +289,7 @@ impl<'a, 'mir, 'tcx> ConstPropagator<'a, 'mir, 'tcx> {
                     })?;
                     Some((res, span))
                 },
-                // We could get more projections by using e.g. `operand_projection`,
+                // We could get more projections by using e.g., `operand_projection`,
                 // but we do not even have the stack frame set up properly so
                 // an `Index` projection would throw us off-track.
                 _ => None,
@@ -309,7 +312,7 @@ impl<'a, 'mir, 'tcx> ConstPropagator<'a, 'mir, 'tcx> {
                     eval_promoted(this.tcx, cid, this.mir, this.param_env)
                 })?;
                 trace!("evaluated promoted {:?} to {:?}", promoted, res);
-                Some((res, source_info.span))
+                Some((res.into(), source_info.span))
             },
             _ => None,
         }
@@ -615,7 +618,7 @@ impl<'b, 'a, 'tcx> Visitor<'tcx> for ConstPropagator<'b, 'a, 'tcx> {
                         .span;
                     let node_id = self
                         .tcx
-                        .hir
+                        .hir()
                         .as_local_node_id(self.source.def_id)
                         .expect("some part of a failing const eval must be local");
                     use rustc::mir::interpret::EvalErrorKind::*;

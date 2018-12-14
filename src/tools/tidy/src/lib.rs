@@ -56,16 +56,11 @@ pub mod libcoretest;
 
 fn filter_dirs(path: &Path) -> bool {
     let skip = [
-        "src/dlmalloc",
         "src/llvm",
         "src/llvm-emscripten",
         "src/libbacktrace",
-        "src/libcompiler_builtins",
         "src/librustc_data_structures/owning_ref",
-        "src/compiler-rt",
-        "src/liblibc",
         "src/vendor",
-        "src/rt/hoedown",
         "src/tools/cargo",
         "src/tools/clang",
         "src/tools/rls",
@@ -77,7 +72,9 @@ fn filter_dirs(path: &Path) -> bool {
         "src/tools/lldb",
         "src/target",
         "src/stdsimd",
+        "src/rust-sgx",
         "target",
+        "vendor",
     ];
     skip.iter().any(|p| path.ends_with(p))
 }

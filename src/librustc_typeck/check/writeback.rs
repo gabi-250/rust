@@ -32,8 +32,8 @@ use syntax_pos::Span;
 
 impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
     pub fn resolve_type_vars_in_body(&self, body: &'gcx hir::Body) -> &'gcx ty::TypeckTables<'gcx> {
-        let item_id = self.tcx.hir.body_owner(body.id());
-        let item_def_id = self.tcx.hir.local_def_id(item_id);
+        let item_id = self.tcx.hir().body_owner(body.id());
+        let item_def_id = self.tcx.hir().local_def_id(item_id);
 
         // This attribute causes us to dump some writeback information
         // in the form of errors, which is used for unit tests.
@@ -56,7 +56,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
 
         let used_trait_imports = mem::replace(
             &mut self.tables.borrow_mut().used_trait_imports,
-            Lrc::new(DefIdSet()),
+            Lrc::new(DefIdSet::default()),
         );
         debug!(
             "used_trait_imports({:?}) = {:?}",
@@ -99,7 +99,7 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
         body: &'gcx hir::Body,
         rustc_dump_user_substs: bool,
     ) -> WritebackCx<'cx, 'gcx, 'tcx> {
-        let owner = fcx.tcx.hir.definitions().node_to_hir_id(body.id().node_id);
+        let owner = fcx.tcx.hir().definitions().node_to_hir_id(body.id().node_id);
 
         WritebackCx {
             fcx,
@@ -115,7 +115,7 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
 
     fn write_ty_to_tables(&mut self, hir_id: hir::HirId, ty: Ty<'gcx>) {
         debug!("write_ty_to_tables({:?}, {:?})", hir_id, ty);
-        assert!(!ty.needs_infer() && !ty.has_skol());
+        assert!(!ty.needs_infer() && !ty.has_placeholders());
         self.tables.node_types_mut().insert(hir_id, ty);
     }
 
@@ -233,7 +233,7 @@ impl<'cx, 'gcx, 'tcx> Visitor<'gcx> for WritebackCx<'cx, 'gcx, 'tcx> {
 
         match e.node {
             hir::ExprKind::Closure(_, _, body, _, _) => {
-                let body = self.fcx.tcx.hir.body(body);
+                let body = self.fcx.tcx.hir().body(body);
                 for arg in &body.arguments {
                     self.visit_node_id(e.span, arg.hir_id);
                 }
@@ -306,7 +306,7 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
                 ty::UpvarCapture::ByValue => ty::UpvarCapture::ByValue,
                 ty::UpvarCapture::ByRef(ref upvar_borrow) => {
                     let r = upvar_borrow.region;
-                    let r = self.resolve(&r, &upvar_id.var_id);
+                    let r = self.resolve(&r, &upvar_id.var_path.hir_id);
                     ty::UpvarCapture::ByRef(ty::UpvarBorrow {
                         kind: upvar_borrow.kind,
                         region: r,
@@ -398,7 +398,7 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
                 c_sig
             } else {
                 span_bug!(
-                    self.fcx.tcx.hir.span_if_local(def_id).unwrap(),
+                    self.fcx.tcx.hir().span_if_local(def_id).unwrap(),
                     "writeback: `{:?}` missing from the global type context",
                     c_sig
                 );
@@ -412,7 +412,7 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
 
     fn visit_opaque_types(&mut self, span: Span) {
         for (&def_id, opaque_defn) in self.fcx.opaque_types.borrow().iter() {
-            let node_id = self.tcx().hir.as_local_node_id(def_id).unwrap();
+            let node_id = self.tcx().hir().as_local_node_id(def_id).unwrap();
             let instantiated_ty = self.resolve(&opaque_defn.concrete_ty, &node_id);
 
             let generics = self.tcx().generics_of(def_id);
@@ -545,7 +545,7 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
     }
 
     fn visit_field_id(&mut self, node_id: ast::NodeId) {
-        let hir_id = self.tcx().hir.node_to_hir_id(node_id);
+        let hir_id = self.tcx().hir().node_to_hir_id(node_id);
         if let Some(index) = self.fcx
             .tables
             .borrow_mut()
@@ -580,7 +580,7 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
         if let Some(substs) = self.fcx.tables.borrow().node_substs_opt(hir_id) {
             let substs = self.resolve(&substs, &span);
             debug!("write_substs_to_tcx({:?}, {:?})", hir_id, substs);
-            assert!(!substs.needs_infer() && !substs.has_skol());
+            assert!(!substs.needs_infer() && !substs.has_placeholders());
             self.tables.node_substs_mut().insert(hir_id, substs);
         }
 
@@ -591,8 +591,8 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
 
             // Unit-testing mechanism:
             if self.rustc_dump_user_substs {
-                let node_id = self.tcx().hir.hir_to_node_id(hir_id);
-                let span = self.tcx().hir.span(node_id);
+                let node_id = self.tcx().hir().hir_to_node_id(hir_id);
+                let span = self.tcx().hir().span(node_id);
                 self.tcx().sess.span_err(
                     span,
                     &format!("user substs: {:?}", user_substs),
@@ -710,21 +710,21 @@ impl Locatable for Span {
 
 impl Locatable for ast::NodeId {
     fn to_span(&self, tcx: &TyCtxt) -> Span {
-        tcx.hir.span(*self)
+        tcx.hir().span(*self)
     }
 }
 
 impl Locatable for DefIndex {
     fn to_span(&self, tcx: &TyCtxt) -> Span {
-        let node_id = tcx.hir.def_index_to_node_id(*self);
-        tcx.hir.span(node_id)
+        let node_id = tcx.hir().def_index_to_node_id(*self);
+        tcx.hir().span(node_id)
     }
 }
 
 impl Locatable for hir::HirId {
     fn to_span(&self, tcx: &TyCtxt) -> Span {
-        let node_id = tcx.hir.hir_to_node_id(*self);
-        tcx.hir.span(node_id)
+        let node_id = tcx.hir().hir_to_node_id(*self);
+        tcx.hir().span(node_id)
     }
 }
 

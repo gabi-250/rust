@@ -214,10 +214,10 @@ struct MatcherPos<'root, 'tt: 'root> {
     up: Option<MatcherPosHandle<'root, 'tt>>,
 
     /// Specifically used to "unzip" token trees. By "unzip", we mean to unwrap the delimiters from
-    /// a delimited token tree (e.g. something wrapped in `(` `)`) or to get the contents of a doc
+    /// a delimited token tree (e.g., something wrapped in `(` `)`) or to get the contents of a doc
     /// comment...
     ///
-    /// When matching against matchers with nested delimited submatchers (e.g. `pat ( pat ( .. )
+    /// When matching against matchers with nested delimited submatchers (e.g., `pat ( pat ( .. )
     /// pat ) pat`), we need to keep track of the matchers we are descending into. This stack does
     /// that where the bottom of the stack is the outermost matcher.
     /// Also, throughout the comments, this "descent" is often referred to as "unzipping"...
@@ -281,7 +281,7 @@ pub enum ParseResult<T> {
     Success(T),
     /// Arm failed to match. If the second parameter is `token::Eof`, it indicates an unexpected
     /// end of macro invocation. Otherwise, it indicates that no rules expected the given token.
-    Failure(syntax_pos::Span, Token),
+    Failure(syntax_pos::Span, Token, String),
     /// Fatal error (malformed macro?). Abort compilation.
     Error(syntax_pos::Span, String),
 }
@@ -309,7 +309,7 @@ fn create_matches(len: usize) -> Box<[Rc<NamedMatchVec>]> {
         vec![]
     } else {
         let empty_matches = Rc::new(SmallVec::new());
-        vec![empty_matches.clone(); len]
+        vec![empty_matches; len]
     }.into_boxed_slice()
 }
 
@@ -373,7 +373,7 @@ fn nameize<I: Iterator<Item = NamedMatch>>(
     ms: &[TokenTree],
     mut res: I,
 ) -> NamedParseResult {
-    // Recursively descend into each type of matcher (e.g. sequences, delimited, metavars) and make
+    // Recursively descend into each type of matcher (e.g., sequences, delimited, metavars) and make
     // sure that each metavar has _exactly one_ binding. If a metavar does not have exactly one
     // binding, then there is an error. If it does, then we insert the binding into the
     // `NamedParseResult`.
@@ -698,7 +698,7 @@ pub fn parse(
             parser.span,
         ) {
             Success(_) => {}
-            Failure(sp, tok) => return Failure(sp, tok),
+            Failure(sp, tok, t) => return Failure(sp, tok, t),
             Error(sp, msg) => return Error(sp, msg),
         }
 
@@ -710,7 +710,7 @@ pub fn parse(
         // Error messages here could be improved with links to original rules.
 
         // If we reached the EOF, check that there is EXACTLY ONE possible matcher. Otherwise,
-        // either the parse is ambiguous (which should never happen) or their is a syntax error.
+        // either the parse is ambiguous (which should never happen) or there is a syntax error.
         if token_name_eq(&parser.token, &token::Eof) {
             if eof_items.len() == 1 {
                 let matches = eof_items[0]
@@ -724,7 +724,15 @@ pub fn parse(
                     "ambiguity: multiple successful parses".to_string(),
                 );
             } else {
-                return Failure(parser.span, token::Eof);
+                return Failure(
+                    if parser.span.is_dummy() {
+                        parser.span
+                    } else {
+                        sess.source_map().next_point(parser.span)
+                    },
+                    token::Eof,
+                    "missing tokens in macro arguments".to_string(),
+                );
             }
         }
         // Performance hack: eof_items may share matchers via Rc with other things that we want
@@ -757,9 +765,13 @@ pub fn parse(
             );
         }
         // If there are no possible next positions AND we aren't waiting for the black-box parser,
-        // then their is a syntax error.
+        // then there is a syntax error.
         else if bb_items.is_empty() && next_items.is_empty() {
-            return Failure(parser.span, parser.token);
+            return Failure(
+                parser.span,
+                parser.token,
+                "no rules expected this token in macro call".to_string(),
+            );
         }
         // Dump all possible `next_items` into `cur_items` for the next iteration.
         else if !next_items.is_empty() {
@@ -883,7 +895,7 @@ fn may_begin_with(name: &str, token: &Token) -> bool {
 ///
 /// - `p`: the "black-box" parser to use
 /// - `sp`: the `Span` we want to parse
-/// - `name`: the name of the metavar _matcher_ we want to match (e.g. `tt`, `ident`, `block`,
+/// - `name`: the name of the metavar _matcher_ we want to match (e.g., `tt`, `ident`, `block`,
 ///   etc...)
 ///
 /// # Returns

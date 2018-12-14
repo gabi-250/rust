@@ -25,7 +25,7 @@ impl AbiBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn apply_attrs_callsite(
         &mut self,
         ty: &FnType<'tcx, Ty<'tcx>>,
-        callsite: <Self::CodegenCx as BackendTypes>::Value
+        callsite: &'ll Value
     ) {
         unimplemented!("apply_attrs_callsite");
     }

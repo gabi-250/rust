@@ -9,11 +9,11 @@
 // except according to those terms.
 
 use {AmbiguityError, AmbiguityKind, AmbiguityErrorMisc};
-use {CrateLint, Resolver, ResolutionError, Segment, Weak};
-use {Module, ModuleKind, NameBinding, NameBindingKind, PathResult, ToNameBinding};
+use {CrateLint, Resolver, ResolutionError, ScopeSet, Weak};
+use {Module, ModuleKind, NameBinding, NameBindingKind, PathResult, Segment, ToNameBinding};
 use {is_known_tool, resolve_error};
 use ModuleOrUniformRoot;
-use Namespace::{self, *};
+use Namespace::*;
 use build_reduced_graph::{BuildReducedGraphVisitor, IsMacroExport};
 use resolve_imports::ImportResolver;
 use rustc::hir::def_id::{DefId, CRATE_DEF_INDEX, DefIndex,
@@ -21,28 +21,24 @@ use rustc::hir::def_id::{DefId, CRATE_DEF_INDEX, DefIndex,
 use rustc::hir::def::{Def, NonMacroAttrKind};
 use rustc::hir::map::{self, DefCollector};
 use rustc::{ty, lint};
-use syntax::ast::{self, Name, Ident};
+use syntax::ast::{self, Ident};
 use syntax::attr;
 use syntax::errors::DiagnosticBuilder;
 use syntax::ext::base::{self, Determinacy};
-use syntax::ext::base::{MacroKind, SyntaxExtension, Resolver as SyntaxResolver};
+use syntax::ext::base::{MacroKind, SyntaxExtension};
 use syntax::ext::expand::{AstFragment, Invocation, InvocationKind};
 use syntax::ext::hygiene::{self, Mark};
 use syntax::ext::tt::macro_rules;
-use syntax::feature_gate::{self, feature_err, emit_feature_err, is_builtin_attr_name, GateIssue};
-use syntax::feature_gate::EXPLAIN_DERIVE_UNDERSCORE;
+use syntax::feature_gate::{feature_err, is_builtin_attr_name, GateIssue};
 use syntax::fold::{self, Folder};
-use syntax::parse::parser::PathStyle;
-use syntax::parse::token::{self, Token};
 use syntax::ptr::P;
 use syntax::symbol::{Symbol, keywords};
-use syntax::tokenstream::{TokenStream, TokenTree, Delimited, DelimSpan};
 use syntax::util::lev_distance::find_best_match_for_name;
 use syntax_pos::{Span, DUMMY_SP};
 use errors::Applicability;
 
 use std::cell::Cell;
-use std::mem;
+use std::{mem, ptr};
 use rustc_data_structures::sync::Lrc;
 
 #[derive(Clone, Debug)]
@@ -167,7 +163,7 @@ impl<'a, 'crateloader: 'a> base::Resolver for Resolver<'a, 'crateloader> {
 
                 if path.segments[0].ident.name == keywords::DollarCrate.name() {
                     let module = self.0.resolve_crate_root(path.segments[0].ident);
-                    path.segments[0].ident.name = keywords::CrateRoot.name();
+                    path.segments[0].ident.name = keywords::PathRoot.name();
                     if !module.is_local() {
                         let span = path.segments[0].ident.span;
                         path.segments.insert(1, match module.kind {
@@ -192,10 +188,6 @@ impl<'a, 'crateloader: 'a> base::Resolver for Resolver<'a, 'crateloader> {
         let ret = EliminateCrateVar(self, item.span).fold_item(item);
         assert!(ret.len() == 1);
         ret.into_iter().next().unwrap()
-    }
-
-    fn is_whitelisted_legacy_custom_derive(&self, name: Name) -> bool {
-        self.whitelisted_legacy_custom_derives.contains(&name)
     }
 
     fn visit_ast_fragment_with_placeholders(&mut self, mark: Mark, fragment: &AstFragment,
@@ -238,79 +230,6 @@ impl<'a, 'crateloader: 'a> base::Resolver for Resolver<'a, 'crateloader> {
 
     fn resolve_imports(&mut self) {
         ImportResolver { resolver: self }.resolve_imports()
-    }
-
-    // Resolves attribute and derive legacy macros from `#![plugin(..)]`.
-    fn find_legacy_attr_invoc(&mut self, attrs: &mut Vec<ast::Attribute>, allow_derive: bool)
-                              -> Option<ast::Attribute> {
-        if !allow_derive {
-            return None;
-        }
-
-        // Check for legacy derives
-        for i in 0..attrs.len() {
-            let name = attrs[i].name();
-
-            if name == "derive" {
-                let result = attrs[i].parse_list(&self.session.parse_sess, |parser| {
-                    parser.parse_path_allowing_meta(PathStyle::Mod)
-                });
-
-                let mut traits = match result {
-                    Ok(traits) => traits,
-                    Err(mut e) => {
-                        e.cancel();
-                        continue
-                    }
-                };
-
-                for j in 0..traits.len() {
-                    if traits[j].segments.len() > 1 {
-                        continue
-                    }
-                    let trait_name = traits[j].segments[0].ident.name;
-                    let legacy_name = Symbol::intern(&format!("derive_{}", trait_name));
-                    if !self.builtin_macros.contains_key(&legacy_name) {
-                        continue
-                    }
-                    let span = traits.remove(j).span;
-                    self.gate_legacy_custom_derive(legacy_name, span);
-                    if traits.is_empty() {
-                        attrs.remove(i);
-                    } else {
-                        let mut tokens = Vec::with_capacity(traits.len() - 1);
-                        for (j, path) in traits.iter().enumerate() {
-                            if j > 0 {
-                                tokens.push(TokenTree::Token(attrs[i].span, Token::Comma).into());
-                            }
-                            tokens.reserve((path.segments.len() * 2).saturating_sub(1));
-                            for (k, segment) in path.segments.iter().enumerate() {
-                                if k > 0 {
-                                    tokens.push(TokenTree::Token(path.span, Token::ModSep).into());
-                                }
-                                let tok = Token::from_ast_ident(segment.ident);
-                                tokens.push(TokenTree::Token(path.span, tok).into());
-                            }
-                        }
-                        let delim_span = DelimSpan::from_single(attrs[i].span);
-                        attrs[i].tokens = TokenTree::Delimited(delim_span, Delimited {
-                            delim: token::Paren,
-                            tts: TokenStream::concat(tokens).into(),
-                        }).into();
-                    }
-                    return Some(ast::Attribute {
-                        path: ast::Path::from_ident(Ident::new(legacy_name, span)),
-                        tokens: TokenStream::empty(),
-                        id: attr::mk_attr_id(),
-                        style: ast::AttrStyle::Outer,
-                        is_sugared_doc: false,
-                        span,
-                    });
-                }
-            }
-        }
-
-        None
     }
 
     fn resolve_macro_invocation(&mut self, invoc: &Invocation, invoc_id: Mark, force: bool)
@@ -430,11 +349,6 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                                 feature_err(&self.session.parse_sess, "rustc_attrs", path.span,
                                             GateIssue::Language, &msg).emit();
                             }
-                        } else if name.starts_with("derive_") {
-                            if !features.custom_derive {
-                                feature_err(&self.session.parse_sess, "custom_derive", path.span,
-                                            GateIssue::Language, EXPLAIN_DERIVE_UNDERSCORE).emit();
-                            }
                         } else if !features.custom_attribute {
                             let msg = format!("The attribute `{}` is currently unknown to the \
                                                compiler and may have meaning added to it in the \
@@ -445,7 +359,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                     }
                 } else {
                     // Not only attributes, but anything in macro namespace can result in
-                    // `Def::NonMacroAttr` definition (e.g. `inline!()`), so we must report
+                    // `Def::NonMacroAttr` definition (e.g., `inline!()`), so we must report
                     // an error for those cases.
                     let msg = format!("expected a macro, found {}", def.kind_name());
                     self.session.span_err(path.span, &msg);
@@ -502,7 +416,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
             def
         } else {
             let binding = self.early_resolve_ident_in_lexical_scope(
-                path[0].ident, MacroNS, Some(kind), false, parent_scope, false, force, path_span
+                path[0].ident, ScopeSet::Macro(kind), parent_scope, false, force, path_span
             );
             match binding {
                 Ok(..) => {}
@@ -522,14 +436,12 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
     // Resolve an identifier in lexical scope.
     // This is a variation of `fn resolve_ident_in_lexical_scope` that can be run during
     // expansion and import resolution (perhaps they can be merged in the future).
-    // The function is used for resolving initial segments of macro paths (e.g. `foo` in
+    // The function is used for resolving initial segments of macro paths (e.g., `foo` in
     // `foo::bar!(); or `foo!();`) and also for import paths on 2018 edition.
     crate fn early_resolve_ident_in_lexical_scope(
         &mut self,
-        mut ident: Ident,
-        ns: Namespace,
-        macro_kind: Option<MacroKind>,
-        is_import: bool,
+        orig_ident: Ident,
+        scope_set: ScopeSet,
         parent_scope: &ParentScope<'a>,
         record_used: bool,
         force: bool,
@@ -582,6 +494,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
         enum WhereToResolve<'a> {
             DeriveHelpers,
             MacroRules(LegacyScope<'a>),
+            CrateRoot,
             Module(Module<'a>),
             MacroUsePrelude,
             BuiltinMacros,
@@ -595,17 +508,17 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
 
         bitflags! {
             struct Flags: u8 {
-                const MACRO_RULES       = 1 << 0;
-                const MODULE            = 1 << 1;
-                const PRELUDE           = 1 << 2;
-                const MISC_SUGGEST_SELF = 1 << 3;
-                const MISC_FROM_PRELUDE = 1 << 4;
+                const MACRO_RULES        = 1 << 0;
+                const MODULE             = 1 << 1;
+                const PRELUDE            = 1 << 2;
+                const MISC_SUGGEST_CRATE = 1 << 3;
+                const MISC_SUGGEST_SELF  = 1 << 4;
+                const MISC_FROM_PRELUDE  = 1 << 5;
             }
         }
 
         assert!(force || !record_used); // `record_used` implies `force`
-        assert!(macro_kind.is_none() || !is_import); // `is_import` implies no macro kind
-        ident = ident.modern();
+        let mut ident = orig_ident.modern();
 
         // Make sure `self`, `super` etc produce an error when passed to here.
         if ident.is_path_segment_keyword() {
@@ -626,10 +539,17 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
         let mut innermost_result: Option<(&NameBinding, Flags)> = None;
 
         // Go through all the scopes and try to resolve the name.
-        let mut where_to_resolve = if ns == MacroNS {
-            WhereToResolve::DeriveHelpers
-        } else {
-            WhereToResolve::Module(parent_scope.module)
+        let rust_2015 = orig_ident.span.rust_2015();
+        let (ns, macro_kind, is_import, is_absolute_path) = match scope_set {
+            ScopeSet::Import(ns) => (ns, None, true, false),
+            ScopeSet::AbsolutePath(ns) => (ns, None, false, true),
+            ScopeSet::Macro(macro_kind) => (MacroNS, Some(macro_kind), false, false),
+            ScopeSet::Module => (TypeNS, None, false, false),
+        };
+        let mut where_to_resolve = match ns {
+            _ if is_absolute_path || is_import && rust_2015 => WhereToResolve::CrateRoot,
+            TypeNS | ValueNS => WhereToResolve::Module(parent_scope.module),
+            MacroNS => WhereToResolve::DeriveHelpers,
         };
         let mut use_prelude = !parent_scope.module.no_implicit_prelude;
         let mut determinacy = Determinacy::Determined;
@@ -667,6 +587,26 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                         Err(Determinacy::Undetermined),
                     _ => Err(Determinacy::Determined),
                 }
+                WhereToResolve::CrateRoot => {
+                    let root_ident = Ident::new(keywords::PathRoot.name(), orig_ident.span);
+                    let root_module = self.resolve_crate_root(root_ident);
+                    let binding = self.resolve_ident_in_module_ext(
+                        ModuleOrUniformRoot::Module(root_module),
+                        orig_ident,
+                        ns,
+                        None,
+                        record_used,
+                        path_span,
+                    );
+                    match binding {
+                        Ok(binding) => Ok((binding, Flags::MODULE | Flags::MISC_SUGGEST_CRATE)),
+                        Err((Determinacy::Undetermined, Weak::No)) =>
+                            return Err(Determinacy::determined(force)),
+                        Err((Determinacy::Undetermined, Weak::Yes)) =>
+                            Err(Determinacy::Undetermined),
+                        Err((Determinacy::Determined, _)) => Err(Determinacy::Determined),
+                    }
+                }
                 WhereToResolve::Module(module) => {
                     let orig_current_module = mem::replace(&mut self.current_module, module);
                     let binding = self.resolve_ident_in_module_unadjusted_ext(
@@ -681,7 +621,9 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                     self.current_module = orig_current_module;
                     match binding {
                         Ok(binding) => {
-                            let misc_flags = if module.is_normal() {
+                            let misc_flags = if ptr::eq(module, self.graph_root) {
+                                Flags::MISC_SUGGEST_CRATE
+                            } else if module.is_normal() {
                                 Flags::MISC_SUGGEST_SELF
                             } else {
                                 Flags::empty()
@@ -696,7 +638,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                     }
                 }
                 WhereToResolve::MacroUsePrelude => {
-                    if use_prelude || self.session.rust_2015() {
+                    if use_prelude || rust_2015 {
                         match self.macro_use_prelude.get(&ident.name).cloned() {
                             Some(binding) =>
                                 Ok((binding, Flags::PRELUDE | Flags::MISC_FROM_PRELUDE)),
@@ -725,7 +667,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                     }
                 }
                 WhereToResolve::LegacyPluginHelpers => {
-                    if (use_prelude || self.session.rust_2015()) &&
+                    if (use_prelude || rust_2015) &&
                        self.session.plugin_attributes.borrow().iter()
                                                      .any(|(name, _)| ident.name == &**name) {
                         let binding = (Def::NonMacroAttr(NonMacroAttrKind::LegacyPluginHelper),
@@ -737,9 +679,8 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                     }
                 }
                 WhereToResolve::ExternPrelude => {
-                    if use_prelude {
-                        match self.extern_prelude_get(ident, !record_used,
-                                                      innermost_result.is_some()) {
+                    if use_prelude || is_absolute_path {
+                        match self.extern_prelude_get(ident, !record_used) {
                             Some(binding) => Ok((binding, Flags::PRELUDE)),
                             None => Err(Determinacy::determined(
                                 self.graph_root.unresolved_invocations.borrow().is_empty()
@@ -804,6 +745,8 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
 
                             let ambiguity_error_kind = if is_import {
                                 Some(AmbiguityKind::Import)
+                            } else if is_absolute_path {
+                                Some(AmbiguityKind::AbsolutePath)
                             } else if innermost_def == builtin || def == builtin {
                                 Some(AmbiguityKind::BuiltinAttr)
                             } else if innermost_def == derive_helper || def == derive_helper {
@@ -816,7 +759,11 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                             } else if innermost_flags.contains(Flags::MACRO_RULES) &&
                                       flags.contains(Flags::MODULE) &&
                                       !self.disambiguate_legacy_vs_modern(innermost_binding,
-                                                                          binding) {
+                                                                          binding) ||
+                                      flags.contains(Flags::MACRO_RULES) &&
+                                      innermost_flags.contains(Flags::MODULE) &&
+                                      !self.disambiguate_legacy_vs_modern(binding,
+                                                                          innermost_binding) {
                                 Some(AmbiguityKind::LegacyVsModern)
                             } else if innermost_binding.is_glob_import() {
                                 Some(AmbiguityKind::GlobVsOuter)
@@ -827,7 +774,9 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                                 None
                             };
                             if let Some(kind) = ambiguity_error_kind {
-                                let misc = |f: Flags| if f.contains(Flags::MISC_SUGGEST_SELF) {
+                                let misc = |f: Flags| if f.contains(Flags::MISC_SUGGEST_CRATE) {
+                                    AmbiguityErrorMisc::SuggestCrate
+                                } else if f.contains(Flags::MISC_SUGGEST_SELF) {
                                     AmbiguityErrorMisc::SuggestSelf
                                 } else if f.contains(Flags::MISC_FROM_PRELUDE) {
                                     AmbiguityErrorMisc::FromPrelude
@@ -836,7 +785,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                                 };
                                 self.ambiguity_errors.push(AmbiguityError {
                                     kind,
-                                    ident,
+                                    ident: orig_ident,
                                     b1: innermost_binding,
                                     b2: binding,
                                     misc1: misc(innermost_flags),
@@ -867,6 +816,18 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                     LegacyScope::Empty => WhereToResolve::Module(parent_scope.module),
                     LegacyScope::Uninitialized => unreachable!(),
                 }
+                WhereToResolve::CrateRoot if is_import => match ns {
+                    TypeNS | ValueNS => WhereToResolve::Module(parent_scope.module),
+                    MacroNS => WhereToResolve::DeriveHelpers,
+                }
+                WhereToResolve::CrateRoot if is_absolute_path => match ns {
+                    TypeNS => {
+                        ident.span.adjust(Mark::root());
+                        WhereToResolve::ExternPrelude
+                    }
+                    ValueNS | MacroNS => break,
+                }
+                WhereToResolve::CrateRoot => unreachable!(),
                 WhereToResolve::Module(module) => {
                     match self.hygienic_lexical_parent(module, &mut ident.span) {
                         Some(parent_module) => WhereToResolve::Module(parent_module),
@@ -884,6 +845,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                 WhereToResolve::BuiltinMacros => WhereToResolve::BuiltinAttrs,
                 WhereToResolve::BuiltinAttrs => WhereToResolve::LegacyPluginHelpers,
                 WhereToResolve::LegacyPluginHelpers => break, // nowhere else to search
+                WhereToResolve::ExternPrelude if is_absolute_path => break,
                 WhereToResolve::ExternPrelude => WhereToResolve::ToolPrelude,
                 WhereToResolve::ToolPrelude => WhereToResolve::StdLibPrelude,
                 WhereToResolve::StdLibPrelude => match ns {
@@ -899,30 +861,45 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
 
         // The first found solution was the only one, return it.
         if let Some((binding, flags)) = innermost_result {
-            if is_import && !self.session.features_untracked().uniform_paths {
-                // We get to here only if there's no ambiguity, in ambiguous cases an error will
-                // be reported anyway, so there's no reason to report an additional feature error.
-                // The `binding` can actually be introduced by something other than `--extern`,
-                // but its `Def` should coincide with a crate passed with `--extern`
-                // (otherwise there would be ambiguity) and we can skip feature error in this case.
-                if ns != TypeNS || !use_prelude ||
-                   self.extern_prelude_get(ident, true, false).is_none() {
-                    let msg = "imports can only refer to extern crate names \
-                               passed with `--extern` on stable channel";
-                    let mut err = feature_err(&self.session.parse_sess, "uniform_paths",
-                                              ident.span, GateIssue::Language, msg);
-
-                    let what = self.binding_description(binding, ident,
-                                                        flags.contains(Flags::MISC_FROM_PRELUDE));
-                    let note_msg = format!("this import refers to {what}", what = what);
-                    if binding.span.is_dummy() {
-                        err.note(&note_msg);
-                    } else {
-                        err.span_note(binding.span, &note_msg);
-                        err.span_label(binding.span, "not an extern crate passed with `--extern`");
-                    }
-                    err.emit();
+            // We get to here only if there's no ambiguity, in ambiguous cases an error will
+            // be reported anyway, so there's no reason to report an additional feature error.
+            // The `binding` can actually be introduced by something other than `--extern`,
+            // but its `Def` should coincide with a crate passed with `--extern`
+            // (otherwise there would be ambiguity) and we can skip feature error in this case.
+            'ok: {
+                if !is_import || self.session.features_untracked().uniform_paths {
+                    break 'ok;
                 }
+                if ns == TypeNS && use_prelude && self.extern_prelude_get(ident, true).is_some() {
+                    break 'ok;
+                }
+                if rust_2015 {
+                    let root_ident = Ident::new(keywords::PathRoot.name(), orig_ident.span);
+                    let root_module = self.resolve_crate_root(root_ident);
+                    if self.resolve_ident_in_module_ext(ModuleOrUniformRoot::Module(root_module),
+                                                        orig_ident, ns, None, false, path_span)
+                                                        .is_ok() {
+                        break 'ok;
+                    }
+                }
+
+                let msg = "imports can only refer to extern crate names \
+                           passed with `--extern` on stable channel";
+                let mut err = feature_err(&self.session.parse_sess, "uniform_paths",
+                                          ident.span, GateIssue::Language, msg);
+
+                let what = self.binding_description(binding, ident,
+                                                    flags.contains(Flags::MISC_FROM_PRELUDE));
+                let note_msg = format!("this import refers to {what}", what = what);
+                let label_span = if binding.span.is_dummy() {
+                    err.note(&note_msg);
+                    ident.span
+                } else {
+                    err.span_note(binding.span, &note_msg);
+                    binding.span
+                };
+                err.span_label(label_span, "not an extern crate passed with `--extern`");
+                err.emit();
             }
 
             return Ok(binding);
@@ -999,7 +976,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
         let macro_resolutions =
             mem::replace(&mut *module.single_segment_macro_resolutions.borrow_mut(), Vec::new());
         for (ident, kind, parent_scope, initial_binding) in macro_resolutions {
-            match self.early_resolve_ident_in_lexical_scope(ident, MacroNS, Some(kind), false,
+            match self.early_resolve_ident_in_lexical_scope(ident, ScopeSet::Macro(kind),
                                                             &parent_scope, true, true, ident.span) {
                 Ok(binding) => {
                     let initial_def = initial_binding.map(|initial_binding| {
@@ -1025,7 +1002,7 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
         let builtin_attrs = mem::replace(&mut *module.builtin_attrs.borrow_mut(), Vec::new());
         for (ident, parent_scope) in builtin_attrs {
             let _ = self.early_resolve_ident_in_lexical_scope(
-                ident, MacroNS, Some(MacroKind::Attr), false, &parent_scope, true, true, ident.span
+                ident, ScopeSet::Macro(MacroKind::Attr), &parent_scope, true, true, ident.span
             );
         }
     }
@@ -1153,16 +1130,6 @@ impl<'a, 'cl> Resolver<'a, 'cl> {
                 self.unused_macros.insert(def_id);
             }
             self.define(module, ident, MacroNS, (def, vis, item.span, expansion));
-        }
-    }
-
-    fn gate_legacy_custom_derive(&mut self, name: Symbol, span: Span) {
-        if !self.session.features_untracked().custom_derive {
-            let sess = &self.session.parse_sess;
-            let explain = feature_gate::EXPLAIN_CUSTOM_DERIVE;
-            emit_feature_err(sess, "custom_derive", span, GateIssue::Language, explain);
-        } else if !self.is_whitelisted_legacy_custom_derive(name) {
-            self.session.span_warn(span, feature_gate::EXPLAIN_DEPR_CUSTOM_DERIVE);
         }
     }
 }

@@ -127,7 +127,7 @@ mod test;
 pub mod profile;
 pub mod driver;
 pub mod pretty;
-mod derive_registrar;
+mod proc_macro_decls;
 
 pub mod target_features {
     use syntax::ast;
@@ -258,7 +258,7 @@ pub fn get_codegen_backend(sess: &Session) -> Box<dyn CodegenBackend> {
             .unwrap_or(&sess.target.target.options.codegen_backend);
         let backend = match &codegen_name[..] {
             "metadata_only" => {
-                rustc_codegen_utils::codegen_backend::MetadataOnlyCodegenBackend::new
+                rustc_codegen_utils::codegen_backend::MetadataOnlyCodegenBackend::boxed
             }
             filename if filename.contains(".") => {
                 load_backend_from_dylib(filename.as_ref())
@@ -291,7 +291,7 @@ fn get_codegen_sysroot(backend_name: &str) -> fn() -> Box<dyn CodegenBackend> {
     // let's just return a dummy creation function which won't be used in
     // general anyway.
     if cfg!(test) {
-        return rustc_codegen_utils::codegen_backend::MetadataOnlyCodegenBackend::new
+        return rustc_codegen_utils::codegen_backend::MetadataOnlyCodegenBackend::boxed
     }
 
     let target = session::config::host_triple();
@@ -598,7 +598,7 @@ fn make_input(free_matches: &[String]) -> Option<(Input, Option<PathBuf>, Option
             } else {
                 None
             };
-            Some((Input::Str { name: FileName::Anon, input: src },
+            Some((Input::Str { name: FileName::anon_source_code(&src), input: src },
                   None, err))
         } else {
             Some((Input::File(PathBuf::from(ifile)),
@@ -1476,6 +1476,11 @@ fn parse_crate_attrs<'a>(sess: &'a Session, input: &Input) -> PResult<'a, Vec<as
     }
 }
 
+// Temporarily have stack size set to 32MB to deal with various crates with long method
+// chains or deep syntax trees.
+// FIXME(oli-obk): get https://github.com/rust-lang/rust/pull/55617 the finish line
+const STACK_SIZE: usize = 32 * 1024 * 1024; // 32MB
+
 /// Runs `f` in a suitable thread for running `rustc`; returns a `Result` with either the return
 /// value of `f` or -- if a panic occurs -- the panic value.
 ///
@@ -1485,9 +1490,6 @@ pub fn in_named_rustc_thread<F, R>(name: String, f: F) -> Result<R, Box<dyn Any 
     where F: FnOnce() -> R + Send + 'static,
           R: Send + 'static,
 {
-    // Temporarily have stack size set to 16MB to deal with nom-using crates failing
-    const STACK_SIZE: usize = 16 * 1024 * 1024; // 16MB
-
     #[cfg(all(unix, not(target_os = "haiku")))]
     let spawn_thread = unsafe {
         // Fetch the current resource limits
@@ -1705,7 +1707,6 @@ pub fn diagnostics_registry() -> errors::registry::Registry {
     all_errors.extend_from_slice(&rustc_privacy::DIAGNOSTICS);
     // FIXME: need to figure out a way to get these back in here
     // all_errors.extend_from_slice(get_codegen_backend(sess).diagnostics());
-    all_errors.extend_from_slice(&rustc_codegen_utils::DIAGNOSTICS);
     all_errors.extend_from_slice(&rustc_metadata::DIAGNOSTICS);
     all_errors.extend_from_slice(&rustc_passes::DIAGNOSTICS);
     all_errors.extend_from_slice(&rustc_plugin::DIAGNOSTICS);

@@ -15,8 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::fs::{self, File};
-use std::io::prelude::*;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::cmp;
@@ -58,6 +57,7 @@ pub struct Config {
     pub ignore_git: bool,
     pub exclude: Vec<PathBuf>,
     pub rustc_error_format: Option<String>,
+    pub test_compare_mode: bool,
 
     pub run_host_only: bool,
 
@@ -326,6 +326,7 @@ struct Rust {
     verify_llvm_ir: Option<bool>,
     remap_debuginfo: Option<bool>,
     jemalloc: Option<bool>,
+    test_compare_mode: Option<bool>,
 }
 
 /// TOML representation of how each build target is configured.
@@ -414,9 +415,7 @@ impl Config {
         config.run_host_only = !(flags.host.is_empty() && !flags.target.is_empty());
 
         let toml = file.map(|file| {
-            let mut f = t!(File::open(&file));
-            let mut contents = String::new();
-            t!(f.read_to_string(&mut contents));
+            let contents = t!(fs::read_to_string(&file));
             match toml::from_str(&contents) {
                 Ok(table) => table,
                 Err(err) => {
@@ -540,6 +539,7 @@ impl Config {
             set(&mut config.codegen_tests, rust.codegen_tests);
             set(&mut config.rust_rpath, rust.rpath);
             set(&mut config.jemalloc, rust.jemalloc);
+            set(&mut config.test_compare_mode, rust.test_compare_mode);
             set(&mut config.backtrace, rust.backtrace);
             set(&mut config.channel, rust.channel.clone());
             set(&mut config.rust_dist_src, rust.dist_src);

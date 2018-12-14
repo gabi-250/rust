@@ -119,7 +119,7 @@ struct RegionDefinition<'tcx> {
     external_name: Option<ty::Region<'tcx>>,
 }
 
-/// NB: The variants in `Cause` are intentionally ordered. Lower
+/// N.B., the variants in `Cause` are intentionally ordered. Lower
 /// values are preferred when it comes to error messages. Do not
 /// reorder willy nilly.
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
@@ -657,7 +657,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                     .buffer(errors_buffer);
             } else {
                 // FIXME. We should handle this case better. It
-                // indicates that we have e.g. some region variable
+                // indicates that we have e.g., some region variable
                 // whose value is like `'a+'b` where `'a` and `'b` are
                 // distinct unrelated univesal regions that are not
                 // known to outlive one another. It'd be nice to have
@@ -1208,7 +1208,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                         blame_span: blame_span_category.1,
                         category: blame_span_category.0,
                     });
-                    return;
+                    continue;
                 }
             }
 
@@ -1230,7 +1230,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         mir: &Mir<'tcx>,
         _mir_def_id: DefId,
         longer_fr: RegionVid,
-        placeholder: ty::Placeholder,
+        placeholder: ty::PlaceholderRegion,
     ) {
         debug!(
             "check_bound_universal_region(fr={:?}, placeholder={:?})",

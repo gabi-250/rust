@@ -97,7 +97,7 @@
 //! ## Implementation details of logically-immutable methods
 //!
 //! Occasionally it may be desirable not to expose in an API that there is mutation happening
-//! "under the hood". This may be because logically the operation is immutable, but e.g. caching
+//! "under the hood". This may be because logically the operation is immutable, but e.g., caching
 //! forces the implementation to perform mutation; or because you must employ mutation to implement
 //! a trait method that was originally defined to take `&self`.
 //!
@@ -1227,7 +1227,7 @@ impl<T: ?Sized + fmt::Display> fmt::Display for Ref<'_, T> {
 }
 
 impl<'b, T: ?Sized> RefMut<'b, T> {
-    /// Make a new `RefMut` for a component of the borrowed data, e.g. an enum
+    /// Make a new `RefMut` for a component of the borrowed data, e.g., an enum
     /// variant.
     ///
     /// The `RefCell` is already mutably borrowed, so this cannot fail.
@@ -1509,7 +1509,9 @@ impl<T: ?Sized> UnsafeCell<T> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const fn get(&self) -> *mut T {
-        &self.value as *const T as *mut T
+        // We can just cast the pointer from `UnsafeCell<T>` to `T` because of
+        // #[repr(transparent)]
+        self as *const UnsafeCell<T> as *const T as *mut T
     }
 }
 

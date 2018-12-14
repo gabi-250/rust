@@ -110,7 +110,7 @@ pub fn simplify_type<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
                 // anything. when lazy normalization happens, this
                 // will change. It would still be nice to have a way
                 // to deal with known-not-to-unify-with-anything
-                // projections (e.g. the likes of <__S as Encoder>::Error).
+                // projections (e.g., the likes of <__S as Encoder>::Error).
                 Some(ParameterSimplifiedType)
             } else {
                 None
@@ -122,7 +122,7 @@ pub fn simplify_type<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
         ty::Foreign(def_id) => {
             Some(ForeignSimplifiedType(def_id))
         }
-        ty::Bound(..) | ty::Infer(_) | ty::Error => None,
+        ty::Placeholder(..) | ty::Bound(..) | ty::Infer(_) | ty::Error => None,
     }
 }
 

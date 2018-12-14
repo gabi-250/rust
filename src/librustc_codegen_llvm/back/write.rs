@@ -23,7 +23,7 @@ use llvm_util;
 use ModuleLlvm;
 use rustc_codegen_ssa::{ModuleCodegen, CompiledModule};
 use rustc::util::common::time_ext;
-use rustc_fs_util::{path2cstr, link_or_copy};
+use rustc_fs_util::{path_to_c_string, link_or_copy};
 use rustc_data_structures::small_c_str::SmallCStr;
 use errors::{self, Handler, FatalError};
 use type_::Type;
@@ -80,7 +80,7 @@ pub fn write_output_file(
         output: &Path,
         file_type: llvm::FileType) -> Result<(), FatalError> {
     unsafe {
-        let output_c = path2cstr(output);
+        let output_c = path_to_c_string(output);
         let result = llvm::LLVMRustWriteOutputFile(target, pm, m, output_c.as_ptr(), file_type);
         if result.into_result().is_err() {
             let msg = format!("could not write output to {}", output.display());
@@ -211,7 +211,7 @@ pub(crate) fn save_temp_bitcode(
         let ext = format!("{}.bc", name);
         let cgu = Some(&module.name[..]);
         let path = cgcx.output_filenames.temp_path_ext(&ext, cgu);
-        let cstr = path2cstr(&path);
+        let cstr = path_to_c_string(&path);
         let llmod = module.module_llvm.llmod();
         llvm::LLVMWriteBitcodeToFile(llmod, cstr.as_ptr());
     }
@@ -324,7 +324,7 @@ pub(crate) unsafe fn optimize(cgcx: &CodegenContext<LlvmCodegenBackend>,
 
     if config.emit_no_opt_bc {
         let out = cgcx.output_filenames.temp_path_ext("no-opt.bc", module_name);
-        let out = path2cstr(&out);
+        let out = path_to_c_string(&out);
         llvm::LLVMWriteBitcodeToFile(llmod, out.as_ptr());
     }
 
@@ -371,15 +371,16 @@ pub(crate) unsafe fn optimize(cgcx: &CodegenContext<LlvmCodegenBackend>,
                     .unwrap_or(llvm::CodeGenOptLevel::None);
                 let prepare_for_thin_lto = cgcx.lto == Lto::Thin || cgcx.lto == Lto::ThinLocal ||
                     (cgcx.lto != Lto::Fat && cgcx.opts.debugging_opts.cross_lang_lto.enabled());
+                with_llvm_pmb(llmod, &config, opt_level, prepare_for_thin_lto, &mut |b| {
+                    llvm::LLVMPassManagerBuilderPopulateFunctionPassManager(b, fpm);
+                    llvm::LLVMPassManagerBuilderPopulateModulePassManager(b, mpm);
+                });
+
                 have_name_anon_globals_pass = have_name_anon_globals_pass || prepare_for_thin_lto;
                 if using_thin_buffers && !prepare_for_thin_lto {
                     assert!(addpass("name-anon-globals"));
                     have_name_anon_globals_pass = true;
                 }
-                with_llvm_pmb(llmod, &config, opt_level, prepare_for_thin_lto, &mut |b| {
-                    llvm::LLVMPassManagerBuilderPopulateFunctionPassManager(b, fpm);
-                    llvm::LLVMPassManagerBuilderPopulateModulePassManager(b, mpm);
-                })
             }
 
             for pass in &config.passes {
@@ -530,7 +531,7 @@ pub(crate) unsafe fn codegen(cgcx: &CodegenContext<LlvmCodegenBackend>,
             || -> Result<(), FatalError> {
             if config.emit_ir {
                 let out = cgcx.output_filenames.temp_path(OutputType::LlvmAssembly, module_name);
-                let out = path2cstr(&out);
+                let out = path_to_c_string(&out);
 
                 extern "C" fn demangle_callback(input_ptr: *const c_char,
                                                 input_len: size_t,
@@ -781,7 +782,7 @@ fn create_msvc_imps(
     }
     // The x86 ABI seems to require that leading underscores are added to symbol
     // names, so we need an extra underscore on 32-bit. There's also a leading
-    // '\x01' here which disables LLVM's symbol mangling (e.g. no extra
+    // '\x01' here which disables LLVM's symbol mangling (e.g., no extra
     // underscores added in front).
     let prefix = if cgcx.target_pointer_width == "32" {
         "\x01__imp__"

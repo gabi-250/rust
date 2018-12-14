@@ -38,7 +38,7 @@
 //! However, compiletest itself tries to avoid running tests when the artifacts
 //! that are involved (mainly the compiler) haven't changed.
 //!
-//! When you execute `x.py build`, the steps which are executed are:
+//! When you execute `x.py build`, the steps executed are:
 //!
 //! * First, the python script is run. This will automatically download the
 //!   stage0 rustc and cargo according to `src/stage0.txt`, or use the cached
@@ -777,10 +777,10 @@ impl Build {
     fn cflags(&self, target: Interned<String>, which: GitRepo) -> Vec<String> {
         // Filter out -O and /O (the optimization flags) that we picked up from
         // cc-rs because the build scripts will determine that for themselves.
-        let mut base: Vec<String> = self.cc[&target].args().iter()
+        let mut base = self.cc[&target].args().iter()
                            .map(|s| s.to_string_lossy().into_owned())
                            .filter(|s| !s.starts_with("-O") && !s.starts_with("/O"))
-                           .collect::<Vec<_>>();
+                           .collect::<Vec<String>>();
 
         // If we're compiling on macOS then we add a few unconditional flags
         // indicating that we want libc++ (more filled out than libstdc++) and
@@ -1067,9 +1067,8 @@ impl Build {
 
     /// Returns the `a.b.c` version that the given package is at.
     fn release_num(&self, package: &str) -> String {
-        let mut toml = String::new();
         let toml_file_name = self.src.join(&format!("src/tools/{}/Cargo.toml", package));
-        t!(t!(File::open(toml_file_name)).read_to_string(&mut toml));
+        let toml = t!(fs::read_to_string(&toml_file_name));
         for line in toml.lines() {
             let prefix = "version = \"";
             let suffix = "\"";
@@ -1135,10 +1134,10 @@ impl Build {
             let krate = &self.crates[&krate];
             if krate.is_local(self) {
                 ret.push(krate);
-                for dep in &krate.deps {
-                    if visited.insert(dep) && dep != "build_helper" {
-                        list.push(*dep);
-                    }
+            }
+            for dep in &krate.deps {
+                if visited.insert(dep) && dep != "build_helper" {
+                    list.push(*dep);
                 }
             }
         }
@@ -1151,8 +1150,7 @@ impl Build {
         }
 
         let mut paths = Vec::new();
-        let mut contents = Vec::new();
-        t!(t!(File::open(stamp)).read_to_end(&mut contents));
+        let contents = t!(fs::read(stamp));
         // This is the method we use for extracting paths from the stamp file passed to us. See
         // run_cargo for more information (in compile.rs).
         for part in contents.split(|b| *b == 0) {

@@ -226,8 +226,17 @@ fn build_drop_shim<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
         // The first argument (index 0), but add 1 for the return value.
         let dropee_ptr = Place::Local(Local::new(1+0));
         if tcx.sess.opts.debugging_opts.mir_emit_retag {
-            // We use raw ptr operations, better prepare the alias tracking for that
+            // Function arguments should be retagged
             mir.basic_blocks_mut()[START_BLOCK].statements.insert(0, Statement {
+                source_info,
+                kind: StatementKind::Retag {
+                    fn_entry: true,
+                    two_phase: false,
+                    place: dropee_ptr.clone(),
+                },
+            });
+            // We use raw ptr operations, better prepare the alias tracking for that
+            mir.basic_blocks_mut()[START_BLOCK].statements.insert(1, Statement {
                 source_info,
                 kind: StatementKind::EscapeToRaw(Operand::Copy(dropee_ptr.clone())),
             })
@@ -851,7 +860,7 @@ pub fn build_adt_ctor<'a, 'gcx, 'tcx>(infcx: &infer::InferCtxt<'a, 'gcx, 'tcx>,
 {
     let tcx = infcx.tcx;
     let gcx = tcx.global_tcx();
-    let def_id = tcx.hir.local_def_id(ctor_id);
+    let def_id = tcx.hir().local_def_id(ctor_id);
     let param_env = gcx.param_env(def_id);
 
     // Normalize the sig.

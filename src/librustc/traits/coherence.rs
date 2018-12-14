@@ -11,8 +11,8 @@
 //! See rustc guide chapters on [trait-resolution] and [trait-specialization] for more info on how
 //! this works.
 //!
-//! [trait-resolution]: https://rust-lang-nursery.github.io/rustc-guide/traits/resolution.html
-//! [trait-specialization]: https://rust-lang-nursery.github.io/rustc-guide/traits/specialization.html
+//! [trait-resolution]: https://rust-lang.github.io/rustc-guide/traits/resolution.html
+//! [trait-specialization]: https://rust-lang.github.io/rustc-guide/traits/specialization.html
 
 use hir::def_id::{DefId, LOCAL_CRATE};
 use syntax_pos::DUMMY_SP;
@@ -256,12 +256,12 @@ pub fn orphan_check<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
 /// The current rule is that a trait-ref orphan checks in a crate C:
 ///
 /// 1. Order the parameters in the trait-ref in subst order - Self first,
-///    others linearly (e.g. `<U as Foo<V, W>>` is U < V < W).
+///    others linearly (e.g., `<U as Foo<V, W>>` is U < V < W).
 /// 2. Of these type parameters, there is at least one type parameter
 ///    in which, walking the type as a tree, you can reach a type local
 ///    to C where all types in-between are fundamental types. Call the
 ///    first such parameter the "local key parameter".
-///     - e.g. `Box<LocalType>` is OK, because you can visit LocalType
+///     - e.g., `Box<LocalType>` is OK, because you can visit LocalType
 ///       going through `Box`, which is fundamental.
 ///     - similarly, `FundamentalPair<Vec<()>, Box<LocalType>>` is OK for
 ///       the same reason.
@@ -269,7 +269,7 @@ pub fn orphan_check<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
 ///       not local), `Vec<LocalType>` is bad, because `Vec<->` is between
 ///       the local type and the type parameter.
 /// 3. Every type parameter before the local key parameter is fully known in C.
-///     - e.g. `impl<T> T: Trait<LocalType>` is bad, because `T` might be
+///     - e.g., `impl<T> T: Trait<LocalType>` is bad, because `T` might be
 ///       an unknown type.
 ///     - but `impl<T> LocalType: Trait<T>` is OK, because `LocalType`
 ///       occurs before `T`.
@@ -277,7 +277,7 @@ pub fn orphan_check<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
 ///    through the parameter's type tree, must appear only as a subtree of
 ///    a type local to C, with only fundamental types between the type
 ///    local to C and the local key parameter.
-///     - e.g. `Vec<LocalType<T>>>` (or equivalently `Box<Vec<LocalType<T>>>`)
+///     - e.g., `Vec<LocalType<T>>>` (or equivalently `Box<Vec<LocalType<T>>>`)
 ///     is bad, because the only local type with `T` as a subtree is
 ///     `LocalType<T>`, and `Vec<->` is between it and the type parameter.
 ///     - similarly, `FundamentalPair<LocalType<T>, T>` is bad, because
@@ -288,7 +288,7 @@ pub fn orphan_check<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
 ///
 /// The orphan rules actually serve several different purposes:
 ///
-/// 1. They enable link-safety - i.e. 2 mutually-unknowing crates (where
+/// 1. They enable link-safety - i.e., 2 mutually-unknowing crates (where
 ///    every type local to one crate is unknown in the other) can't implement
 ///    the same trait-ref. This follows because it can be seen that no such
 ///    type can orphan-check in 2 such crates.
@@ -455,7 +455,7 @@ fn ty_is_local_constructor(ty: Ty<'_>, in_crate: InCrate) -> bool {
             false
         }
 
-        ty::Bound(..) | ty::Infer(..) => match in_crate {
+        ty::Placeholder(..) | ty::Bound(..) | ty::Infer(..) => match in_crate {
             InCrate::Local => false,
             // The inference variable might be unified with a local
             // type in that remote crate.

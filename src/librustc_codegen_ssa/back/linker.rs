@@ -107,7 +107,7 @@ impl LinkerInfo {
 /// This trait is the total list of requirements needed by `back::link` and
 /// represents the meaning of each option being passed down. This trait is then
 /// used to dispatch on whether a GNU-like linker (generally `ld.exe`) or an
-/// MSVC linker (e.g. `link.exe`) is being used.
+/// MSVC linker (e.g., `link.exe`) is being used.
 pub trait Linker {
     fn link_dylib(&mut self, lib: &str);
     fn link_rust_dylib(&mut self, lib: &str, path: &Path);
@@ -1037,6 +1037,17 @@ impl<'a> Linker for WasmLd<'a> {
         // indicative of bugs, let's prevent them.
         self.cmd.arg("--fatal-warnings");
 
+        // The symbol visibility story is a bit in flux right now with LLD.
+        // It's... not entirely clear to me what's going on, but this looks to
+        // make everything work when `export_symbols` isn't otherwise called for
+        // things like executables.
+        self.cmd.arg("--export-dynamic");
+
+        // LLD only implements C++-like demangling, which doesn't match our own
+        // mangling scheme. Tell LLD to not demangle anything and leave it up to
+        // us to demangle these symbols later.
+        self.cmd.arg("--no-demangle");
+
         ::std::mem::replace(&mut self.cmd, Command::new(""))
     }
 
@@ -1050,6 +1061,10 @@ impl<'a> Linker for WasmLd<'a> {
 }
 
 fn exported_symbols(tcx: TyCtxt, crate_type: CrateType) -> Vec<String> {
+    if let Some(ref exports) = tcx.sess.target.target.options.override_export_symbols {
+        return exports.clone()
+    }
+
     let mut symbols = Vec::new();
 
     let export_threshold = symbol_export::crates_export_threshold(&[crate_type]);

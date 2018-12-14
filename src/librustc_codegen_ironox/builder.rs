@@ -15,12 +15,13 @@ use rustc_codegen_ssa::mir::operand::OperandRef;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use context::CodegenCx;
 use value::Value;
+use rustc::hir::def_id::DefId;
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{Align, Size, TyLayout};
 use rustc_codegen_ssa::traits::*;
 use std::borrow::Cow;
 use std::ffi::CStr;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use syntax;
 
 use basic_block::BasicBlock;
@@ -30,7 +31,6 @@ impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type Value = <CodegenCx<'ll, 'tcx> as BackendTypes>::Value;
     type BasicBlock = <CodegenCx<'ll, 'tcx> as BackendTypes>::BasicBlock;
     type Type = <CodegenCx<'ll, 'tcx> as BackendTypes>::Type;
-    type Context = <CodegenCx<'ll, 'tcx> as BackendTypes>::Context;
     type Funclet = <CodegenCx<'ll, 'tcx> as BackendTypes>::Funclet;
 
     type DIScope = <CodegenCx<'ll, 'tcx> as BackendTypes>::DIScope;
@@ -61,11 +61,35 @@ impl ty::layout::HasTyCtxt<'tcx> for Builder<'_, '_, 'tcx> {
     }
 }
 
+impl Deref for Builder<'_, 'll, 'tcx> {
+    type Target = CodegenCx<'ll, 'tcx>;
+
+    fn deref(&self) -> &Self::Target {
+        self.cx
+    }
+}
+
 impl HasCodegen<'tcx> for Builder<'a, 'll, 'tcx> {
     type CodegenCx = CodegenCx<'ll, 'tcx>;
 }
 
+impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
+    fn get_static(&self, def_id: DefId) -> &'ll Value {
+        unimplemented!("get_static");
+    }
+}
+
 impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
+    fn checked_binop(
+        &mut self,
+        oop: OverflowOp,
+        ty: Ty,
+        lhs: &'ll Value,
+        rhs: &'ll Value,
+    ) -> (&'ll Value, &'ll Value) {
+        unimplemented!("checked_binop");
+    }
+
     fn new_block<'b>(
         cx: &'a Self::CodegenCx,
         llfn: <Self::CodegenCx as BackendTypes>::Value,
@@ -972,22 +996,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn lifetime_end(&mut self, ptr: <Self::CodegenCx as BackendTypes>::Value, size: Size) {
         unimplemented!("lifetime_end");
-    }
-
-    /// If LLVM lifetime intrinsic support is enabled (i.e. optimizations
-    /// on), and `ptr` is nonzero-sized, then extracts the size of `ptr`
-    /// and the intrinsic for `lt` and passes them to `emit`, which is in
-    /// charge of generating code to call the passed intrinsic on whatever
-    /// block of generated code is targeted for the intrinsic.
-    ///
-    /// If LLVM lifetime intrinsic support is disabled (i.e.  optimizations
-    /// off) or `ptr` is zero-sized, then no-op (does not call `emit`).
-    fn call_lifetime_intrinsic(
-        &mut self,
-        intrinsic: &str,
-        ptr: <Self::CodegenCx as BackendTypes>::Value, size: Size
-    ) {
-        unimplemented!("call_lifetime_intrinsic");
     }
 
     fn call(

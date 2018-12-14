@@ -72,7 +72,7 @@ fn mir_keys<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, krate: CrateNum)
                       -> Lrc<DefIdSet> {
     assert_eq!(krate, LOCAL_CRATE);
 
-    let mut set = DefIdSet();
+    let mut set = DefIdSet::default();
 
     // All body-owners have MIR associated with them.
     set.extend(tcx.body_owners());
@@ -91,7 +91,7 @@ fn mir_keys<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, krate: CrateNum)
                               _: ast::NodeId,
                               _: Span) {
             if let hir::VariantData::Tuple(_, node_id) = *v {
-                self.set.insert(self.tcx.hir.local_def_id(node_id));
+                self.set.insert(self.tcx.hir().local_def_id(node_id));
             }
             intravisit::walk_struct_def(self, v)
         }
@@ -99,7 +99,7 @@ fn mir_keys<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, krate: CrateNum)
             NestedVisitorMap::None
         }
     }
-    tcx.hir.krate().visit_all_item_likes(&mut GatherCtors {
+    tcx.hir().krate().visit_all_item_likes(&mut GatherCtors {
         tcx,
         set: &mut set,
     }.as_deep_visitor());
@@ -209,9 +209,6 @@ fn mir_const<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> &'tcx Stea
 
     let mut mir = tcx.mir_built(def_id).steal();
     run_passes(tcx, &mut mir, def_id, MirPhase::Const, &[
-        // Remove all `EndRegion` statements that are not involved in borrows.
-        &cleanup_post_borrowck::CleanEndRegions,
-
         // What we need to do constant evaluation.
         &simplify::SimplifyCfg::new("initial"),
         &type_check::TypeckMir,
@@ -222,8 +219,8 @@ fn mir_const<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> &'tcx Stea
 }
 
 fn mir_validated<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> &'tcx Steal<Mir<'tcx>> {
-    let node_id = tcx.hir.as_local_node_id(def_id).unwrap();
-    if let hir::BodyOwnerKind::Const = tcx.hir.body_owner_kind(node_id) {
+    let node_id = tcx.hir().as_local_node_id(def_id).unwrap();
+    if let hir::BodyOwnerKind::Const = tcx.hir().body_owner_kind(node_id) {
         // Ensure that we compute the `mir_const_qualif` for constants at
         // this point, before we steal the mir-const result.
         let _ = tcx.mir_const_qualif(def_id);

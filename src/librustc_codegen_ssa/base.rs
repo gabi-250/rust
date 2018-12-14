@@ -192,7 +192,7 @@ pub fn unsized_info<'tcx, Cx: CodegenMethods<'tcx>>(
         (_, &ty::Dynamic(ref data, ..)) => {
             let vtable_ptr = cx.layout_of(cx.tcx().mk_mut_ptr(target))
                 .field(cx, FAT_PTR_EXTRA);
-            cx.static_ptrcast(meth::get_vtable(cx, source, data.principal()),
+            cx.const_ptrcast(meth::get_vtable(cx, source, data.principal()),
                             cx.backend_type(vtable_ptr))
         }
         _ => bug!("unsized_info: invalid unsizing {:?} -> {:?}",
@@ -268,7 +268,7 @@ pub fn coerce_unsized_into<'a, 'tcx: 'a, Bx: BuilderMethods<'a, 'tcx>>(
         let (base, info) = match bx.load_operand(src).val {
             OperandValue::Pair(base, info) => {
                 // fat-ptr to fat-ptr unsize preserves the vtable
-                // i.e. &'a fmt::Debug+Send => &'a fmt::Debug
+                // i.e., &'a fmt::Debug+Send => &'a fmt::Debug
                 // So we need to pointercast the base to ensure
                 // the types match up.
                 let thin_ptr = dst.layout.field(bx.cx(), FAT_PTR_ADDR);
@@ -366,14 +366,6 @@ pub fn wants_msvc_seh(sess: &Session) -> bool {
     sess.target.target.options.is_like_msvc
 }
 
-pub fn call_assume<'a, 'tcx: 'a, Bx: BuilderMethods<'a, 'tcx>>(
-    bx: &mut Bx,
-    val: Bx::Value
-) {
-    let assume_intrinsic = bx.cx().get_intrinsic("llvm.assume");
-    bx.call(assume_intrinsic, &[val], None);
-}
-
 pub fn from_immediate<'a, 'tcx: 'a, Bx: BuilderMethods<'a, 'tcx>>(
     bx: &mut Bx,
     val: Bx::Value
@@ -461,7 +453,7 @@ pub fn maybe_create_entry_wrapper<'a, 'tcx: 'a, Bx: BuilderMethods<'a, 'tcx>>(
 ) {
     let (main_def_id, span) = match *cx.sess().entry_fn.borrow() {
         Some((id, span, _)) => {
-            (cx.tcx().hir.local_def_id(id), span)
+            (cx.tcx().hir().local_def_id(id), span)
         }
         None => return,
     };

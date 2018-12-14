@@ -128,7 +128,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         }
     }
 
-    // returns if `cond` not occurring implies that `error` does not occur - i.e. that
+    // returns if `cond` not occurring implies that `error` does not occur - i.e., that
     // `error` occurring implies that `cond` occurs.
     fn error_implies(&self,
                      cond: &ty::Predicate<'tcx>,
@@ -281,7 +281,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                 ty::Generator(..) => Some(18),
                 ty::Foreign(..) => Some(19),
                 ty::GeneratorWitness(..) => Some(20),
-                ty::Bound(..) | ty::Infer(..) | ty::Error => None,
+                ty::Placeholder(..) | ty::Bound(..) | ty::Infer(..) | ty::Error => None,
                 ty::UnnormalizedProjection(..) => bug!("only used with chalk-engine"),
             }
         }
@@ -580,7 +580,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
 
         let mut err = struct_span_err!(self.tcx.sess, sp, E0276, "{}", msg);
 
-        if let Some(trait_item_span) = self.tcx.hir.span_if_local(trait_item_def_id) {
+        if let Some(trait_item_span) = self.tcx.hir().span_if_local(trait_item_def_id) {
             let span = self.tcx.sess.source_map().def_span(trait_item_span);
             err.span_label(span, format!("definition of `{}` from trait", item_name));
         }
@@ -765,8 +765,8 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                     ty::Predicate::ClosureKind(closure_def_id, closure_substs, kind) => {
                         let found_kind = self.closure_kind(closure_def_id, closure_substs).unwrap();
                         let closure_span = self.tcx.sess.source_map()
-                            .def_span(self.tcx.hir.span_if_local(closure_def_id).unwrap());
-                        let node_id = self.tcx.hir.as_local_node_id(closure_def_id).unwrap();
+                            .def_span(self.tcx.hir().span_if_local(closure_def_id).unwrap());
+                        let node_id = self.tcx.hir().as_local_node_id(closure_def_id).unwrap();
                         let mut err = struct_span_err!(
                             self.tcx.sess, closure_span, E0525,
                             "expected a closure that implements the `{}` trait, \
@@ -785,7 +785,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                         // a particular trait.
                         if let Some(tables) = self.in_progress_tables {
                             let tables = tables.borrow();
-                            let closure_hir_id = self.tcx.hir.node_to_hir_id(node_id);
+                            let closure_hir_id = self.tcx.hir().node_to_hir_id(node_id);
                             match (found_kind, tables.closure_kind_origins().get(closure_hir_id)) {
                                 (ty::ClosureKind::FnOnce, Some((span, name))) => {
                                     err.span_label(*span, format!(
@@ -841,7 +841,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                 };
 
                 let found_span = found_did.and_then(|did|
-                    self.tcx.hir.span_if_local(did)
+                    self.tcx.hir().span_if_local(did)
                 ).map(|sp| self.tcx.sess.source_map().def_span(sp)); // the sp could be an fn def
 
                 let found = match found_trait_ref.skip_binder().substs.type_at(1).sty {
@@ -862,7 +862,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                                                      expected_trait_ref)
                 } else {
                     let (closure_span, found) = found_did
-                        .and_then(|did| self.tcx.hir.get_if_local(did))
+                        .and_then(|did| self.tcx.hir().get_if_local(did))
                         .map(|node| {
                             let (found_span, found) = self.get_fn_like_arguments(node);
                             (Some(found_span), found)
@@ -901,8 +901,8 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                                        code: &ObligationCauseCode<'tcx>,
                                        err: &mut DiagnosticBuilder<'tcx>) {
         if let &ObligationCauseCode::VariableType(node_id) = code {
-            let parent_node = self.tcx.hir.get_parent_node(node_id);
-            if let Some(Node::Local(ref local)) = self.tcx.hir.find(parent_node) {
+            let parent_node = self.tcx.hir().get_parent_node(node_id);
+            if let Some(Node::Local(ref local)) = self.tcx.hir().find(parent_node) {
                 if let Some(ref expr) = local.init {
                     if let hir::ExprKind::Index(_, _) = expr.node {
                         if let Ok(snippet) = self.tcx.sess.source_map().span_to_snippet(expr.span) {
@@ -976,7 +976,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                 node: hir::ExprKind::Closure(_, ref _decl, id, span, _),
                 ..
             }) => {
-                (self.tcx.sess.source_map().def_span(span), self.tcx.hir.body(id).arguments.iter()
+                (self.tcx.sess.source_map().def_span(span), self.tcx.hir().body(id).arguments.iter()
                     .map(|arg| {
                         if let hir::Pat {
                             node: hir::PatKind::Tuple(args, _),
@@ -1037,7 +1037,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                  ).collect::<Vec<_>>())
             }
             Node::StructCtor(ref variant_data) => {
-                (self.tcx.sess.source_map().def_span(self.tcx.hir.span(variant_data.id())),
+                (self.tcx.sess.source_map().def_span(self.tcx.hir().span(variant_data.id())),
                  vec![ArgKind::empty(); variant_data.fields().len()])
             }
             _ => panic!("non-FnLike node found: {:?}", node),
@@ -1092,13 +1092,27 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         if let Some(found_span) = found_span {
             err.span_label(found_span, format!("takes {}", found_str));
 
+            // move |_| { ... }
+            // ^^^^^^^^-- def_span
+            //
+            // move |_| { ... }
+            // ^^^^^-- prefix
+            let prefix_span = self.tcx.sess.source_map().span_until_non_whitespace(found_span);
+            // move |_| { ... }
+            //      ^^^-- pipe_span
+            let pipe_span = if let Some(span) = found_span.trim_start(prefix_span) {
+                span
+            } else {
+                found_span
+            };
+
             // Suggest to take and ignore the arguments with expected_args_length `_`s if
             // found arguments is empty (assume the user just wants to ignore args in this case).
             // For example, if `expected_args_length` is 2, suggest `|_, _|`.
             if found_args.is_empty() && is_closure {
                 let underscores = vec!["_"; expected_args.len()].join(", ");
                 err.span_suggestion_with_applicability(
-                    found_span,
+                    pipe_span,
                     &format!(
                         "consider changing the closure to take and ignore the expected argument{}",
                         if expected_args.len() < 2 {
@@ -1222,7 +1236,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
                                                    -> DiagnosticBuilder<'tcx>
     {
         assert!(type_def_id.is_local());
-        let span = self.hir.span_if_local(type_def_id).unwrap();
+        let span = self.hir().span_if_local(type_def_id).unwrap();
         let span = self.sess.source_map().def_span(span);
         let mut err = struct_span_err!(self.sess, span, E0072,
                                        "recursive type `{}` has infinite size",
@@ -1468,7 +1482,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
                 let item_name = tcx.item_path_str(item_def_id);
                 let msg = format!("required by `{}`", item_name);
 
-                if let Some(sp) = tcx.hir.span_if_local(item_def_id) {
+                if let Some(sp) = tcx.hir().span_if_local(item_def_id) {
                     let sp = tcx.sess.source_map().def_span(sp);
                     err.span_note(sp, &msg);
                 } else {

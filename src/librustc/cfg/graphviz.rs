@@ -32,11 +32,11 @@ pub struct LabelledCFG<'a, 'tcx: 'a> {
 impl<'a, 'tcx> LabelledCFG<'a, 'tcx> {
     fn local_id_to_string(&self, local_id: hir::ItemLocalId) -> String {
         assert!(self.cfg.owner_def_id.is_local());
-        let node_id = self.tcx.hir.hir_to_node_id(hir::HirId {
-            owner: self.tcx.hir.def_index_to_hir_id(self.cfg.owner_def_id.index).owner,
+        let node_id = self.tcx.hir().hir_to_node_id(hir::HirId {
+            owner: self.tcx.hir().def_index_to_hir_id(self.cfg.owner_def_id.index).owner,
             local_id
         });
-        let s = self.tcx.hir.node_to_string(node_id);
+        let s = self.tcx.hir().node_to_string(node_id);
 
         // Replacing newlines with \\l causes each line to be left-aligned,
         // improving presentation of (long) pretty-printed expressions.
@@ -106,8 +106,7 @@ impl<'a> dot::GraphWalk<'a> for &'a cfg::CFG {
     type Node = Node<'a>;
     type Edge = Edge<'a>;
     fn nodes(&'a self) -> dot::Nodes<'a, Node<'a>> {
-        let mut v = Vec::new();
-        self.graph.each_node(|i, nd| { v.push((i, nd)); true });
+        let v: Vec<_> = self.graph.enumerated_nodes().collect();
         v.into()
     }
     fn edges(&'a self) -> dot::Edges<'a, Edge<'a>> {

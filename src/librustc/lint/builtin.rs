@@ -174,7 +174,7 @@ declare_lint! {
 declare_lint! {
     pub LEGACY_DIRECTORY_OWNERSHIP,
     Deny,
-    "non-inline, non-`#[path]` modules (e.g. `mod foo;`) were erroneously allowed in some files \
+    "non-inline, non-`#[path]` modules (e.g., `mod foo;`) were erroneously allowed in some files \
      not named `mod.rs`"
 }
 
@@ -319,6 +319,12 @@ declare_lint! {
 }
 
 declare_lint! {
+    pub PRIVATE_DOC_TESTS,
+    Allow,
+    "warn about doc test in private item"
+}
+
+declare_lint! {
     pub WHERE_CLAUSES_OBJECT_SAFETY,
     Warn,
     "checks the object safety of where clauses"
@@ -360,7 +366,7 @@ pub mod parser {
 }
 
 /// Does nothing as a lint pass, but registers some `Lint`s
-/// which are used by other parts of the compiler.
+/// that are used by other parts of the compiler.
 #[derive(Copy, Clone)]
 pub struct HardwiredLints;
 
@@ -415,6 +421,7 @@ impl LintPass for HardwiredLints {
             DUPLICATE_MACRO_EXPORTS,
             INTRA_DOC_LINK_RESOLUTION_FAILURE,
             MISSING_DOC_CODE_EXAMPLES,
+            PRIVATE_DOC_TESTS,
             WHERE_CLAUSES_OBJECT_SAFETY,
             PROC_MACRO_DERIVE_RESOLUTION_FALLBACK,
             MACRO_USE_EXTERN_CRATE,

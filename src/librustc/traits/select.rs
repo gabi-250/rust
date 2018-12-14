@@ -8,9 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! See [rustc guide] for more info on how this works.
+//! Candidate selection. See the [rustc guide] for more information on how this works.
 //!
-//! [rustc guide]: https://rust-lang-nursery.github.io/rustc-guide/traits/resolution.html#selection
+//! [rustc guide]: https://rust-lang.github.io/rustc-guide/traits/resolution.html#selection
 
 use self::EvaluationResult::*;
 use self::SelectionCandidate::*;
@@ -69,10 +69,10 @@ pub struct SelectionContext<'cx, 'gcx: 'cx + 'tcx, 'tcx: 'cx> {
     /// require themselves.
     freshener: TypeFreshener<'cx, 'gcx, 'tcx>,
 
-    /// If true, indicates that the evaluation should be conservative
+    /// If `true`, indicates that the evaluation should be conservative
     /// and consider the possibility of types outside this crate.
     /// This comes up primarily when resolving ambiguity. Imagine
-    /// there is some trait reference `$0 : Bar` where `$0` is an
+    /// there is some trait reference `$0: Bar` where `$0` is an
     /// inference variable. If `intercrate` is true, then we can never
     /// say for sure that this reference is not implemented, even if
     /// there are *no impls at all for `Bar`*, because `$0` could be
@@ -80,7 +80,7 @@ pub struct SelectionContext<'cx, 'gcx: 'cx + 'tcx, 'tcx: 'cx> {
     /// `Bar`. This is the suitable mode for coherence. Elsewhere,
     /// though, we set this to false, because we are only interested
     /// in types that the user could actually have written --- in
-    /// other words, we consider `$0 : Bar` to be unimplemented if
+    /// other words, we consider `$0: Bar` to be unimplemented if
     /// there is no type that the user could *actually name* that
     /// would satisfy it. This avoids crippling inference, basically.
     intercrate: Option<IntercrateMode>,
@@ -1170,10 +1170,10 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     //
     // The selection process begins by examining all in-scope impls,
     // caller obligations, and so forth and assembling a list of
-    // candidates. See [rustc guide] for more details.
+    // candidates. See the [rustc guide] for more details.
     //
     // [rustc guide]:
-    // https://rust-lang-nursery.github.io/rustc-guide/traits/resolution.html#candidate-assembly
+    // https://rust-lang.github.io/rustc-guide/traits/resolution.html#candidate-assembly
 
     fn candidate_from_obligation<'o>(
         &mut self,
@@ -1615,7 +1615,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         };
 
         if obligation.predicate.skip_binder().self_ty().is_ty_var() {
-            // Self is a type variable (e.g. `_: AsRef<str>`).
+            // Self is a type variable (e.g., `_: AsRef<str>`).
             //
             // This is somewhat problematic, as the current scheme can't really
             // handle it turning to be a projection. This does end up as truly
@@ -1664,7 +1664,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             self.assemble_candidates_for_unsizing(obligation, &mut candidates);
         } else {
             if lang_items.clone_trait() == Some(def_id) {
-                // Same builtin conditions as `Copy`, i.e. every type which has builtin support
+                // Same builtin conditions as `Copy`, i.e., every type which has builtin support
                 // for `Copy` also has builtin support for `Clone`, + tuples and arrays of `Clone`
                 // types have builtin support for `Clone`.
                 let clone_conditions = self.copy_clone_conditions(obligation);
@@ -1726,7 +1726,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         let poly_trait_predicate = self.infcx()
             .resolve_type_vars_if_possible(&obligation.predicate);
         let (skol_trait_predicate, placeholder_map) = self.infcx()
-            .replace_late_bound_regions_with_placeholders(&poly_trait_predicate);
+            .replace_bound_vars_with_placeholders(&poly_trait_predicate);
         debug!(
             "match_projection_obligation_against_definition_bounds: \
              skol_trait_predicate={:?} placeholder_map={:?}",
@@ -2023,7 +2023,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                     {
                         candidates.vec.push(ImplCandidate(impl_def_id));
 
-                        // NB: we can safely drop the placeholder map
+                        // N.B., we can safely drop the placeholder map
                         // since we are in a probe.
                         mem::drop(placeholder_map);
                     }
@@ -2069,7 +2069,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                     // that this obligation holds. That could be a
                     // where-clause or, in the case of an object type,
                     // it could be that the object type lists the
-                    // trait (e.g. `Foo+Send : Send`). See
+                    // trait (e.g., `Foo+Send : Send`). See
                     // `compile-fail/typeck-default-trait-impl-send-param.rs`
                     // for an example of a test case that exercises
                     // this path.
@@ -2097,7 +2097,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         );
 
         self.probe(|this, _snapshot| {
-            // the code below doesn't care about regions, and the
+            // The code below doesn't care about regions, and the
             // self-ty here doesn't escape this probe, so just erase
             // any LBR.
             let self_ty = this.tcx().erase_late_bound_regions(&obligation.self_ty());
@@ -2145,7 +2145,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                 .count();
 
             if upcast_trait_refs > 1 {
-                // can be upcast in many ways; need more type information
+                // Can be upcast in many ways; need more type information.
                 candidates.ambiguous = true;
             } else if upcast_trait_refs == 1 {
                 candidates.vec.push(ObjectCandidate);
@@ -2197,8 +2197,8 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             (&ty::Dynamic(ref data_a, ..), &ty::Dynamic(ref data_b, ..)) => {
                 // Upcasts permit two things:
                 //
-                // 1. Dropping builtin bounds, e.g. `Foo+Send` to `Foo`
-                // 2. Tightening the region bound, e.g. `Foo+'a` to `Foo+'b` if `'a : 'b`
+                // 1. Dropping builtin bounds, e.g., `Foo+Send` to `Foo`
+                // 2. Tightening the region bound, e.g., `Foo+'a` to `Foo+'b` if `'a : 'b`
                 //
                 // Note that neither of these changes requires any
                 // change at runtime.  Eventually this will be
@@ -2354,7 +2354,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             ImplCandidate(other_def) => {
                 // See if we can toss out `victim` based on specialization.
                 // This requires us to know *for sure* that the `other` impl applies
-                // i.e. EvaluatedToOk:
+                // i.e., EvaluatedToOk:
                 if other.evaluation == EvaluatedToOk {
                     match victim.candidate {
                         ImplCandidate(victim_def) => {
@@ -2470,7 +2470,8 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             ty::Infer(ty::TyVar(_)) => Ambiguous,
 
             ty::UnnormalizedProjection(..)
-            | ty::Bound(_)
+            | ty::Placeholder(..)
+            | ty::Bound(..)
             | ty::Infer(ty::FreshTy(_))
             | ty::Infer(ty::FreshIntTy(_))
             | ty::Infer(ty::FreshFloatTy(_)) => {
@@ -2555,7 +2556,8 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             }
 
             ty::UnnormalizedProjection(..)
-            | ty::Bound(_)
+            | ty::Placeholder(..)
+            | ty::Bound(..)
             | ty::Infer(ty::FreshTy(_))
             | ty::Infer(ty::FreshIntTy(_))
             | ty::Infer(ty::FreshFloatTy(_)) => {
@@ -2594,11 +2596,12 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             | ty::Char => Vec::new(),
 
             ty::UnnormalizedProjection(..)
+            | ty::Placeholder(..)
             | ty::Dynamic(..)
             | ty::Param(..)
             | ty::Foreign(..)
             | ty::Projection(..)
-            | ty::Bound(_)
+            | ty::Bound(..)
             | ty::Infer(ty::TyVar(_))
             | ty::Infer(ty::FreshTy(_))
             | ty::Infer(ty::FreshIntTy(_))
@@ -2682,7 +2685,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
 
                 self.in_snapshot(|this, snapshot| {
                     let (skol_ty, placeholder_map) = this.infcx()
-                        .replace_late_bound_regions_with_placeholders(&ty);
+                        .replace_bound_vars_with_placeholders(&ty);
                     let Normalized {
                         value: normalized_ty,
                         mut obligations,
@@ -2714,10 +2717,10 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     //
     // Confirmation unifies the output type parameters of the trait
     // with the values found in the obligation, possibly yielding a
-    // type error.  See [rustc guide] for more details.
+    // type error.  See the [rustc guide] for more details.
     //
     // [rustc guide]:
-    // https://rust-lang-nursery.github.io/rustc-guide/traits/resolution.html#confirmation
+    // https://rust-lang.github.io/rustc-guide/traits/resolution.html#confirmation
 
     fn confirm_candidate(
         &mut self,
@@ -2916,7 +2919,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         let trait_obligations: Vec<PredicateObligation<'_>> = self.in_snapshot(|this, snapshot| {
             let poly_trait_ref = obligation.predicate.to_poly_trait_ref();
             let (trait_ref, placeholder_map) = this.infcx()
-                .replace_late_bound_regions_with_placeholders(&poly_trait_ref);
+                .replace_bound_vars_with_placeholders(&poly_trait_ref);
             let cause = obligation.derived_cause(ImplDerivedObligation);
             this.impl_or_trait_obligations(
                 cause,
@@ -3000,7 +3003,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         // are sufficient to determine the impl substs, without
         // relying on projections in the impl-trait-ref.
         //
-        // e.g. `impl<U: Tr, V: Iterator<Item=U>> Foo<<U as Tr>::T> for V`
+        // e.g., `impl<U: Tr, V: Iterator<Item=U>> Foo<<U as Tr>::T> for V`
         impl_obligations.append(&mut substs.obligations);
 
         VtableImplData {
@@ -3119,7 +3122,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
 
         self.in_snapshot(|this, snapshot| {
             let (predicate, placeholder_map) = this.infcx()
-                .replace_late_bound_regions_with_placeholders(&obligation.predicate);
+                .replace_bound_vars_with_placeholders(&obligation.predicate);
             let trait_ref = predicate.trait_ref;
             let trait_def_id = trait_ref.def_id;
             let substs = trait_ref.substs;
@@ -3582,7 +3585,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         }
 
         let (skol_obligation, placeholder_map) = self.infcx()
-            .replace_late_bound_regions_with_placeholders(&obligation.predicate);
+            .replace_bound_vars_with_placeholders(&obligation.predicate);
         let skol_obligation_trait_ref = skol_obligation.trait_ref;
 
         let impl_substs = self.infcx

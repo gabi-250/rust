@@ -8,8 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! This module contains TyKind and its major components
+//! This module contains `TyKind` and its major components.
 
+use hir;
 use hir::def_id::DefId;
 use infer::canonical::Canonical;
 use mir::interpret::ConstValue;
@@ -30,9 +31,6 @@ use syntax::ast::{self, Ident};
 use syntax::symbol::{keywords, InternedString};
 
 use serialize;
-
-use hir;
-
 use self::InferTy::*;
 use self::TyKind::*;
 
@@ -91,7 +89,7 @@ impl BoundRegion {
     }
 }
 
-/// N.B., If you change this, you'll probably want to change the corresponding
+/// N.B., if you change this, you'll probably want to change the corresponding
 /// AST structure in `libsyntax/ast.rs` as well.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, RustcEncodable, RustcDecodable)]
 pub enum TyKind<'tcx> {
@@ -201,7 +199,10 @@ pub enum TyKind<'tcx> {
     Param(ParamTy),
 
     /// Bound type variable, used only when preparing a trait query.
-    Bound(BoundTy),
+    Bound(ty::DebruijnIndex, BoundTy),
+
+    /// A placeholder type - universally quantified higher-ranked type.
+    Placeholder(ty::PlaceholderType),
 
     /// A type variable used during type checking.
     Infer(InferTy),
@@ -528,11 +529,11 @@ impl<'tcx> UpvarSubsts<'tcx> {
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, RustcEncodable, RustcDecodable)]
 pub enum ExistentialPredicate<'tcx> {
-    /// e.g. Iterator
+    /// e.g., Iterator
     Trait(ExistentialTraitRef<'tcx>),
-    /// e.g. Iterator::Item = T
+    /// e.g., Iterator::Item = T
     Projection(ExistentialProjection<'tcx>),
-    /// e.g. Send
+    /// e.g., Send
     AutoTrait(DefId),
 }
 
@@ -664,6 +665,7 @@ impl<'tcx> TraitRef<'tcx> {
         }
     }
 
+    #[inline]
     pub fn self_ty(&self) -> Ty<'tcx> {
         self.substs.type_at(0)
     }
@@ -780,7 +782,7 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
 /// Binder<TraitRef>`). Note that when we instantiate,
 /// erase, or otherwise "discharge" these bound vars, we change the
 /// type from `Binder<T>` to just `T` (see
-/// e.g. `liberate_late_bound_regions`).
+/// e.g., `liberate_late_bound_regions`).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, RustcEncodable, RustcDecodable)]
 pub struct Binder<T>(T);
 
@@ -975,15 +977,18 @@ impl<'tcx> FnSig<'tcx> {
 pub type PolyFnSig<'tcx> = Binder<FnSig<'tcx>>;
 
 impl<'tcx> PolyFnSig<'tcx> {
+    #[inline]
     pub fn inputs(&self) -> Binder<&'tcx [Ty<'tcx>]> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs())
     }
+    #[inline]
     pub fn input(&self, index: usize) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs()[index])
     }
     pub fn inputs_and_output(&self) -> ty::Binder<&'tcx List<Ty<'tcx>>> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs_and_output)
     }
+    #[inline]
     pub fn output(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|fn_sig| fn_sig.output())
     }
@@ -1013,7 +1018,7 @@ impl<'a, 'gcx, 'tcx> ParamTy {
     }
 
     pub fn for_self() -> ParamTy {
-        ParamTy::new(0, keywords::SelfType.name().as_interned_str())
+        ParamTy::new(0, keywords::SelfUpper.name().as_interned_str())
     }
 
     pub fn for_def(def: &ty::GenericParamDef) -> ParamTy {
@@ -1028,7 +1033,7 @@ impl<'a, 'gcx, 'tcx> ParamTy {
         // FIXME(#50125): Ignoring `Self` with `idx != 0` might lead to weird behavior elsewhere,
         // but this should only be possible when using `-Z continue-parse-after-error` like
         // `compile-fail/issue-36638.rs`.
-        self.name == keywords::SelfType.name().as_str() && self.idx == 0
+        self.name == keywords::SelfUpper.name().as_str() && self.idx == 0
     }
 }
 
@@ -1092,12 +1097,12 @@ pub type Region<'tcx> = &'tcx RegionKind;
 /// with some concrete region before being used. There are 2 kind of
 /// bound regions: early-bound, which are bound in an item's Generics,
 /// and are substituted by a Substs,  and late-bound, which are part of
-/// higher-ranked types (e.g. `for<'a> fn(&'a ())`) and are substituted by
+/// higher-ranked types (e.g., `for<'a> fn(&'a ())`) and are substituted by
 /// the likes of `liberate_late_bound_regions`. The distinction exists
 /// because higher-ranked lifetimes aren't supported in all places. See [1][2].
 ///
 /// Unlike Param-s, bound regions are not supposed to exist "in the wild"
-/// outside their binder, e.g. in types passed to type inference, and
+/// outside their binder, e.g., in types passed to type inference, and
 /// should first be substituted (by placeholder regions, free regions,
 /// or region variables).
 ///
@@ -1135,7 +1140,7 @@ pub type Region<'tcx> = &'tcx RegionKind;
 ///
 /// [1]: http://smallcultfollowing.com/babysteps/blog/2013/10/29/intermingled-parameter-lists/
 /// [2]: http://smallcultfollowing.com/babysteps/blog/2013/11/04/intermingled-parameter-lists/
-/// [rustc guide]: https://rust-lang-nursery.github.io/rustc-guide/traits/hrtb.html
+/// [rustc guide]: https://rust-lang.github.io/rustc-guide/traits/hrtb.html
 #[derive(Clone, PartialEq, Eq, Hash, Copy, RustcEncodable, RustcDecodable, PartialOrd, Ord)]
 pub enum RegionKind {
     // Region bound in a type or fn declaration which will be
@@ -1153,7 +1158,7 @@ pub enum RegionKind {
     ReFree(FreeRegion),
 
     /// A concrete region naming some statically determined scope
-    /// (e.g. an expression or sequence of statements) within the
+    /// (e.g., an expression or sequence of statements) within the
     /// current function.
     ReScope(region::Scope),
 
@@ -1165,7 +1170,7 @@ pub enum RegionKind {
 
     /// A placeholder region - basically the higher-ranked version of ReFree.
     /// Should not exist after typeck.
-    RePlaceholder(ty::Placeholder),
+    RePlaceholder(ty::PlaceholderRegion),
 
     /// Empty lifetime is for data that is never accessed.
     /// Bottom in the region lattice. We treat ReEmpty somewhat
@@ -1242,7 +1247,6 @@ newtype_index! {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, RustcEncodable, RustcDecodable)]
 pub struct BoundTy {
-    pub index: DebruijnIndex,
     pub var: BoundVar,
     pub kind: BoundTyKind,
 }
@@ -1253,13 +1257,12 @@ pub enum BoundTyKind {
     Param(InternedString),
 }
 
-impl_stable_hash_for!(struct BoundTy { index, var, kind });
+impl_stable_hash_for!(struct BoundTy { var, kind });
 impl_stable_hash_for!(enum self::BoundTyKind { Anon, Param(a) });
 
-impl BoundTy {
-    pub fn new(index: DebruijnIndex, var: BoundVar) -> Self {
+impl From<BoundVar> for BoundTy {
+    fn from(var: BoundVar) -> Self {
         BoundTy {
-            index,
             var,
             kind: BoundTyKind::Anon,
         }
@@ -1319,7 +1322,7 @@ impl<'a, 'tcx, 'gcx> PolyExistentialProjection<'tcx> {
 
 impl DebruijnIndex {
     /// Returns the resulting index when this value is moved into
-    /// `amount` number of new binders. So e.g. if you had
+    /// `amount` number of new binders. So e.g., if you had
     ///
     ///    for<'a> fn(&'a x)
     ///
@@ -1327,7 +1330,7 @@ impl DebruijnIndex {
     ///
     ///    for<'a> fn(for<'b> fn(&'a x))
     ///
-    /// you would need to shift the index for `'a` into 1 new binder.
+    /// you would need to shift the index for `'a` into a new binder.
     #[must_use]
     pub fn shifted_in(self, amount: u32) -> DebruijnIndex {
         DebruijnIndex::from_u32(self.as_u32() + amount)
@@ -1462,7 +1465,7 @@ impl RegionKind {
             }
             ty::RePlaceholder(..) => {
                 flags = flags | TypeFlags::HAS_FREE_REGIONS;
-                flags = flags | TypeFlags::HAS_RE_SKOL;
+                flags = flags | TypeFlags::HAS_RE_PLACEHOLDER;
             }
             ty::ReLateBound(..) => {
                 flags = flags | TypeFlags::HAS_RE_LATE_BOUND;
@@ -1547,6 +1550,7 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
         }
     }
 
+    #[inline]
     pub fn is_ty_var(&self) -> bool {
         match self.sty {
             Infer(TyVar(_)) => true,
@@ -1731,6 +1735,7 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
         }
     }
 
+    #[inline]
     pub fn is_integral(&self) -> bool {
         match self.sty {
             Infer(IntVar(_)) | Int(_) | Uint(_) => true,
@@ -1761,6 +1766,7 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
         }
     }
 
+    #[inline]
     pub fn is_fp(&self) -> bool {
         match self.sty {
             Infer(FloatVar(_)) | Float(_) => true,
@@ -1775,6 +1781,13 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
     pub fn is_signed(&self) -> bool {
         match self.sty {
             Int(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_pointer_sized(&self) -> bool {
+        match self.sty {
+            Int(ast::IntTy::Isize) | Uint(ast::UintTy::Usize) => true,
             _ => false,
         }
     }
@@ -1794,10 +1807,10 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
         }
     }
 
-    /// Returns the type and mutability of *ty.
+    /// Returns the type and mutability of `*ty`.
     ///
     /// The parameter `explicit` indicates if this is an *explicit* dereference.
-    /// Some types---notably unsafe ptrs---can only be dereferenced explicitly.
+    /// Some types -- notably unsafe ptrs -- can only be dereferenced explicitly.
     pub fn builtin_deref(&self, explicit: bool) -> Option<TypeAndMut<'tcx>> {
         match self.sty {
             Adt(def, _) if def.is_box() => {
@@ -1844,6 +1857,7 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
         }
     }
 
+    #[inline]
     pub fn ty_adt_def(&self) -> Option<&'tcx AdtDef> {
         match self.sty {
             Adt(adt, _) => Some(adt),
@@ -1890,6 +1904,7 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
             Foreign(..) |
             Param(_) |
             Bound(..) |
+            Placeholder(..) |
             Infer(_) |
             Error => {}
         }
@@ -1953,7 +1968,8 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
 
             ty::Infer(ty::TyVar(_)) => false,
 
-            ty::Bound(_) |
+            ty::Bound(..) |
+            ty::Placeholder(..) |
             ty::Infer(ty::FreshTy(_)) |
             ty::Infer(ty::FreshIntTy(_)) |
             ty::Infer(ty::FreshFloatTy(_)) =>

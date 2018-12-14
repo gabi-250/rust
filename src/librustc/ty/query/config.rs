@@ -227,9 +227,9 @@ impl<'tcx> QueryDescription<'tcx> for queries::erase_regions_ty<'tcx> {
 
 impl<'tcx> QueryDescription<'tcx> for queries::type_param_predicates<'tcx> {
     fn describe(tcx: TyCtxt<'_, '_, '_>, (_, def_id): (DefId, DefId)) -> Cow<'static, str> {
-        let id = tcx.hir.as_local_node_id(def_id).unwrap();
+        let id = tcx.hir().as_local_node_id(def_id).unwrap();
         format!("computing the bounds for type parameter `{}`",
-                tcx.hir.ty_param_name(id)).into()
+                tcx.hir().ty_param_name(id)).into()
     }
 }
 
@@ -591,7 +591,7 @@ impl<'tcx> QueryDescription<'tcx> for queries::plugin_registrar_fn<'tcx> {
     }
 }
 
-impl<'tcx> QueryDescription<'tcx> for queries::derive_registrar_fn<'tcx> {
+impl<'tcx> QueryDescription<'tcx> for queries::proc_macro_decls_static<'tcx> {
     fn describe(_tcx: TyCtxt<'_, '_, '_>, _: CrateNum) -> Cow<'static, str> {
         "looking up the derive registrar for a crate".into()
     }

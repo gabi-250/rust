@@ -45,7 +45,7 @@ fn compute_ignored_attr_names() -> FxHashSet<Symbol> {
 /// This is the context state available during incr. comp. hashing. It contains
 /// enough information to transform DefIds and HirIds into stable DefPaths (i.e.
 /// a reference to the TyCtxt) and it holds a few caches for speeding up various
-/// things (e.g. each DefId/DefPath is only hashed once).
+/// things (e.g., each DefId/DefPath is only hashed once).
 #[derive(Clone)]
 pub struct StableHashingContext<'a> {
     sess: &'a Session,
@@ -369,8 +369,7 @@ impl<'a> HashStable<StableHashingContext<'a>> for Span {
             // times, we cache a stable hash of it and hash that instead of
             // recursing every time.
             thread_local! {
-                static CACHE: RefCell<FxHashMap<hygiene::Mark, u64>> =
-                    RefCell::new(Default::default());
+                static CACHE: RefCell<FxHashMap<hygiene::Mark, u64>> = Default::default();
             }
 
             let sub_hash: u64 = CACHE.with(|cache| {
