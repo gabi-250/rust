@@ -17,7 +17,6 @@ use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::mir::operand::{OperandValue, OperandRef};
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use context::CodegenCx;
-use value::Value;
 use rustc::hir::def_id::DefId;
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{Align, Size, TyLayout};
@@ -30,7 +29,7 @@ use syntax;
 
 use ir::basic_block::{BasicBlock, BasicBlockData};
 use type_::Type;
-use value::Instruction;
+use value::{Instruction, Value};
 
 impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type Value = <CodegenCx<'ll, 'tcx> as BackendTypes>::Value;
@@ -108,12 +107,16 @@ impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 
 impl Builder<'a, 'll, 'tcx> {
     /// Add the instruction at the current `BuilderPosition`.
-    fn emit_instr(&mut self, inst: Instruction) {
+    fn emit_instr(&mut self, inst: Instruction) -> Value {
         let mut module = self.cx.module.borrow_mut();
         module.get_function(self.builder.fn_idx)
             .insert_inst(self.builder.bb_idx, self.builder.inst_idx, inst);
+        let ret = Value::Instruction(self.builder.fn_idx,
+                                     self.builder.bb_idx,
+                                     self.builder.inst_idx);
         // move to the next instruction
         self.builder.inst_idx += 1;
+        ret
     }
 }
 
@@ -189,16 +192,20 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn ret_void(&mut self) {
-        self.emit_instr(Instruction::None);
+        let _ = self.emit_instr(Instruction::Ret(None));
     }
 
     fn ret(&mut self, v: Value) {
-        // FIXME: add a return instruction at the current builder position
+        let _ = self.emit_instr(Instruction::Ret(Some(v)));
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        // FIXME: emit the real instruction
-        self.emit_instr(Instruction::None);
+        let mut label;
+        {
+            let module = self.cx.module.borrow();
+            label = module.functions[dest.0].basic_blocks[dest.1].label.to_string();
+        }
+        let _ = self.emit_instr(Instruction::Br(label));
     }
 
     fn cond_br(
@@ -231,7 +238,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn unreachable(&mut self) {
-        // FIXME?
+        unimplemented!("unreachable");
     }
 
     fn add(
@@ -460,7 +467,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ty: Type,
         name: &str, align: Align
     )-> Value {
-        unimplemented!("alloca");
+        let cur_fn = self.builder.fn_idx;
+        let mut module = self.cx.module.borrow_mut();
+        // XXX
+        let local_idx = 0;//module.functions[cur_fn].alloca(self.cx, ty, name, align);
+        Value::Local(cur_fn, local_idx)
     }
 
     fn dynamic_alloca(
@@ -522,7 +533,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         align: Align
     )-> Value {
-        unimplemented!("store");
+        self.store_with_flags(val, ptr, align, MemFlags::empty())
     }
 
     fn atomic_store(
@@ -542,7 +553,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         flags: MemFlags,
     )-> Value {
-        unimplemented!("store_with_flags");
+        // FIXME: ignore the flags for now
+        self.emit_instr(Instruction::Store(ptr, val))
     }
 
     fn gep(
@@ -1040,8 +1052,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         typ: &str,
         llfn: Value,
         args: &'b [Value]
-    ) -> Cow<'b, [Value]>
-        where [Value] : ToOwned {
+    ) -> Cow<'b, [Value]> {
         unimplemented!("check_call");
     }
 
@@ -1059,7 +1070,17 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         args: &[Value],
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        Value::None
+        if funclet.is_some() {
+            unimplemented!("call funclet: {:?}", funclet);
+        }
+        match llfn {
+            Value::Function(usize) => {
+                self.emit_instr(Instruction::Call(usize, args.to_vec()))
+            },
+            _ => {
+                bug!("expected Value::Function, found {:?}", llfn);
+            }
+        }
     }
 
     fn zext(

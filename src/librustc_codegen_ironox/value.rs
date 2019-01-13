@@ -32,14 +32,21 @@ pub enum Value {
     ConstStruct(usize),
     /// The parameter of an `IronOxFunction`. This is just a wrapper around a `Type`.
     Param(Type),
-    /// A placeholder for unimplemented Values. This variant will be removed.
+    /// An instruction: (functiton index, basic block index, instruction index).
+    Instruction(usize, usize, usize),
     None,
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Debug)]
 pub enum Instruction {
-    // FIXME: implement
-    None,
+    /// Store (ptr, value).
+    Store(Value, Value),
+    /// An unconditional branch to a label.
+    Br(String),
+    /// Return instruction.
+    Ret(Option<Value>),
+    /// Call (function, args)
+    Call(usize, Vec<Value>),
 }
 
 impl Eq for Value {}
