@@ -242,33 +242,12 @@ impl WriteBackendMethods for IronOxCodegenBackend {
 
     unsafe fn codegen(
         cgcx: &CodegenContext<Self>,
-        _diag_handler: &Handler,
+        diag_handler: &Handler,
         module: ModuleCodegen<Self::Module>,
         config: &ModuleConfig,
-        _timeline: &mut Timeline
+        timeline: &mut Timeline
     ) -> Result<CompiledModule, FatalError> {
-        // FIXME fix this
-        if true || config.no_integrated_as {
-            let object = cgcx.output_filenames
-                .temp_path(OutputType::Object, Some(&module.name));
-            let filename = object.to_str().unwrap().to_string();
-            let mut cmd = Command::new("as").arg("-o").arg(filename)
-                .stdin(Stdio::piped()).spawn().expect("failed to run as");
-            {
-                let stdin = cmd.stdin.as_mut().expect("failed to open stdin");
-                stdin.write_all(module.module_llvm.asm().as_bytes())
-                    .expect("failed to write to stdin");
-            }
-            Ok(CompiledModule {
-                name: module.name.clone(),
-                kind: module.kind,
-                object: Some(object),
-                bytecode: None,
-                bytecode_compressed: None,
-            })
-        } else {
-            unimplemented!("ironox does not have an integrated assembler!");
-        }
+        back::write::codegen(cgcx, diag_handler, module, config, timeline)
     }
 
     fn prepare_thin(
