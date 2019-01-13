@@ -25,7 +25,7 @@ impl AbiBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn apply_attrs_callsite(
         &mut self,
         ty: &FnType<'tcx, Ty<'tcx>>,
-        callsite: &'ll Value
+        callsite: Value
     ) {
         unimplemented!("apply_attrs_callsite");
     }
@@ -36,7 +36,7 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         ty: &ArgType<'tcx, Ty<'tcx>>,
         idx: &mut usize,
-        dst: PlaceRef<'tcx, &'ll Value>
+        dst: PlaceRef<'tcx, Value>
     ) {
         unimplemented!("store_fn_arg");
     }
@@ -44,13 +44,13 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn store_arg_ty(
         &mut self,
         ty: &ArgType<'tcx, Ty<'tcx>>,
-        val: &'ll Value,
-        dst: PlaceRef<'tcx, &'ll Value>
+        val: Value,
+        dst: PlaceRef<'tcx, Value>
     ) {
         unimplemented!("store_arg_ty");
     }
 
-    fn memory_ty(&self, ty: &ArgType<'tcx, Ty<'tcx>>) -> &'ll Type {
+    fn memory_ty(&self, ty: &ArgType<'tcx, Ty<'tcx>>) -> Type {
         unimplemented!("memory_ty");
     }
 }

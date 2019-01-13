@@ -43,9 +43,9 @@ fn codegen_ironox_module<'ll, 'tcx>(
 ) -> (Stats, ModuleCodegen<ModuleIronOx>) {
     let backend = IronOxCodegenBackend(());
     let cgu = tcx.codegen_unit(cgu_name);
-    let ironox_module = backend.new_metadata(tcx.sess, &cgu_name.as_str());
+    let mut ironox_module = backend.new_metadata(tcx.sess, &cgu_name.as_str());
     let stats = {
-        let cx = CodegenCx::new(tcx, cgu, &ironox_module);
+        let cx = CodegenCx::new(tcx, cgu, &mut ironox_module);
         let mono_items = cx.codegen_unit
                            .items_in_deterministic_order(cx.tcx);
         for &(mono_item, (linkage, visibility)) in &mono_items {

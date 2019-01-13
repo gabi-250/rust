@@ -16,14 +16,22 @@ use rustc_codegen_ssa::traits::*;
 use rustc::hir::def_id::DefId;
 use rustc::ty::layout::Align;
 
+
 impl StaticMethods for CodegenCx<'ll, 'tcx> {
     fn static_addr_of(
         &self,
-        cv: &'ll Value,
+        cv: Value,
         align: Align,
         kind: Option<&str>,
-    ) -> &'ll Value {
-        unimplemented!("static_addr_of");
+    ) -> Value {
+        match cv {
+            Value::Local(_, _) => {
+                bug!("the address of a local cannot be known statically");
+            },
+            _ => {
+                unimplemented!("addr_of {:?}", cv);
+            }
+        }
     }
 
     fn codegen_static(
