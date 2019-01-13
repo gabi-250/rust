@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use self::ImportDirectiveSubclass::*;
 
 use {AmbiguityError, AmbiguityKind, AmbiguityErrorMisc};
@@ -134,7 +124,7 @@ impl<'a> NameResolution<'a> {
     }
 }
 
-impl<'a, 'crateloader> Resolver<'a, 'crateloader> {
+impl<'a> Resolver<'a> {
     fn resolution(&self, module: Module<'a>, ident: Ident, ns: Namespace)
                   -> &'a RefCell<NameResolution<'a>> {
         *module.resolutions.borrow_mut().entry((ident.modern(), ns))
@@ -245,7 +235,18 @@ impl<'a, 'crateloader> Resolver<'a, 'crateloader> {
         };
 
         if record_used {
-            return resolution.binding.ok_or((Determined, Weak::No)).and_then(|binding| {
+            return resolution.binding.and_then(|binding| {
+                // If the primary binding is blacklisted, search further and return the shadowed
+                // glob binding if it exists. What we really want here is having two separate
+                // scopes in a module - one for non-globs and one for globs, but until that's done
+                // use this hack to avoid inconsistent resolution ICEs during import validation.
+                if let Some(blacklisted_binding) = self.blacklisted_binding {
+                    if ptr::eq(binding, blacklisted_binding) {
+                        return resolution.shadowed_glob;
+                    }
+                }
+                Some(binding)
+            }).ok_or((Determined, Weak::No)).and_then(|binding| {
                 if self.last_import_segment && check_usable(self, binding).is_err() {
                     Err((Determined, Weak::No))
                 } else {
@@ -449,6 +450,7 @@ impl<'a, 'crateloader> Resolver<'a, 'crateloader> {
                 directive,
                 used: Cell::new(false),
             },
+            ambiguity: None,
             span: directive.span,
             vis,
             expansion: directive.parent_scope.expansion,
@@ -476,6 +478,10 @@ impl<'a, 'crateloader> Resolver<'a, 'crateloader> {
         self.set_binding_parent_module(binding, module);
         self.update_resolution(module, ident, ns, |this, resolution| {
             if let Some(old_binding) = resolution.binding {
+                if binding.def() == Def::Err {
+                    // Do not override real bindings with `Def::Err`s from error recovery.
+                    return Ok(());
+                }
                 match (old_binding.is_glob_import(), binding.is_glob_import()) {
                     (true, true) => {
                         if binding.def() != old_binding.def() {
@@ -498,8 +504,8 @@ impl<'a, 'crateloader> Resolver<'a, 'crateloader> {
                                                                     nonglob_binding, glob_binding));
                         } else {
                             resolution.binding = Some(nonglob_binding);
-                            resolution.shadowed_glob = Some(glob_binding);
                         }
+                        resolution.shadowed_glob = Some(glob_binding);
                     }
                     (false, false) => {
                         if let (&NameBindingKind::Def(_, true), &NameBindingKind::Def(_, true)) =
@@ -527,13 +533,15 @@ impl<'a, 'crateloader> Resolver<'a, 'crateloader> {
         })
     }
 
-    fn ambiguity(&self, kind: AmbiguityKind, b1: &'a NameBinding<'a>, b2: &'a NameBinding<'a>)
-                     -> &'a NameBinding<'a> {
+    fn ambiguity(&self, kind: AmbiguityKind,
+                 primary_binding: &'a NameBinding<'a>, secondary_binding: &'a NameBinding<'a>)
+                 -> &'a NameBinding<'a> {
         self.arenas.alloc_name_binding(NameBinding {
-            kind: NameBindingKind::Ambiguity { kind, b1, b2 },
-            vis: if b1.vis.is_at_least(b2.vis, self) { b1.vis } else { b2.vis },
-            span: b1.span,
-            expansion: Mark::root(),
+            kind: primary_binding.kind.clone(),
+            ambiguity: Some((secondary_binding, kind)),
+            vis: primary_binding.vis,
+            span: primary_binding.span,
+            expansion: primary_binding.expansion,
         })
     }
 
@@ -541,7 +549,7 @@ impl<'a, 'crateloader> Resolver<'a, 'crateloader> {
     // If the resolution becomes a success, define it in the module's glob importers.
     fn update_resolution<T, F>(&mut self, module: Module<'a>, ident: Ident, ns: Namespace, f: F)
                                -> T
-        where F: FnOnce(&mut Resolver<'a, 'crateloader>, &mut NameResolution<'a>) -> T
+        where F: FnOnce(&mut Resolver<'a>, &mut NameResolution<'a>) -> T
     {
         // Ensure that `resolution` isn't borrowed when defining in the module's glob importers,
         // during which the resolution might end up getting re-defined via a glob cycle.
@@ -592,30 +600,30 @@ impl<'a, 'crateloader> Resolver<'a, 'crateloader> {
     }
 }
 
-pub struct ImportResolver<'a, 'b: 'a, 'c: 'a + 'b> {
-    pub resolver: &'a mut Resolver<'b, 'c>,
+pub struct ImportResolver<'a, 'b: 'a> {
+    pub resolver: &'a mut Resolver<'b>,
 }
 
-impl<'a, 'b: 'a, 'c: 'a + 'b> ::std::ops::Deref for ImportResolver<'a, 'b, 'c> {
-    type Target = Resolver<'b, 'c>;
-    fn deref(&self) -> &Resolver<'b, 'c> {
+impl<'a, 'b: 'a> ::std::ops::Deref for ImportResolver<'a, 'b> {
+    type Target = Resolver<'b>;
+    fn deref(&self) -> &Resolver<'b> {
         self.resolver
     }
 }
 
-impl<'a, 'b: 'a, 'c: 'a + 'b> ::std::ops::DerefMut for ImportResolver<'a, 'b, 'c> {
-    fn deref_mut(&mut self) -> &mut Resolver<'b, 'c> {
+impl<'a, 'b: 'a> ::std::ops::DerefMut for ImportResolver<'a, 'b> {
+    fn deref_mut(&mut self) -> &mut Resolver<'b> {
         self.resolver
     }
 }
 
-impl<'a, 'b: 'a, 'c: 'a + 'b> ty::DefIdTree for &'a ImportResolver<'a, 'b, 'c> {
+impl<'a, 'b: 'a> ty::DefIdTree for &'a ImportResolver<'a, 'b> {
     fn parent(self, id: DefId) -> Option<DefId> {
         self.resolver.parent(id)
     }
 }
 
-impl<'a, 'b:'a, 'c: 'b> ImportResolver<'a, 'b, 'c> {
+impl<'a, 'b:'a> ImportResolver<'a, 'b> {
     // Import resolution
     //
     // This is a fixed-point algorithm. We resolve imports until our efforts
@@ -852,7 +860,7 @@ impl<'a, 'b:'a, 'c: 'b> ImportResolver<'a, 'b, 'c> {
             PathResult::Module(module) => {
                 // Consistency checks, analogous to `finalize_current_module_macro_resolutions`.
                 if let Some(initial_module) = directive.imported_module.get() {
-                    if module != initial_module && no_ambiguity {
+                    if !ModuleOrUniformRoot::same_def(module, initial_module) && no_ambiguity {
                         span_bug!(directive.span, "inconsistent resolution for an import");
                     }
                 } else {
@@ -962,9 +970,9 @@ impl<'a, 'b:'a, 'c: 'b> ImportResolver<'a, 'b, 'c> {
                                                 directive.module_path.is_empty());
                             }
                         }
-                        initial_binding.def_ignoring_ambiguity()
+                        initial_binding.def()
                     });
-                    let def = binding.def_ignoring_ambiguity();
+                    let def = binding.def();
                     if let Ok(initial_def) = initial_def {
                         if def != initial_def && this.ambiguity_errors.is_empty() {
                             span_bug!(directive.span, "inconsistent resolution for an import");
@@ -1201,10 +1209,10 @@ impl<'a, 'b:'a, 'c: 'b> ImportResolver<'a, 'b, 'c> {
                 None => continue,
             };
 
-            // Filter away "empty import canaries".
-            let is_non_canary_import =
-                binding.is_import() && binding.vis != ty::Visibility::Invisible;
-            if is_non_canary_import || binding.is_macro_def() {
+            // Filter away "empty import canaries" and ambiguous imports.
+            let is_good_import = binding.is_import() && !binding.is_ambiguity() &&
+                                 binding.vis != ty::Visibility::Invisible;
+            if is_good_import || binding.is_macro_def() {
                 let def = binding.def();
                 if def != Def::Err {
                     if let Some(def_id) = def.opt_def_id() {

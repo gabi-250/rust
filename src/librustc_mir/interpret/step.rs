@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! This module contains the `EvalContext` methods for executing a single step of the interpreter.
 //!
 //! The main entry point is the `step` method.
@@ -81,7 +71,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
     }
 
     fn statement(&mut self, stmt: &mir::Statement<'tcx>) -> EvalResult<'tcx> {
-        debug!("{:?}", stmt);
+        info!("{:?}", stmt);
 
         use rustc::mir::StatementKind::*;
 
@@ -119,13 +109,9 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
             FakeRead(..) => {}
 
             // Stacked Borrows.
-            Retag { fn_entry, two_phase, ref place } => {
+            Retag(kind, ref place) => {
                 let dest = self.eval_place(place)?;
-                M::retag(self, fn_entry, two_phase, dest)?;
-            }
-            EscapeToRaw(ref op) => {
-                let op = self.eval_operand(op, None)?;
-                M::escape_to_raw(self, op)?;
+                M::retag(self, kind, dest)?;
             }
 
             // Statements we do not track.
@@ -293,7 +279,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
     }
 
     fn terminator(&mut self, terminator: &mir::Terminator<'tcx>) -> EvalResult<'tcx> {
-        debug!("{:?}", terminator.kind);
+        info!("{:?}", terminator.kind);
         self.tcx.span = terminator.source_info.span;
         self.memory.tcx.span = terminator.source_info.span;
 
@@ -303,7 +289,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> 
         if !self.stack.is_empty() {
             // This should change *something*
             debug_assert!(self.cur_frame() != old_stack || self.frame().block != old_bb);
-            debug!("// {:?}", self.frame().block);
+            info!("// {:?}", self.frame().block);
         }
         Ok(())
     }

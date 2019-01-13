@@ -1,21 +1,10 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-
 use build;
 use build::scope::{CachedBlock, DropKind};
 use hair::cx::Cx;
 use hair::{LintLevel, BindingMode, PatternKind};
 use rustc::hir;
 use rustc::hir::Node;
-use rustc::hir::def_id::{DefId, LocalDefId};
+use rustc::hir::def_id::DefId;
 use rustc::middle::region;
 use rustc::mir::*;
 use rustc::mir::visit::{MutVisitor, TyContext};
@@ -111,13 +100,6 @@ pub fn mir_build<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> Mir<'t
 
             let safety = match fn_sig.unsafety {
                 hir::Unsafety::Normal => Safety::Safe,
-                hir::Unsafety::Unsafe if tcx.is_min_const_fn(fn_def_id) => {
-                    // As specified in #55607, a `const unsafe fn` differs
-                    // from an `unsafe fn` in that its body is still considered
-                    // safe code by default.
-                    assert!(implicit_argument.is_none());
-                    Safety::Safe
-                },
                 hir::Unsafety::Unsafe => Safety::FnUnsafe,
             };
 
@@ -220,7 +202,7 @@ impl<'a, 'gcx: 'tcx, 'tcx> MutVisitor<'tcx> for GlobalizeMir<'a, 'gcx> {
         }
     }
 
-    fn visit_const(&mut self, constant: &mut &'tcx ty::Const<'tcx>, _: Location) {
+    fn visit_const(&mut self, constant: &mut &'tcx ty::LazyConst<'tcx>, _: Location) {
         if let Some(lifted) = self.tcx.lift(constant) {
             *constant = lifted;
         } else {
@@ -397,6 +379,7 @@ struct Builder<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
     /// (A match binding can have two locals; the 2nd is for the arm's guard.)
     var_indices: NodeMap<LocalsForNode>,
     local_decls: IndexVec<Local, LocalDecl<'tcx>>,
+    canonical_user_type_annotations: ty::CanonicalUserTypeAnnotations<'tcx>,
     upvar_decls: Vec<UpvarDecl>,
     unit_temp: Option<Place<'tcx>>,
 
@@ -628,12 +611,7 @@ fn should_abort_on_panic<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
     // unwind anyway. Don't stop them.
     let attrs = &tcx.get_attrs(fn_def_id);
     match attr::find_unwind_attr(Some(tcx.sess.diagnostic()), attrs) {
-        None => {
-            // FIXME(rust-lang/rust#48251) -- Had to disable
-            // abort-on-panic for backwards compatibility reasons.
-            false
-        }
-
+        None => true,
         Some(UnwindAttr::Allowed) => false,
         Some(UnwindAttr::Aborts) => true,
     }
@@ -662,21 +640,29 @@ fn construct_fn<'a, 'gcx, 'tcx, A>(hir: Cx<'a, 'gcx, 'tcx>,
     let arguments: Vec<_> = arguments.collect();
 
     let tcx = hir.tcx();
-    let span = tcx.hir().span(fn_id);
+    let tcx_hir = tcx.hir();
+    let span = tcx_hir.span(fn_id);
+
+    let hir_tables = hir.tables();
+    let fn_def_id = tcx_hir.local_def_id(fn_id);
 
     // Gather the upvars of a closure, if any.
-    let upvar_decls: Vec<_> = tcx.with_freevars(fn_id, |freevars| {
-        freevars.iter().map(|fv| {
-            let var_id = fv.var_id();
-            let var_hir_id = tcx.hir().node_to_hir_id(var_id);
-            let closure_expr_id = tcx.hir().local_def_id(fn_id);
-            let capture = hir.tables().upvar_capture(ty::UpvarId {
-                var_path: ty::UpvarPath {hir_id: var_hir_id},
-                closure_expr_id: LocalDefId::from_def_id(closure_expr_id),
-            });
+    // In analyze_closure() in upvar.rs we gathered a list of upvars used by a
+    // closure and we stored in a map called upvar_list in TypeckTables indexed
+    // with the closure's DefId. Here, we run through that vec of UpvarIds for
+    // the given closure and use the necessary information to create UpvarDecl.
+    let upvar_decls: Vec<_> = hir_tables
+        .upvar_list
+        .get(&fn_def_id)
+        .into_iter()
+        .flatten()
+        .map(|upvar_id| {
+            let var_hir_id = upvar_id.var_path.hir_id;
+            let var_node_id = tcx_hir.hir_to_node_id(var_hir_id);
+            let capture = hir_tables.upvar_capture(*upvar_id);
             let by_ref = match capture {
                 ty::UpvarCapture::ByValue => false,
-                ty::UpvarCapture::ByRef(..) => true
+                ty::UpvarCapture::ByRef(..) => true,
             };
             let mut decl = UpvarDecl {
                 debug_name: keywords::Invalid.name(),
@@ -684,10 +670,9 @@ fn construct_fn<'a, 'gcx, 'tcx, A>(hir: Cx<'a, 'gcx, 'tcx>,
                 by_ref,
                 mutability: Mutability::Not,
             };
-            if let Some(Node::Binding(pat)) = tcx.hir().find(var_id) {
+            if let Some(Node::Binding(pat)) = tcx_hir.find(var_node_id) {
                 if let hir::PatKind::Binding(_, _, ident, _) = pat.node {
                     decl.debug_name = ident.name;
-
                     if let Some(&bm) = hir.tables.pat_binding_modes().get(pat.hir_id) {
                         if bm == ty::BindByValue(hir::MutMutable) {
                             decl.mutability = Mutability::Mut;
@@ -700,8 +685,8 @@ fn construct_fn<'a, 'gcx, 'tcx, A>(hir: Cx<'a, 'gcx, 'tcx>,
                 }
             }
             decl
-        }).collect()
-    });
+        })
+        .collect();
 
     let mut builder = Builder::new(hir,
         span,
@@ -711,7 +696,6 @@ fn construct_fn<'a, 'gcx, 'tcx, A>(hir: Cx<'a, 'gcx, 'tcx>,
         return_ty_span,
         upvar_decls);
 
-    let fn_def_id = tcx.hir().local_def_id(fn_id);
     let call_site_scope = region::Scope {
         id: body.value.hir_id.local_id,
         data: region::ScopeData::CallSite
@@ -754,7 +738,7 @@ fn construct_fn<'a, 'gcx, 'tcx, A>(hir: Cx<'a, 'gcx, 'tcx>,
         // RustCall pseudo-ABI untuples the last argument.
         spread_arg = Some(Local::new(arguments.len()));
     }
-    let closure_expr_id = tcx.hir().local_def_id(fn_id);
+    let closure_expr_id = tcx_hir.local_def_id(fn_id);
     info!("fn_id {:?} has attrs {:?}", closure_expr_id,
           tcx.get_attrs(closure_expr_id));
 
@@ -835,6 +819,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                 LocalDecl::new_return_place(return_ty, return_span),
                 1,
             ),
+            canonical_user_type_annotations: IndexVec::new(),
             upvar_decls,
             var_indices: Default::default(),
             unit_temp: None,
@@ -861,15 +846,18 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             }
         }
 
-        Mir::new(self.cfg.basic_blocks,
-                 self.source_scopes,
-                 ClearCrossCrate::Set(self.source_scope_local_data),
-                 IndexVec::new(),
-                 yield_ty,
-                 self.local_decls,
-                 self.arg_count,
-                 self.upvar_decls,
-                 self.fn_span
+        Mir::new(
+            self.cfg.basic_blocks,
+            self.source_scopes,
+            ClearCrossCrate::Set(self.source_scope_local_data),
+            IndexVec::new(),
+            yield_ty,
+            self.local_decls,
+            self.canonical_user_type_annotations,
+            self.arg_count,
+            self.upvar_decls,
+            self.fn_span,
+            self.hir.control_flow_destroyed(),
         )
     }
 

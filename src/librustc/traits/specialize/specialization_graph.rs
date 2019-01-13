@@ -1,13 +1,3 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use super::OverlapError;
 
 use hir::def_id::DefId;
@@ -68,10 +58,22 @@ struct Children {
     blanket_impls: Vec<DefId>,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum FutureCompatOverlapErrorKind {
+    Issue43355,
+    Issue33140,
+}
+
+#[derive(Debug)]
+pub struct FutureCompatOverlapError {
+    pub error: OverlapError,
+    pub kind: FutureCompatOverlapErrorKind
+}
+
 /// The result of attempting to insert an impl into a group of children.
 enum Inserted {
     /// The impl was inserted as a new child in this group of children.
-    BecameNewSibling(Option<OverlapError>),
+    BecameNewSibling(Option<FutureCompatOverlapError>),
 
     /// The impl should replace existing impls [X1, ..], because the impl specializes X1, X2, etc.
     ReplaceChildren(Vec<DefId>),
@@ -132,10 +134,12 @@ impl<'a, 'gcx, 'tcx> Children {
             simplified_self,
         );
 
-        for possible_sibling in match simplified_self {
-            Some(sty) => self.filtered(sty),
-            None => self.iter(),
-        } {
+        let possible_siblings = match simplified_self {
+            Some(sty) => PotentialSiblings::Filtered(self.filtered(sty)),
+            None => PotentialSiblings::Unfiltered(self.iter()),
+        };
+
+        for possible_sibling in possible_siblings {
             debug!(
                 "insert: impl_def_id={:?}, simplified_self={:?}, possible_sibling={:?}",
                 impl_def_id,
@@ -159,6 +163,7 @@ impl<'a, 'gcx, 'tcx> Children {
                         None
                     },
                     intercrate_ambiguity_causes: overlap.intercrate_ambiguity_causes,
+                    involves_placeholder: overlap.involves_placeholder,
                 }
             };
 
@@ -169,7 +174,19 @@ impl<'a, 'gcx, 'tcx> Children {
                 impl_def_id,
                 traits::IntercrateMode::Issue43355,
                 |overlap| {
-                    if tcx.impls_are_allowed_to_overlap(impl_def_id, possible_sibling) {
+                    if let Some(overlap_kind) =
+                        tcx.impls_are_allowed_to_overlap(impl_def_id, possible_sibling)
+                    {
+                        match overlap_kind {
+                            ty::ImplOverlapKind::Permitted => {}
+                            ty::ImplOverlapKind::Issue33140 => {
+                                last_lint = Some(FutureCompatOverlapError {
+                                    error: overlap_error(overlap),
+                                    kind: FutureCompatOverlapErrorKind::Issue33140
+                                });
+                            }
+                        }
+
                         return Ok((false, false));
                     }
 
@@ -197,13 +214,23 @@ impl<'a, 'gcx, 'tcx> Children {
 
                 replace_children.push(possible_sibling);
             } else {
-                if !tcx.impls_are_allowed_to_overlap(impl_def_id, possible_sibling) {
+                if let None = tcx.impls_are_allowed_to_overlap(
+                    impl_def_id, possible_sibling)
+                {
+                    // do future-compat checks for overlap. Have issue #33140
+                    // errors overwrite issue #43355 errors when both are present.
+
                     traits::overlapping_impls(
                         tcx,
                         possible_sibling,
                         impl_def_id,
                         traits::IntercrateMode::Fixed,
-                        |overlap| last_lint = Some(overlap_error(overlap)),
+                        |overlap| {
+                            last_lint = Some(FutureCompatOverlapError {
+                                error: overlap_error(overlap),
+                                kind: FutureCompatOverlapErrorKind::Issue43355
+                            });
+                        },
                         || (),
                     );
                 }
@@ -222,14 +249,37 @@ impl<'a, 'gcx, 'tcx> Children {
         Ok(Inserted::BecameNewSibling(last_lint))
     }
 
-    fn iter(&mut self) -> Box<dyn Iterator<Item = DefId> + '_> {
+    fn iter(&mut self) -> impl Iterator<Item = DefId> + '_ {
         let nonblanket = self.nonblanket_impls.iter_mut().flat_map(|(_, v)| v.iter());
-        Box::new(self.blanket_impls.iter().chain(nonblanket).cloned())
+        self.blanket_impls.iter().chain(nonblanket).cloned()
     }
 
-    fn filtered(&mut self, sty: SimplifiedType) -> Box<dyn Iterator<Item = DefId> + '_> {
+    fn filtered(&mut self, sty: SimplifiedType) -> impl Iterator<Item = DefId> + '_ {
         let nonblanket = self.nonblanket_impls.entry(sty).or_default().iter();
-        Box::new(self.blanket_impls.iter().chain(nonblanket).cloned())
+        self.blanket_impls.iter().chain(nonblanket).cloned()
+    }
+}
+
+// A custom iterator used by Children::insert
+enum PotentialSiblings<I, J>
+    where I: Iterator<Item = DefId>,
+          J: Iterator<Item = DefId>
+{
+    Unfiltered(I),
+    Filtered(J)
+}
+
+impl<I, J> Iterator for PotentialSiblings<I, J>
+    where I: Iterator<Item = DefId>,
+          J: Iterator<Item = DefId>
+{
+    type Item = DefId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match *self {
+            PotentialSiblings::Unfiltered(ref mut iter) => iter.next(),
+            PotentialSiblings::Filtered(ref mut iter) => iter.next()
+        }
     }
 }
 
@@ -247,7 +297,7 @@ impl<'a, 'gcx, 'tcx> Graph {
     pub fn insert(&mut self,
                   tcx: TyCtxt<'a, 'gcx, 'tcx>,
                   impl_def_id: DefId)
-                  -> Result<Option<OverlapError>, OverlapError> {
+                  -> Result<Option<FutureCompatOverlapError>, OverlapError> {
         assert!(impl_def_id.is_local());
 
         let trait_ref = tcx.impl_trait_ref(impl_def_id).unwrap();

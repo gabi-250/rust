@@ -1,13 +1,3 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use cfg::*;
 use middle::region;
 use rustc_data_structures::graph::implementation as graph;
@@ -402,7 +392,8 @@ impl<'a, 'tcx> CFGBuilder<'a, 'tcx> {
 
             hir::ExprKind::Closure(..) |
             hir::ExprKind::Lit(..) |
-            hir::ExprKind::Path(_) => {
+            hir::ExprKind::Path(_) |
+            hir::ExprKind::Err => {
                 self.straightline(expr, pred, None::<hir::Expr>.iter())
             }
         }
@@ -415,8 +406,8 @@ impl<'a, 'tcx> CFGBuilder<'a, 'tcx> {
             args: I) -> CFGIndex {
         let func_or_rcvr_exit = self.expr(func_or_rcvr, pred);
         let ret = self.straightline(call_expr, func_or_rcvr_exit, args);
-        // FIXME(canndrew): This is_never should probably be an is_uninhabited.
-        if self.tables.expr_ty(call_expr).is_never() {
+        let m = self.tcx.hir().get_module_parent(call_expr.id);
+        if self.tcx.is_ty_uninhabited_from(m, self.tables.expr_ty(call_expr)) {
             self.add_unreachable_node()
         } else {
             ret

@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use fortanix_sgx_abi::Tcs;
 
 use super::abi::thread;
@@ -20,7 +10,6 @@ pub struct Mutex {
 
 // Implementation according to “Operating Systems: Three Easy Pieces”, chapter 28
 impl Mutex {
-    #[unstable(feature = "sgx_internals", issue = "0")] // FIXME: min_const_fn
     pub const fn new() -> Mutex {
         Mutex { inner: SpinMutex::new(WaitVariable::new(false)) }
     }
@@ -79,7 +68,6 @@ pub struct ReentrantMutex {
 }
 
 impl ReentrantMutex {
-    #[unstable(feature = "sgx_internals", issue = "0")] // FIXME: min_const_fn
     pub const fn uninitialized() -> ReentrantMutex {
         ReentrantMutex {
             inner: SpinMutex::new(WaitVariable::new(ReentrantLock { owner: None, count: 0 }))

@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use rustc::lint as lint;
 use rustc::hir;
 use rustc::hir::def::Def;
@@ -53,14 +43,14 @@ enum PathKind {
     Type,
 }
 
-struct LinkCollector<'a, 'tcx: 'a, 'rcx: 'a, 'cstore: 'rcx> {
-    cx: &'a DocContext<'a, 'tcx, 'rcx, 'cstore>,
+struct LinkCollector<'a, 'tcx: 'a, 'rcx: 'a> {
+    cx: &'a DocContext<'a, 'tcx, 'rcx>,
     mod_ids: Vec<NodeId>,
     is_nightly_build: bool,
 }
 
-impl<'a, 'tcx, 'rcx, 'cstore> LinkCollector<'a, 'tcx, 'rcx, 'cstore> {
-    fn new(cx: &'a DocContext<'a, 'tcx, 'rcx, 'cstore>) -> Self {
+impl<'a, 'tcx, 'rcx> LinkCollector<'a, 'tcx, 'rcx> {
+    fn new(cx: &'a DocContext<'a, 'tcx, 'rcx>) -> Self {
         LinkCollector {
             cx,
             mod_ids: Vec::new(),
@@ -213,7 +203,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> LinkCollector<'a, 'tcx, 'rcx, 'cstore> {
     }
 }
 
-impl<'a, 'tcx, 'rcx, 'cstore> DocFolder for LinkCollector<'a, 'tcx, 'rcx, 'cstore> {
+impl<'a, 'tcx, 'rcx> DocFolder for LinkCollector<'a, 'tcx, 'rcx> {
     fn fold_item(&mut self, mut item: Item) -> Option<Item> {
         let item_node_id = if item.is_mod() {
             if let Some(id) = self.cx.tcx.hir().as_local_node_id(item.def_id) {
@@ -294,23 +284,23 @@ impl<'a, 'tcx, 'rcx, 'cstore> DocFolder for LinkCollector<'a, 'tcx, 'rcx, 'cstor
                      "trait@", "union@"].iter()
                                       .find(|p| link.starts_with(**p)) {
                     kind = PathKind::Type;
-                    link.trim_left_matches(prefix)
+                    link.trim_start_matches(prefix)
                 } else if let Some(prefix) =
                     ["const@", "static@",
                      "value@", "function@", "mod@",
                      "fn@", "module@", "method@"]
                         .iter().find(|p| link.starts_with(**p)) {
                     kind = PathKind::Value;
-                    link.trim_left_matches(prefix)
+                    link.trim_start_matches(prefix)
                 } else if link.ends_with("()") {
                     kind = PathKind::Value;
-                    link.trim_right_matches("()")
+                    link.trim_end_matches("()")
                 } else if link.starts_with("macro@") {
                     kind = PathKind::Macro;
-                    link.trim_left_matches("macro@")
+                    link.trim_start_matches("macro@")
                 } else if link.ends_with('!') {
                     kind = PathKind::Macro;
-                    link.trim_right_matches('!')
+                    link.trim_end_matches('!')
                 } else {
                     &link[..]
                 }.trim();
@@ -642,7 +632,7 @@ fn handle_variant(cx: &DocContext, def: Def) -> Result<(Def, Option<String>), ()
     };
     let parent_def = Def::Enum(parent);
     let variant = cx.tcx.expect_variant_def(def);
-    Ok((parent_def, Some(format!("{}.v", variant.name))))
+    Ok((parent_def, Some(format!("{}.v", variant.ident.name))))
 }
 
 const PRIMITIVES: &[(&str, Def)] = &[

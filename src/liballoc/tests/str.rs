@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use std::borrow::Cow;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::str::from_utf8;
@@ -1514,9 +1504,9 @@ fn contains_weird_cases() {
 
 #[test]
 fn trim_ws() {
-    assert_eq!(" \t  a \t  ".trim_left_matches(|c: char| c.is_whitespace()),
+    assert_eq!(" \t  a \t  ".trim_start_matches(|c: char| c.is_whitespace()),
                     "a \t  ");
-    assert_eq!(" \t  a \t  ".trim_right_matches(|c: char| c.is_whitespace()),
+    assert_eq!(" \t  a \t  ".trim_end_matches(|c: char| c.is_whitespace()),
                " \t  a");
     assert_eq!(" \t  a \t  ".trim_start_matches(|c: char| c.is_whitespace()),
                     "a \t  ");
@@ -1524,9 +1514,9 @@ fn trim_ws() {
                " \t  a");
     assert_eq!(" \t  a \t  ".trim_matches(|c: char| c.is_whitespace()),
                     "a");
-    assert_eq!(" \t   \t  ".trim_left_matches(|c: char| c.is_whitespace()),
+    assert_eq!(" \t   \t  ".trim_start_matches(|c: char| c.is_whitespace()),
                          "");
-    assert_eq!(" \t   \t  ".trim_right_matches(|c: char| c.is_whitespace()),
+    assert_eq!(" \t   \t  ".trim_end_matches(|c: char| c.is_whitespace()),
                "");
     assert_eq!(" \t   \t  ".trim_start_matches(|c: char| c.is_whitespace()),
                          "");

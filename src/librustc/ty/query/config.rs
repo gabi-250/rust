@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use dep_graph::SerializedDepNodeIndex;
 use dep_graph::DepNode;
 use hir::def_id::{CrateNum, DefId, DefIndex};
@@ -113,6 +103,15 @@ impl<'tcx> QueryDescription<'tcx> for queries::normalize_ty_after_erasing_region
 impl<'tcx> QueryDescription<'tcx> for queries::evaluate_obligation<'tcx> {
     fn describe(_tcx: TyCtxt<'_, '_, '_>, goal: CanonicalPredicateGoal<'tcx>) -> Cow<'static, str> {
         format!("evaluating trait selection obligation `{}`", goal.value.value).into()
+    }
+}
+
+impl<'tcx> QueryDescription<'tcx> for queries::evaluate_goal<'tcx> {
+    fn describe(
+        _tcx: TyCtxt<'_, '_, '_>,
+        goal: traits::ChalkCanonicalGoal<'tcx>
+    ) -> Cow<'static, str> {
+        format!("evaluating trait selection obligation `{}`", goal.value.goal).into()
     }
 }
 
@@ -824,6 +823,12 @@ impl<'tcx> QueryDescription<'tcx> for queries::optimized_mir<'tcx> {
 impl<'tcx> QueryDescription<'tcx> for queries::substitute_normalize_and_test_predicates<'tcx> {
     fn describe(tcx: TyCtxt<'_, '_, '_>, key: (DefId, &'tcx Substs<'tcx>)) -> Cow<'static, str> {
         format!("testing substituted normalized predicates:`{}`", tcx.item_path_str(key.0)).into()
+    }
+}
+
+impl<'tcx> QueryDescription<'tcx> for queries::method_autoderef_steps<'tcx> {
+    fn describe(_tcx: TyCtxt<'_, '_, '_>, goal: CanonicalTyGoal<'tcx>) -> Cow<'static, str> {
+        format!("computing autoderef types for `{:?}`", goal).into()
     }
 }
 

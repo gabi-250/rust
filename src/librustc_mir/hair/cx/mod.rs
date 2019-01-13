@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! This module contains the code to convert from the wacky tcx data
 //! structures into the hair. The `builder` is generally ignorant of
 //! the tcx etc, and instead goes through the `Cx` for most of its
@@ -56,6 +46,9 @@ pub struct Cx<'a, 'gcx: 'a + 'tcx, 'tcx: 'a> {
 
     /// True if this constant/function needs overflow checks.
     check_overflow: bool,
+
+    /// See field with the same name on `Mir`
+    control_flow_destroyed: Vec<(Span, String)>,
 }
 
 impl<'a, 'gcx, 'tcx> Cx<'a, 'gcx, 'tcx> {
@@ -96,9 +89,13 @@ impl<'a, 'gcx, 'tcx> Cx<'a, 'gcx, 'tcx> {
             constness,
             body_owner_kind,
             check_overflow,
+            control_flow_destroyed: Vec::new(),
         }
     }
 
+    pub fn control_flow_destroyed(self) -> Vec<(Span, String)> {
+        self.control_flow_destroyed
+    }
 }
 
 impl<'a, 'gcx, 'tcx> Cx<'a, 'gcx, 'tcx> {
@@ -111,8 +108,8 @@ impl<'a, 'gcx, 'tcx> Cx<'a, 'gcx, 'tcx> {
         self.tcx.types.usize
     }
 
-    pub fn usize_literal(&mut self, value: u64) -> &'tcx ty::Const<'tcx> {
-        ty::Const::from_usize(self.tcx, value)
+    pub fn usize_literal(&mut self, value: u64) -> &'tcx ty::LazyConst<'tcx> {
+        self.tcx.intern_lazy_const(ty::LazyConst::Evaluated(ty::Const::from_usize(self.tcx, value)))
     }
 
     pub fn bool_ty(&mut self) -> Ty<'tcx> {
@@ -123,12 +120,12 @@ impl<'a, 'gcx, 'tcx> Cx<'a, 'gcx, 'tcx> {
         self.tcx.mk_unit()
     }
 
-    pub fn true_literal(&mut self) -> &'tcx ty::Const<'tcx> {
-        ty::Const::from_bool(self.tcx, true)
+    pub fn true_literal(&mut self) -> &'tcx ty::LazyConst<'tcx> {
+        self.tcx.intern_lazy_const(ty::LazyConst::Evaluated(ty::Const::from_bool(self.tcx, true)))
     }
 
-    pub fn false_literal(&mut self) -> &'tcx ty::Const<'tcx> {
-        ty::Const::from_bool(self.tcx, false)
+    pub fn false_literal(&mut self) -> &'tcx ty::LazyConst<'tcx> {
+        self.tcx.intern_lazy_const(ty::LazyConst::Evaluated(ty::Const::from_bool(self.tcx, false)))
     }
 
     pub fn const_eval_literal(
@@ -137,7 +134,7 @@ impl<'a, 'gcx, 'tcx> Cx<'a, 'gcx, 'tcx> {
         ty: Ty<'tcx>,
         sp: Span,
         neg: bool,
-    ) -> &'tcx ty::Const<'tcx> {
+    ) -> ty::Const<'tcx> {
         trace!("const_eval_literal: {:#?}, {:?}, {:?}, {:?}", lit, ty, sp, neg);
 
         match lit_to_const(lit, self.tcx, ty, neg) {
@@ -172,14 +169,14 @@ impl<'a, 'gcx, 'tcx> Cx<'a, 'gcx, 'tcx> {
                         method_name: &str,
                         self_ty: Ty<'tcx>,
                         params: &[Kind<'tcx>])
-                        -> (Ty<'tcx>, &'tcx ty::Const<'tcx>) {
+                        -> (Ty<'tcx>, ty::Const<'tcx>) {
         let method_name = Symbol::intern(method_name);
         let substs = self.tcx.mk_substs_trait(self_ty, params);
         for item in self.tcx.associated_items(trait_def_id) {
             if item.kind == ty::AssociatedKind::Method && item.ident.name == method_name {
                 let method_ty = self.tcx.type_of(item.def_id);
                 let method_ty = method_ty.subst(self.tcx, substs);
-                return (method_ty, ty::Const::zero_sized(self.tcx, method_ty));
+                return (method_ty, ty::Const::zero_sized(method_ty));
             }
         }
 
@@ -226,8 +223,8 @@ impl<'a, 'gcx, 'tcx> Cx<'a, 'gcx, 'tcx> {
         self.check_overflow
     }
 
-    pub fn type_moves_by_default(&self, ty: Ty<'tcx>, span: Span) -> bool {
-        self.infcx.type_moves_by_default(self.param_env, ty, span)
+    pub fn type_is_copy_modulo_regions(&self, ty: Ty<'tcx>, span: Span) -> bool {
+        self.infcx.type_is_copy_modulo_regions(self.param_env, ty, span)
     }
 }
 

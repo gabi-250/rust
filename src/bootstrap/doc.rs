@@ -1,13 +1,3 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Documentation generation for rustbuilder.
 //!
 //! This module implements generation for all bits and pieces of documentation
@@ -22,15 +12,15 @@ use std::fs;
 use std::io;
 use std::path::{PathBuf, Path};
 
-use Mode;
+use crate::Mode;
 use build_helper::up_to_date;
 
-use util::symlink_dir;
-use builder::{Builder, Compiler, RunConfig, ShouldRun, Step};
-use tool::{self, prepare_tool_cargo, Tool, SourceType};
-use compile;
-use cache::{INTERNER, Interned};
-use config::Config;
+use crate::util::symlink_dir;
+use crate::builder::{Builder, Compiler, RunConfig, ShouldRun, Step};
+use crate::tool::{self, prepare_tool_cargo, Tool, SourceType};
+use crate::compile;
+use crate::cache::{INTERNER, Interned};
+use crate::config::Config;
 
 macro_rules! book {
     ($($name:ident, $path:expr, $book_name:expr;)+) => {

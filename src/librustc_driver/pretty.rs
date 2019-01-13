@@ -1,13 +1,3 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! The various pretty-printing routines.
 
 use rustc::cfg;
@@ -202,7 +192,6 @@ impl PpSourceMode {
         hir_map: &hir_map::Map<'tcx>,
         analysis: &ty::CrateAnalysis,
         resolutions: &Resolutions,
-        arenas: &'tcx AllArenas<'tcx>,
         output_filenames: &OutputFilenames,
         id: &str,
         f: F
@@ -228,6 +217,7 @@ impl PpSourceMode {
             PpmTyped => {
                 let control = &driver::CompileController::basic();
                 let codegen_backend = ::get_codegen_backend(sess);
+                let mut arenas = AllArenas::new();
                 abort_on_err(driver::phase_3_run_analysis_passes(&*codegen_backend,
                                                                  control,
                                                                  sess,
@@ -235,7 +225,7 @@ impl PpSourceMode {
                                                                  hir_map.clone(),
                                                                  analysis.clone(),
                                                                  resolutions.clone(),
-                                                                 arenas,
+                                                                 &mut arenas,
                                                                  id,
                                                                  output_filenames,
                                                                  |tcx, _, _, _| {
@@ -751,7 +741,6 @@ impl<'a> fold::Folder for ReplaceBodyWithLoop<'a> {
 
     fn fold_block(&mut self, b: P<ast::Block>) -> P<ast::Block> {
         fn stmt_to_block(rules: ast::BlockCheckMode,
-                         recovered: bool,
                          s: Option<ast::Stmt>,
                          sess: &Session) -> ast::Block {
             ast::Block {
@@ -759,7 +748,6 @@ impl<'a> fold::Folder for ReplaceBodyWithLoop<'a> {
                 rules,
                 id: sess.next_node_id(),
                 span: syntax_pos::DUMMY_SP,
-                recovered,
             }
         }
 
@@ -778,7 +766,7 @@ impl<'a> fold::Folder for ReplaceBodyWithLoop<'a> {
             }
         }
 
-        let empty_block = stmt_to_block(BlockCheckMode::Default, false, None, self.sess);
+        let empty_block = stmt_to_block(BlockCheckMode::Default, None, self.sess);
         let loop_expr = P(ast::Expr {
             node: ast::ExprKind::Loop(P(empty_block), None),
             id: self.sess.next_node_id(),
@@ -819,7 +807,7 @@ impl<'a> fold::Folder for ReplaceBodyWithLoop<'a> {
                         old_blocks.push(new_block);
                     }
 
-                    stmt_to_block(b.rules, b.recovered, Some(loop_stmt), self.sess)
+                    stmt_to_block(b.rules, Some(loop_stmt), self.sess)
                 } else {
                     //push `loop {}` onto the end of our fresh block and yield that
                     new_block.stmts.push(loop_stmt);
@@ -977,7 +965,6 @@ pub fn print_after_hir_lowering<'tcx, 'a: 'tcx>(sess: &'a Session,
                                                 krate: &ast::Crate,
                                                 crate_name: &str,
                                                 ppm: PpMode,
-                                                arenas: &'tcx AllArenas<'tcx>,
                                                 output_filenames: &OutputFilenames,
                                                 opt_uii: Option<UserIdentifiedItem>,
                                                 ofile: Option<&Path>) {
@@ -988,7 +975,6 @@ pub fn print_after_hir_lowering<'tcx, 'a: 'tcx>(sess: &'a Session,
                             analysis,
                             resolutions,
                             crate_name,
-                            arenas,
                             output_filenames,
                             ppm,
                             opt_uii,
@@ -1026,7 +1012,6 @@ pub fn print_after_hir_lowering<'tcx, 'a: 'tcx>(sess: &'a Session,
                                            hir_map,
                                            analysis,
                                            resolutions,
-                                           arenas,
                                            output_filenames,
                                            crate_name,
                                            move |annotation, krate| {
@@ -1050,7 +1035,6 @@ pub fn print_after_hir_lowering<'tcx, 'a: 'tcx>(sess: &'a Session,
                                            hir_map,
                                            analysis,
                                            resolutions,
-                                           arenas,
                                            output_filenames,
                                            crate_name,
                                            move |_annotation, krate| {
@@ -1066,7 +1050,6 @@ pub fn print_after_hir_lowering<'tcx, 'a: 'tcx>(sess: &'a Session,
                                            hir_map,
                                            analysis,
                                            resolutions,
-                                           arenas,
                                            output_filenames,
                                            crate_name,
                                            move |annotation, _| {
@@ -1100,7 +1083,6 @@ pub fn print_after_hir_lowering<'tcx, 'a: 'tcx>(sess: &'a Session,
                                            hir_map,
                                            analysis,
                                            resolutions,
-                                           arenas,
                                            output_filenames,
                                            crate_name,
                                            move |_annotation, _krate| {
@@ -1130,7 +1112,6 @@ fn print_with_analysis<'tcx, 'a: 'tcx>(sess: &'a Session,
                                        analysis: &ty::CrateAnalysis,
                                        resolutions: &Resolutions,
                                        crate_name: &str,
-                                       arenas: &'tcx AllArenas<'tcx>,
                                        output_filenames: &OutputFilenames,
                                        ppm: PpMode,
                                        uii: Option<UserIdentifiedItem>,
@@ -1147,6 +1128,7 @@ fn print_with_analysis<'tcx, 'a: 'tcx>(sess: &'a Session,
 
     let control = &driver::CompileController::basic();
     let codegen_backend = ::get_codegen_backend(sess);
+    let mut arenas = AllArenas::new();
     abort_on_err(driver::phase_3_run_analysis_passes(&*codegen_backend,
                                                      control,
                                                      sess,
@@ -1154,7 +1136,7 @@ fn print_with_analysis<'tcx, 'a: 'tcx>(sess: &'a Session,
                                                      hir_map.clone(),
                                                      analysis.clone(),
                                                      resolutions.clone(),
-                                                     arenas,
+                                                     &mut arenas,
                                                      crate_name,
                                                      output_filenames,
                                                      |tcx, _, _, _| {

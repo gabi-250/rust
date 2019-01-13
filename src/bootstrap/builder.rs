@@ -1,13 +1,3 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -21,20 +11,20 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use cache::{Cache, Interned, INTERNER};
-use check;
-use compile;
-use dist;
-use doc;
-use flags::Subcommand;
-use install;
-use native;
-use test;
-use tool;
-use util::{add_lib_path, exe, libdir};
-use {Build, DocTests, Mode, GitRepo};
+use crate::cache::{Cache, Interned, INTERNER};
+use crate::check;
+use crate::compile;
+use crate::dist;
+use crate::doc;
+use crate::flags::Subcommand;
+use crate::install;
+use crate::native;
+use crate::test;
+use crate::tool;
+use crate::util::{add_lib_path, exe, libdir};
+use crate::{Build, DocTests, Mode, GitRepo};
 
-pub use Compiler;
+pub use crate::Compiler;
 
 use petgraph::graph::NodeIndex;
 use petgraph::Graph;
@@ -416,6 +406,7 @@ impl<'a> Builder<'a> {
                 test::Rustfmt,
                 test::Miri,
                 test::Clippy,
+                test::CompiletestTest,
                 test::RustdocJS,
                 test::RustdocTheme,
                 // Run bootstrap close to the end as it's unlikely to fail
@@ -458,6 +449,7 @@ impl<'a> Builder<'a> {
                 dist::Rls,
                 dist::Rustfmt,
                 dist::Clippy,
+                dist::Miri,
                 dist::LlvmTools,
                 dist::Lldb,
                 dist::Extended,
@@ -470,6 +462,7 @@ impl<'a> Builder<'a> {
                 install::Rls,
                 install::Rustfmt,
                 install::Clippy,
+                install::Miri,
                 install::Analysis,
                 install::Src,
                 install::Rustc
@@ -684,6 +677,11 @@ impl<'a> Builder<'a> {
             .env("RUSTDOC_REAL", self.rustdoc(host))
             .env("RUSTDOC_CRATE_VERSION", self.rust_version())
             .env("RUSTC_BOOTSTRAP", "1");
+
+        // Remove make-related flags that can cause jobserver problems.
+        cmd.env_remove("MAKEFLAGS");
+        cmd.env_remove("MFLAGS");
+
         if let Some(linker) = self.linker(host) {
             cmd.env("RUSTC_TARGET_LINKER", linker);
         }
@@ -1246,7 +1244,7 @@ impl<'a> Builder<'a> {
 #[cfg(test)]
 mod __test {
     use super::*;
-    use config::Config;
+    use crate::config::Config;
     use std::thread;
 
     fn configure(host: &[&str], target: &[&str]) -> Config {

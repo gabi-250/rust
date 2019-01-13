@@ -1,13 +1,3 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use core::iter::*;
 use core::{i8, i16, isize};
 use core::usize;
@@ -1003,6 +993,8 @@ fn test_cycle() {
     assert_eq!(it.next(), None);
 
     assert_eq!(empty::<i32>().cycle().fold(0, |acc, x| acc + x), 0);
+
+    assert_eq!(once(1).cycle().skip(1).take(4).fold(0, |acc, x| acc + x), 4);
 }
 
 #[test]
@@ -1012,6 +1004,33 @@ fn test_iterator_nth() {
         assert_eq!(v.iter().nth(i).unwrap(), &v[i]);
     }
     assert_eq!(v.iter().nth(v.len()), None);
+}
+
+#[test]
+fn test_iterator_nth_back() {
+    let v: &[_] = &[0, 1, 2, 3, 4];
+    for i in 0..v.len() {
+        assert_eq!(v.iter().nth_back(i).unwrap(), &v[v.len() - 1 - i]);
+    }
+    assert_eq!(v.iter().nth_back(v.len()), None);
+}
+
+#[test]
+fn test_iterator_rev_nth_back() {
+    let v: &[_] = &[0, 1, 2, 3, 4];
+    for i in 0..v.len() {
+        assert_eq!(v.iter().rev().nth_back(i).unwrap(), &v[i]);
+    }
+    assert_eq!(v.iter().rev().nth_back(v.len()), None);
+}
+
+#[test]
+fn test_iterator_rev_nth() {
+    let v: &[_] = &[0, 1, 2, 3, 4];
+    for i in 0..v.len() {
+        assert_eq!(v.iter().rev().nth(i).unwrap(), &v[v.len() - 1 - i]);
+    }
+    assert_eq!(v.iter().rev().nth(v.len()), None);
 }
 
 #[test]
@@ -1232,6 +1251,23 @@ fn test_rev() {
     it.next();
     assert!(it.rev().cloned().collect::<Vec<isize>>() ==
             vec![16, 14, 12, 10, 8, 6]);
+}
+
+#[test]
+fn test_copied() {
+    let xs = [2, 4, 6, 8];
+
+    let mut it = xs.iter().copied();
+    assert_eq!(it.len(), 4);
+    assert_eq!(it.next(), Some(2));
+    assert_eq!(it.len(), 3);
+    assert_eq!(it.next(), Some(4));
+    assert_eq!(it.len(), 2);
+    assert_eq!(it.next_back(), Some(8));
+    assert_eq!(it.len(), 1);
+    assert_eq!(it.next_back(), Some(6));
+    assert_eq!(it.len(), 0);
+    assert_eq!(it.next_back(), None);
 }
 
 #[test]

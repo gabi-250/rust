@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Type-checking for the rust-intrinsic and platform-intrinsic
 //! intrinsics that the compiler exposes.
 
@@ -76,12 +66,24 @@ fn equate_intrinsic_type<'a, 'tcx>(
     require_same_types(tcx, &cause, tcx.mk_fn_ptr(tcx.fn_sig(def_id)), fty);
 }
 
+/// Returns whether the given intrinsic is unsafe to call or not.
+pub fn intrisic_operation_unsafety(intrinsic: &str) -> hir::Unsafety {
+    match intrinsic {
+        "size_of" | "min_align_of" | "needs_drop" |
+        "overflowing_add" | "overflowing_sub" | "overflowing_mul" |
+        "rotate_left" | "rotate_right" |
+        "ctpop" | "ctlz" | "cttz" | "bswap" | "bitreverse"
+        => hir::Unsafety::Normal,
+        _ => hir::Unsafety::Unsafe,
+    }
+}
+
 /// Remember to add all intrinsics here, in librustc_codegen_llvm/intrinsic.rs,
 /// and in libcore/intrinsics.rs
 pub fn check_intrinsic_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                                       it: &hir::ForeignItem) {
     let param = |n| tcx.mk_ty_param(n, Symbol::intern(&format!("P{}", n)).as_interned_str());
-    let name = it.name.as_str();
+    let name = it.ident.as_str();
 
     let mk_va_list_ty = || {
         tcx.lang_items().va_list().map(|did| {
@@ -127,10 +129,7 @@ pub fn check_intrinsic_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
     } else if &name[..] == "abort" || &name[..] == "unreachable" {
         (0, Vec::new(), tcx.types.never, hir::Unsafety::Unsafe)
     } else {
-        let unsafety = match &name[..] {
-            "size_of" | "min_align_of" | "needs_drop" => hir::Unsafety::Normal,
-            _ => hir::Unsafety::Unsafe,
-        };
+        let unsafety = intrisic_operation_unsafety(&name[..]);
         let (n_tps, inputs, output) = match &name[..] {
             "breakpoint" => (0, Vec::new(), tcx.mk_unit()),
             "size_of" |
@@ -143,6 +142,7 @@ pub fn check_intrinsic_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                  ], tcx.types.usize)
             }
             "rustc_peek" => (1, vec![param(0)], param(0)),
+            "panic_if_uninhabited" => (1, Vec::new(), tcx.mk_unit()),
             "init" => (1, Vec::new(), param(0)),
             "uninit" => (1, Vec::new(), param(0)),
             "forget" => (1, vec![param(0)], tcx.mk_unit()),
@@ -403,7 +403,7 @@ pub fn check_platform_intrinsic_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
 
     let def_id = tcx.hir().local_def_id(it.id);
     let i_n_tps = tcx.generics_of(def_id).own_counts().types;
-    let name = it.name.as_str();
+    let name = it.ident.as_str();
 
     let (n_tps, inputs, output) = match &*name {
         "simd_eq" | "simd_ne" | "simd_lt" | "simd_le" | "simd_gt" | "simd_ge" => {
@@ -435,7 +435,8 @@ pub fn check_platform_intrinsic_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
         "simd_insert" => (2, vec![param(0), tcx.types.u32, param(1)], param(0)),
         "simd_extract" => (2, vec![param(0), tcx.types.u32], param(1)),
         "simd_cast" => (2, vec![param(0)], param(1)),
-        "simd_select" => (2, vec![param(0), param(1), param(1)], param(1)),
+        "simd_select" |
+        "simd_select_bitmask" => (2, vec![param(0), param(1), param(1)], param(1)),
         "simd_reduce_all" | "simd_reduce_any" => (1, vec![param(0)], tcx.types.bool),
         "simd_reduce_add_ordered" | "simd_reduce_mul_ordered"
             => (2, vec![param(0), param(1)], param(1)),

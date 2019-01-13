@@ -1,13 +1,3 @@
-// Copyright 2012-2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use super::_match::{MatchCheckCtxt, Matrix, expand_pattern, is_useful};
 use super::_match::Usefulness::*;
 use super::_match::WitnessPreference::*;
@@ -230,7 +220,11 @@ impl<'a, 'tcx> MatchVisitor<'a, 'tcx> {
                 let scrutinee_is_uninhabited = if self.tcx.features().exhaustive_patterns {
                     self.tcx.is_ty_uninhabited_from(module, pat_ty)
                 } else {
-                    self.conservative_is_uninhabited(pat_ty)
+                    match pat_ty.sty {
+                        ty::Never => true,
+                        ty::Adt(def, _) => def.variants.is_empty(),
+                        _ => false
+                    }
                 };
                 if !scrutinee_is_uninhabited {
                     // We know the type is inhabited, so this must be wrong
@@ -256,15 +250,6 @@ impl<'a, 'tcx> MatchVisitor<'a, 'tcx> {
             let scrut_ty = self.tables.node_id_to_type(scrut.hir_id);
             check_exhaustive(cx, scrut_ty, scrut.span, &matrix);
         })
-    }
-
-    fn conservative_is_uninhabited(&self, scrutinee_ty: Ty<'tcx>) -> bool {
-        // "rustc-1.0-style" uncontentious uninhabitableness check
-        match scrutinee_ty.sty {
-            ty::Never => true,
-            ty::Adt(def, _) => def.variants.is_empty(),
-            _ => false
-        }
     }
 
     fn check_irrefutable(&self, pat: &'tcx Pat, origin: &str) {
@@ -321,7 +306,7 @@ fn check_for_bindings_named_same_as_variants(cx: &MatchVisitor, pat: &Pat) {
                 let pat_ty = cx.tables.pat_ty(p);
                 if let ty::Adt(edef, _) = pat_ty.sty {
                     if edef.is_enum() && edef.variants.iter().any(|variant| {
-                        variant.name == ident.name && variant.ctor_kind == CtorKind::Const
+                        variant.ident == ident && variant.ctor_kind == CtorKind::Const
                     }) {
                         let ty_path = cx.tcx.item_path_str(edef.did);
                         let mut err = struct_span_warn!(cx.tcx.sess, p.span, E0170,
@@ -365,7 +350,6 @@ fn check_arms<'a, 'tcx>(cx: &mut MatchCheckCtxt<'a, 'tcx>,
 {
     let mut seen = Matrix::empty();
     let mut catchall = None;
-    let mut printed_if_let_err = false;
     for (arm_index, &(ref pats, guard)) in arms.iter().enumerate() {
         for &(pat, hir_pat) in pats {
             let v = smallvec![pat];
@@ -374,27 +358,12 @@ fn check_arms<'a, 'tcx>(cx: &mut MatchCheckCtxt<'a, 'tcx>,
                 NotUseful => {
                     match source {
                         hir::MatchSource::IfLetDesugar { .. } => {
-                            if cx.tcx.features().irrefutable_let_patterns {
-                                cx.tcx.lint_node(
-                                    lint::builtin::IRREFUTABLE_LET_PATTERNS,
-                                    hir_pat.id, pat.span,
-                                    "irrefutable if-let pattern");
-                            } else {
-                                if printed_if_let_err {
-                                    // we already printed an irrefutable if-let pattern error.
-                                    // We don't want two, that's just confusing.
-                                } else {
-                                    // find the first arm pattern so we can use its span
-                                    let &(ref first_arm_pats, _) = &arms[0];
-                                    let first_pat = &first_arm_pats[0];
-                                    let span = first_pat.0.span;
-                                    struct_span_err!(cx.tcx.sess, span, E0162,
-                                                    "irrefutable if-let pattern")
-                                        .span_label(span, "irrefutable pattern")
-                                        .emit();
-                                    printed_if_let_err = true;
-                                }
-                            }
+                            cx.tcx.lint_node(
+                                lint::builtin::IRREFUTABLE_LET_PATTERNS,
+                                hir_pat.id,
+                                pat.span,
+                                "irrefutable if-let pattern",
+                            );
                         }
 
                         hir::MatchSource::WhileLetDesugar => {
@@ -409,21 +378,12 @@ fn check_arms<'a, 'tcx>(cx: &mut MatchCheckCtxt<'a, 'tcx>,
                                 },
                                 // The arm with the wildcard pattern.
                                 1 => {
-                                    if cx.tcx.features().irrefutable_let_patterns {
-                                        cx.tcx.lint_node(
-                                            lint::builtin::IRREFUTABLE_LET_PATTERNS,
-                                            hir_pat.id, pat.span,
-                                            "irrefutable while-let pattern");
-                                    } else {
-                                        // find the first arm pattern so we can use its span
-                                        let &(ref first_arm_pats, _) = &arms[0];
-                                        let first_pat = &first_arm_pats[0];
-                                        let span = first_pat.0.span;
-                                        struct_span_err!(cx.tcx.sess, span, E0165,
-                                                         "irrefutable while-let pattern")
-                                            .span_label(span, "irrefutable pattern")
-                                            .emit();
-                                    }
+                                    cx.tcx.lint_node(
+                                        lint::builtin::IRREFUTABLE_LET_PATTERNS,
+                                        hir_pat.id,
+                                        pat.span,
+                                        "irrefutable while-let pattern",
+                                    );
                                 },
                                 _ => bug!(),
                             }
@@ -560,7 +520,7 @@ fn check_legality_of_move_bindings(cx: &MatchVisitor,
                     match bm {
                         ty::BindByValue(..) => {
                             let pat_ty = cx.tables.node_id_to_type(p.hir_id);
-                            if pat_ty.moves_by_default(cx.tcx, cx.param_env, pat.span) {
+                            if !pat_ty.is_copy_modulo_regions(cx.tcx, cx.param_env, pat.span) {
                                 check_move(p, sub.as_ref().map(|p| &**p), span_vec);
                             }
                         }

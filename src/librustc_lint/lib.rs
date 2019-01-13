@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! # Lints in the Rust compiler
 //!
 //! This currently only contains the definitions and implementations
@@ -29,6 +19,8 @@
 #![feature(nll)]
 #![feature(quote)]
 #![feature(rustc_diagnostic_macros)]
+
+#![recursion_limit="256"]
 
 #[macro_use]
 extern crate syntax;
@@ -53,6 +45,9 @@ use rustc::lint::builtin::{
     ABSOLUTE_PATHS_NOT_STARTING_WITH_CRATE,
     ELIDED_LIFETIMES_IN_PATHS,
     EXPLICIT_OUTLIVES_REQUIREMENTS,
+    INTRA_DOC_LINK_RESOLUTION_FAILURE,
+    MISSING_DOC_CODE_EXAMPLES,
+    PRIVATE_DOC_TESTS,
     parser::QUESTION_MARK_MACRO_SEP
 };
 use rustc::session;
@@ -120,6 +115,7 @@ pub fn register_builtins(store: &mut lint::LintStore, sess: Option<&Session>) {
                        UnusedDocComment,
                        BadRepr,
                        EllipsisInclusiveRangePatterns,
+                       NonCamelCaseTypes,
                        );
 
     add_early_builtin_with_new!(sess,
@@ -135,7 +131,6 @@ pub fn register_builtins(store: &mut lint::LintStore, sess: Option<&Session>) {
         UnusedAttributes: UnusedAttributes,
         PathStatements: PathStatements,
         UnusedResults: UnusedResults,
-        NonCamelCaseTypes: NonCamelCaseTypes,
         NonSnakeCase: NonSnakeCase,
         NonUpperCaseGlobals: NonUpperCaseGlobals,
         NonShorthandFieldPatterns: NonShorthandFieldPatterns,
@@ -203,6 +198,12 @@ pub fn register_builtins(store: &mut lint::LintStore, sess: Option<&Session>) {
                     // breakage is seen if we try to encourage this lint.
                     // MACRO_USE_EXTERN_CRATE,
                     );
+
+    add_lint_group!(sess,
+                    "rustdoc",
+                    INTRA_DOC_LINK_RESOLUTION_FAILURE,
+                    MISSING_DOC_CODE_EXAMPLES,
+                    PRIVATE_DOC_TESTS);
 
     // Guidelines for creating a future incompatibility lint:
     //
@@ -294,6 +295,11 @@ pub fn register_builtins(store: &mut lint::LintStore, sess: Option<&Session>) {
             edition: None,
         },
         FutureIncompatibleInfo {
+            id: LintId::of(ORDER_DEPENDENT_TRAIT_OBJECTS),
+            reference: "issue #56484 <https://github.com/rust-lang/rust/issues/56484>",
+            edition: None,
+        },
+        FutureIncompatibleInfo {
             id: LintId::of(TYVAR_BEHIND_RAW_POINTER),
             reference: "issue #46906 <https://github.com/rust-lang/rust/issues/46906>",
             edition: Some(Edition::Edition2018),
@@ -376,7 +382,7 @@ pub fn register_builtins(store: &mut lint::LintStore, sess: Option<&Session>) {
     store.register_removed("resolve_trait_on_defaulted_unit",
         "converted into hard error, see https://github.com/rust-lang/rust/issues/48950");
     store.register_removed("private_no_mangle_fns",
-        "no longer an warning, #[no_mangle] functions always exported");
+        "no longer a warning, #[no_mangle] functions always exported");
     store.register_removed("private_no_mangle_statics",
-        "no longer an warning, #[no_mangle] statics always exported");
+        "no longer a warning, #[no_mangle] statics always exported");
 }
