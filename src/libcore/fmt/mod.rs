@@ -1,13 +1,3 @@
-// Copyright 2013-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Utilities for formatting and printing strings.
 
 #![stable(feature = "rust1", since = "1.0.0")]
@@ -609,10 +599,15 @@ pub trait Debug {
 /// println!("The origin is: {}", origin);
 /// ```
 #[rustc_on_unimplemented(
+    on(
+        _Self="std::path::Path",
+        label="`{Self}` cannot be formatted with the default formatter; call `.display()` on it",
+        note="call `.display()` or `.to_string_lossy()` to safely print paths, \
+              as they may contain non-Unicode data"
+    ),
     message="`{Self}` doesn't implement `{Display}`",
     label="`{Self}` cannot be formatted with the default formatter",
-    note="in format strings you may be able to use `{{:?}}` \
-          (or {{:#?}} for pretty-print) instead",
+    note="in format strings you may be able to use `{{:?}}` (or {{:#?}} for pretty-print) instead",
 )]
 #[doc(alias = "{}")]
 #[stable(feature = "rust1", since = "1.0.0")]

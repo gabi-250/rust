@@ -1,7 +1,6 @@
 #![stable(feature = "", since = "1.30.0")]
 
 #![allow(non_camel_case_types)]
-#![cfg_attr(stage0, allow(dead_code))]
 
 //! Utilities related to FFI bindings.
 
@@ -123,7 +122,6 @@ struct VaListImpl {
                      all supported platforms",
            issue = "27745")]
 #[repr(transparent)]
-#[cfg(not(stage0))]
 pub struct VaList<'a>(&'a mut VaListImpl);
 
 // The VaArgSafe trait needs to be used in public interfaces, however, the trait
@@ -173,7 +171,6 @@ impl<T> sealed_trait::VaArgSafe for *mut T {}
            issue = "27745")]
 impl<T> sealed_trait::VaArgSafe for *const T {}
 
-#[cfg(not(stage0))]
 impl<'a> VaList<'a> {
     /// Advance to the next arg.
     #[unstable(feature = "c_variadic",
@@ -189,7 +186,7 @@ impl<'a> VaList<'a> {
                reason = "the `c_variadic` feature has not been properly tested on \
                          all supported platforms",
                issue = "27745")]
-    pub unsafe fn copy<F, R>(&mut self, f: F) -> R
+    pub unsafe fn copy<F, R>(&self, f: F) -> R
             where F: for<'copy> FnOnce(VaList<'copy>) -> R {
         #[cfg(any(all(not(target_arch = "aarch64"), not(target_arch = "powerpc"),
                       not(target_arch = "x86_64")),
@@ -208,7 +205,6 @@ impl<'a> VaList<'a> {
     }
 }
 
-#[cfg(not(stage0))]
 extern "rust-intrinsic" {
     /// Destroy the arglist `ap` after initialization with `va_start` or
     /// `va_copy`.

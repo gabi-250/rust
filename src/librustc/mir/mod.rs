@@ -1,13 +1,3 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! MIR datatypes and passes. See the [rustc guide] for more info.
 //!
 //! [rustc guide]: https://rust-lang.github.io/rustc-guide/mir/index.html
@@ -37,9 +27,12 @@ use syntax::ast::{self, Name};
 use syntax::symbol::InternedString;
 use syntax_pos::{Span, DUMMY_SP};
 use ty::fold::{TypeFoldable, TypeFolder, TypeVisitor};
-use ty::subst::{CanonicalUserSubsts, Subst, Substs};
-use ty::{self, AdtDef, CanonicalTy, ClosureSubsts, GeneratorSubsts, Region, Ty, TyCtxt};
+use ty::subst::{Subst, Substs};
 use ty::layout::VariantIdx;
+use ty::{
+    self, AdtDef, CanonicalUserTypeAnnotations, ClosureSubsts, GeneratorSubsts, Region, Ty, TyCtxt,
+    UserTypeAnnotationIndex, UserTypeAnnotation,
+};
 use util::ppaux;
 
 pub use mir::interpret::AssertMessage;
@@ -131,6 +124,9 @@ pub struct Mir<'tcx> {
     /// variables and temporaries.
     pub local_decls: LocalDecls<'tcx>,
 
+    /// User type annotations
+    pub user_type_annotations: CanonicalUserTypeAnnotations<'tcx>,
+
     /// Number of arguments this function takes.
     ///
     /// Starting at local 1, `arg_count` locals will be provided by the caller
@@ -149,6 +145,14 @@ pub struct Mir<'tcx> {
     /// This is used for the "rust-call" ABI.
     pub spread_arg: Option<Local>,
 
+    /// Mark this MIR of a const context other than const functions as having converted a `&&` or
+    /// `||` expression into `&` or `|` respectively. This is problematic because if we ever stop
+    /// this conversion from happening and use short circuiting, we will cause the following code
+    /// to change the value of `x`: `let mut x = 42; false && { x = 55; true };`
+    ///
+    /// List of places where control flow was destroyed. Used for error reporting.
+    pub control_flow_destroyed: Vec<(Span, String)>,
+
     /// A span representing this MIR, for error reporting
     pub span: Span,
 
@@ -163,10 +167,12 @@ impl<'tcx> Mir<'tcx> {
         source_scope_local_data: ClearCrossCrate<IndexVec<SourceScope, SourceScopeLocalData>>,
         promoted: IndexVec<Promoted, Mir<'tcx>>,
         yield_ty: Option<Ty<'tcx>>,
-        local_decls: IndexVec<Local, LocalDecl<'tcx>>,
+        local_decls: LocalDecls<'tcx>,
+        user_type_annotations: CanonicalUserTypeAnnotations<'tcx>,
         arg_count: usize,
         upvar_decls: Vec<UpvarDecl>,
         span: Span,
+        control_flow_destroyed: Vec<(Span, String)>,
     ) -> Self {
         // We need `arg_count` locals, and one for the return place
         assert!(
@@ -186,11 +192,13 @@ impl<'tcx> Mir<'tcx> {
             generator_drop: None,
             generator_layout: None,
             local_decls,
+            user_type_annotations,
             arg_count,
             upvar_decls,
             spread_arg: None,
             span,
             cache: cache::Cache::new(),
+            control_flow_destroyed,
         }
     }
 
@@ -418,9 +426,11 @@ impl_stable_hash_for!(struct Mir<'tcx> {
     generator_drop,
     generator_layout,
     local_decls,
+    user_type_annotations,
     arg_count,
     upvar_decls,
     spread_arg,
+    control_flow_destroyed,
     span,
     cache
 });
@@ -1656,7 +1666,7 @@ impl<'tcx> TerminatorKind<'tcx> {
                             ),
                             ty: switch_ty,
                         };
-                        fmt_const_val(&mut s, &c).unwrap();
+                        fmt_const_val(&mut s, c).unwrap();
                         s.into()
                     }).chain(iter::once("otherwise".into()))
                     .collect()
@@ -1748,6 +1758,9 @@ pub enum StatementKind<'tcx> {
     /// (e.g., inspecting constants and discriminant values), and the
     /// kind of pattern it comes from. This is in order to adapt potential
     /// error messages to these specific patterns.
+    ///
+    /// Note that this also is emitted for regular `let` bindings to ensure that locals that are
+    /// never accessed still get some sanity checks for e.g. `let x: ! = ..;`
     FakeRead(FakeReadCause, Place<'tcx>),
 
     /// Write the discriminant for a variant to the enum Place.
@@ -1774,23 +1787,7 @@ pub enum StatementKind<'tcx> {
     /// by miri and only generated when "-Z mir-emit-retag" is passed.
     /// See <https://internals.rust-lang.org/t/stacked-borrows-an-aliasing-model-for-rust/8153/>
     /// for more details.
-    Retag {
-        /// `fn_entry` indicates whether this is the initial retag that happens in the
-        /// function prolog.
-        fn_entry: bool,
-        /// `two_phase` indicates whether this is just the reservation action of
-        /// a two-phase borrow.
-        two_phase: bool,
-        /// The place to retag
-        place: Place<'tcx>,
-    },
-
-    /// Escape the given reference to a raw pointer, so that it can be accessed
-    /// without precise provenance tracking. These statements are currently only interpreted
-    /// by miri and only generated when "-Z mir-emit-retag" is passed.
-    /// See <https://internals.rust-lang.org/t/stacked-borrows-an-aliasing-model-for-rust/8153/>
-    /// for more details.
-    EscapeToRaw(Operand<'tcx>),
+    Retag(RetagKind, Place<'tcx>),
 
     /// Encodes a user's type ascription. These need to be preserved
     /// intact so that NLL can respect them. For example:
@@ -1808,6 +1805,19 @@ pub enum StatementKind<'tcx> {
 
     /// No-op. Useful for deleting instructions without affecting statement indices.
     Nop,
+}
+
+/// `RetagKind` describes what kind of retag is to be performed.
+#[derive(Copy, Clone, RustcEncodable, RustcDecodable, Debug, PartialEq, Eq)]
+pub enum RetagKind {
+    /// The initial retag when entering a function
+    FnEntry,
+    /// Retag preparing for a two-phase borrow
+    TwoPhase,
+    /// Retagging raw pointers
+    Raw,
+    /// A "normal" retag
+    Default,
 }
 
 /// The `FakeReadCause` describes the type of pattern why a `FakeRead` statement exists.
@@ -1845,13 +1855,16 @@ impl<'tcx> Debug for Statement<'tcx> {
         match self.kind {
             Assign(ref place, ref rv) => write!(fmt, "{:?} = {:?}", place, rv),
             FakeRead(ref cause, ref place) => write!(fmt, "FakeRead({:?}, {:?})", cause, place),
-            Retag { fn_entry, two_phase, ref place } =>
-                write!(fmt, "Retag({}{}{:?})",
-                    if fn_entry { "[fn entry] " } else { "" },
-                    if two_phase { "[2phase] " } else { "" },
+            Retag(ref kind, ref place) =>
+                write!(fmt, "Retag({}{:?})",
+                    match kind {
+                        RetagKind::FnEntry => "[fn entry] ",
+                        RetagKind::TwoPhase => "[2phase] ",
+                        RetagKind::Raw => "[raw] ",
+                        RetagKind::Default => "",
+                    },
                     place,
                 ),
-            EscapeToRaw(ref place) => write!(fmt, "EscapeToRaw({:?})", place),
             StorageLive(ref place) => write!(fmt, "StorageLive({:?})", place),
             StorageDead(ref place) => write!(fmt, "StorageDead({:?})", place),
             SetDiscriminant {
@@ -2036,7 +2049,7 @@ impl<'tcx> Debug for Place<'tcx> {
             Promoted(ref promoted) => write!(fmt, "({:?}: {:?})", promoted.0, promoted.1),
             Projection(ref data) => match data.elem {
                 ProjectionElem::Downcast(ref adt_def, index) => {
-                    write!(fmt, "({:?} as {})", data.base, adt_def.variants[index].name)
+                    write!(fmt, "({:?} as {})", data.base, adt_def.variants[index].ident)
                 }
                 ProjectionElem::Deref => write!(fmt, "(*{:?})", data.base),
                 ProjectionElem::Field(field, ty) => {
@@ -2141,7 +2154,9 @@ impl<'tcx> Operand<'tcx> {
             span,
             ty,
             user_ty: None,
-            literal: ty::Const::zero_sized(tcx, ty),
+            literal: tcx.intern_lazy_const(
+                ty::LazyConst::Evaluated(ty::Const::zero_sized(ty)),
+            ),
         })
     }
 
@@ -2228,7 +2243,7 @@ pub enum AggregateKind<'tcx> {
         &'tcx AdtDef,
         VariantIdx,
         &'tcx Substs<'tcx>,
-        Option<UserTypeAnnotation<'tcx>>,
+        Option<UserTypeAnnotationIndex>,
         Option<usize>,
     ),
 
@@ -2442,36 +2457,9 @@ pub struct Constant<'tcx> {
     /// indicate that `Vec<_>` was explicitly specified.
     ///
     /// Needed for NLL to impose user-given type constraints.
-    pub user_ty: Option<UserTypeAnnotation<'tcx>>,
+    pub user_ty: Option<UserTypeAnnotationIndex>,
 
-    pub literal: &'tcx ty::Const<'tcx>,
-}
-
-/// A user-given type annotation attached to a constant.  These arise
-/// from constants that are named via paths, like `Foo::<A>::new` and
-/// so forth.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
-pub enum UserTypeAnnotation<'tcx> {
-    Ty(CanonicalTy<'tcx>),
-
-    /// The canonical type is the result of `type_of(def_id)` with the
-    /// given substitutions applied.
-    TypeOf(DefId, CanonicalUserSubsts<'tcx>),
-}
-
-EnumTypeFoldableImpl! {
-    impl<'tcx> TypeFoldable<'tcx> for UserTypeAnnotation<'tcx> {
-        (UserTypeAnnotation::Ty)(ty),
-        (UserTypeAnnotation::TypeOf)(def, substs),
-    }
-}
-
-EnumLiftImpl! {
-    impl<'a, 'tcx> Lift<'tcx> for UserTypeAnnotation<'a> {
-        type Lifted = UserTypeAnnotation<'tcx>;
-        (UserTypeAnnotation::Ty)(ty),
-        (UserTypeAnnotation::TypeOf)(def, substs),
-    }
+    pub literal: &'tcx ty::LazyConst<'tcx>,
 }
 
 /// A collection of projections into user types.
@@ -2533,6 +2521,48 @@ impl<'tcx> UserTypeProjections<'tcx> {
     pub fn projections(&self) -> impl Iterator<Item=&UserTypeProjection<'tcx>> {
         self.contents.iter().map(|&(ref user_type, _span)| user_type)
     }
+
+    pub fn push_projection(
+        mut self,
+        user_ty: &UserTypeProjection<'tcx>,
+        span: Span,
+    ) -> Self {
+        self.contents.push((user_ty.clone(), span));
+        self
+    }
+
+    fn map_projections(
+        mut self,
+        mut f: impl FnMut(UserTypeProjection<'tcx>) -> UserTypeProjection<'tcx>
+    ) -> Self {
+        self.contents = self.contents.drain(..).map(|(proj, span)| (f(proj), span)).collect();
+        self
+    }
+
+    pub fn index(self) -> Self {
+        self.map_projections(|pat_ty_proj| pat_ty_proj.index())
+    }
+
+    pub fn subslice(self, from: u32, to: u32) -> Self {
+        self.map_projections(|pat_ty_proj| pat_ty_proj.subslice(from, to))
+    }
+
+    pub fn deref(self) -> Self {
+        self.map_projections(|pat_ty_proj| pat_ty_proj.deref())
+    }
+
+    pub fn leaf(self, field: Field) -> Self {
+        self.map_projections(|pat_ty_proj| pat_ty_proj.leaf(field))
+    }
+
+    pub fn variant(
+        self,
+        adt_def: &'tcx AdtDef,
+        variant_index: VariantIdx,
+        field: Field,
+    ) -> Self {
+        self.map_projections(|pat_ty_proj| pat_ty_proj.variant(adt_def, variant_index, field))
+    }
 }
 
 /// Encodes the effect of a user-supplied type annotation on the
@@ -2552,11 +2582,44 @@ impl<'tcx> UserTypeProjections<'tcx> {
 ///   determined by finding the type of the `.0` field from `T`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
 pub struct UserTypeProjection<'tcx> {
-    pub base: UserTypeAnnotation<'tcx>,
+    pub base: UserTypeAnnotationIndex,
     pub projs: Vec<ProjectionElem<'tcx, (), ()>>,
 }
 
 impl<'tcx> Copy for ProjectionKind<'tcx> { }
+
+impl<'tcx> UserTypeProjection<'tcx> {
+    pub(crate) fn index(mut self) -> Self {
+        self.projs.push(ProjectionElem::Index(()));
+        self
+    }
+
+    pub(crate) fn subslice(mut self, from: u32, to: u32) -> Self {
+        self.projs.push(ProjectionElem::Subslice { from, to });
+        self
+    }
+
+    pub(crate) fn deref(mut self) -> Self {
+        self.projs.push(ProjectionElem::Deref);
+        self
+    }
+
+    pub(crate) fn leaf(mut self, field: Field) -> Self {
+        self.projs.push(ProjectionElem::Field(field, ()));
+        self
+    }
+
+    pub(crate) fn variant(
+        mut self,
+        adt_def: &'tcx AdtDef,
+        variant_index: VariantIdx,
+        field: Field,
+    ) -> Self {
+        self.projs.push(ProjectionElem::Downcast(adt_def, variant_index));
+        self.projs.push(ProjectionElem::Field(field, ()));
+        self
+    }
+}
 
 CloneTypeFoldableAndLiftImpls! { ProjectionKind<'tcx>, }
 
@@ -2594,12 +2657,20 @@ newtype_index! {
 impl<'tcx> Debug for Constant<'tcx> {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
         write!(fmt, "const ")?;
-        fmt_const_val(fmt, self.literal)
+        fmt_lazy_const_val(fmt, self.literal)
     }
 }
 
 /// Write a `ConstValue` in a way closer to the original source code than the `Debug` output.
-pub fn fmt_const_val(f: &mut impl Write, const_val: &ty::Const<'_>) -> fmt::Result {
+pub fn fmt_lazy_const_val(f: &mut impl Write, const_val: &ty::LazyConst<'_>) -> fmt::Result {
+    match *const_val {
+        ty::LazyConst::Unevaluated(..) => write!(f, "{:?}", const_val),
+        ty::LazyConst::Evaluated(c) => fmt_const_val(f, c),
+    }
+}
+
+/// Write a `ConstValue` in a way closer to the original source code than the `Debug` output.
+pub fn fmt_const_val(f: &mut impl Write, const_val: ty::Const<'_>) -> fmt::Result {
     use ty::TyKind::*;
     let value = const_val.val;
     let ty = const_val.ty;
@@ -2637,7 +2708,7 @@ pub fn fmt_const_val(f: &mut impl Write, const_val: &ty::Const<'_>) -> fmt::Resu
                 if let Ref(_, &ty::TyS { sty: Str, .. }, _) = ty.sty {
                     return ty::tls::with(|tcx| {
                         let alloc = tcx.alloc_map.lock().get(ptr.alloc_id);
-                        if let Some(interpret::AllocType::Memory(alloc)) = alloc {
+                        if let Some(interpret::AllocKind::Memory(alloc)) = alloc {
                             assert_eq!(len as usize as u128, len);
                             let slice =
                                 &alloc.bytes[(ptr.offset.bytes() as usize)..][..(len as usize)];
@@ -2778,9 +2849,6 @@ impl Location {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
 pub enum UnsafetyViolationKind {
     General,
-    /// Right now function calls to `const unsafe fn` are only permitted behind a feature gate
-    /// Also, even `const unsafe fn` need an `unsafe` block to do the allowed operations.
-    GatedConstFnCall,
     /// Permitted in const fn and regular fns
     GeneralAndConstFn,
     ExternStatic(ast::NodeId),
@@ -2965,9 +3033,11 @@ CloneTypeFoldableAndLiftImpls! {
     SourceInfo,
     UpvarDecl,
     FakeReadCause,
+    RetagKind,
     SourceScope,
     SourceScopeData,
     SourceScopeLocalData,
+    UserTypeAnnotationIndex,
 }
 
 BraceStructTypeFoldableImpl! {
@@ -2981,9 +3051,11 @@ BraceStructTypeFoldableImpl! {
         generator_drop,
         generator_layout,
         local_decls,
+        user_type_annotations,
         arg_count,
         upvar_decls,
         spread_arg,
+        control_flow_destroyed,
         span,
         cache,
     }
@@ -3031,8 +3103,7 @@ EnumTypeFoldableImpl! {
         (StatementKind::StorageLive)(a),
         (StatementKind::StorageDead)(a),
         (StatementKind::InlineAsm) { asm, outputs, inputs },
-        (StatementKind::Retag) { fn_entry, two_phase, place },
-        (StatementKind::EscapeToRaw)(place),
+        (StatementKind::Retag)(kind, place),
         (StatementKind::AscribeUserType)(a, v, b),
         (StatementKind::Nop),
     }

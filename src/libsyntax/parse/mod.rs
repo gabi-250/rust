@@ -1,13 +1,3 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! The main parser interface
 
 use rustc_data_structures::sync::{Lrc, Lock};
@@ -15,7 +5,7 @@ use ast::{self, CrateConfig, NodeId};
 use early_buffered_lints::{BufferedEarlyLint, BufferedEarlyLintId};
 use source_map::{SourceMap, FilePathMapping};
 use syntax_pos::{Span, SourceFile, FileName, MultiSpan};
-use errors::{Handler, ColorConfig, Diagnostic, DiagnosticBuilder};
+use errors::{FatalError, Level, Handler, ColorConfig, Diagnostic, DiagnosticBuilder};
 use feature_gate::UnstableFeatures;
 use parse::parser::Parser;
 use ptr::P;
@@ -81,6 +71,7 @@ impl ParseSess {
         }
     }
 
+    #[inline]
     pub fn source_map(&self) -> &SourceMap {
         &self.source_map
     }
@@ -192,6 +183,14 @@ pub fn new_parser_from_file<'a>(sess: &'a ParseSess, path: &Path) -> Parser<'a> 
     source_file_to_parser(sess, file_to_source_file(sess, path, None))
 }
 
+/// Create a new parser, returning buffered diagnostics if the file doesn't
+/// exist or from lexing the initial token stream.
+pub fn maybe_new_parser_from_file<'a>(sess: &'a ParseSess, path: &Path)
+    -> Result<Parser<'a>, Vec<Diagnostic>> {
+    let file = try_file_to_source_file(sess, path, None).map_err(|db| vec![db])?;
+    maybe_source_file_to_parser(sess, file)
+}
+
 /// Given a session, a crate config, a path, and a span, add
 /// the file at the given path to the source_map, and return a parser.
 /// On an error, use the given span as the source of the problem.
@@ -237,17 +236,30 @@ pub fn new_parser_from_tts(sess: &ParseSess, tts: Vec<TokenTree>) -> Parser {
 // base abstractions
 
 /// Given a session and a path and an optional span (for error reporting),
+/// add the path to the session's source_map and return the new source_file or
+/// error when a file can't be read.
+fn try_file_to_source_file(sess: &ParseSess, path: &Path, spanopt: Option<Span>)
+                   -> Result<Lrc<SourceFile>, Diagnostic> {
+    sess.source_map().load_file(path)
+    .map_err(|e| {
+        let msg = format!("couldn't read {}: {}", path.display(), e);
+        let mut diag = Diagnostic::new(Level::Fatal, &msg);
+        if let Some(sp) = spanopt {
+            diag.set_span(sp);
+        }
+        diag
+    })
+}
+
+/// Given a session and a path and an optional span (for error reporting),
 /// add the path to the session's source_map and return the new source_file.
 fn file_to_source_file(sess: &ParseSess, path: &Path, spanopt: Option<Span>)
                    -> Lrc<SourceFile> {
-    match sess.source_map().load_file(path) {
+    match try_file_to_source_file(sess, path, spanopt) {
         Ok(source_file) => source_file,
-        Err(e) => {
-            let msg = format!("couldn't read {}: {}", path.display(), e);
-            match spanopt {
-                Some(sp) => sess.span_diagnostic.span_fatal(sp, &msg).raise(),
-                None => sess.span_diagnostic.fatal(&msg).raise()
-            }
+        Err(d) => {
+            DiagnosticBuilder::new_diagnostic(&sess.span_diagnostic, d).emit();
+            FatalError.raise();
         }
     }
 }
@@ -842,13 +854,13 @@ mod tests {
         with_globals(|| {
             let tts = string_to_stream("fn a (b : i32) { b; }".to_string());
 
-            let expected = TokenStream::concat(vec![
+            let expected = TokenStream::new(vec![
                 TokenTree::Token(sp(0, 2), token::Ident(Ident::from_str("fn"), false)).into(),
                 TokenTree::Token(sp(3, 4), token::Ident(Ident::from_str("a"), false)).into(),
                 TokenTree::Delimited(
                     DelimSpan::from_pair(sp(5, 6), sp(13, 14)),
                     token::DelimToken::Paren,
-                    TokenStream::concat(vec![
+                    TokenStream::new(vec![
                         TokenTree::Token(sp(6, 7),
                                          token::Ident(Ident::from_str("b"), false)).into(),
                         TokenTree::Token(sp(8, 9), token::Colon).into(),
@@ -859,7 +871,7 @@ mod tests {
                 TokenTree::Delimited(
                     DelimSpan::from_pair(sp(15, 16), sp(20, 21)),
                     token::DelimToken::Brace,
-                    TokenStream::concat(vec![
+                    TokenStream::new(vec![
                         TokenTree::Token(sp(17, 18),
                                          token::Ident(Ident::from_str("b"), false)).into(),
                         TokenTree::Token(sp(18, 19), token::Semi).into(),

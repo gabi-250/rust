@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 #![allow(non_snake_case)]
 
 register_long_diagnostics! {
@@ -335,11 +325,13 @@ match Some(42) {
 "##,
 
 E0162: r##"
+#### Note: this error code is no longer emitted by the compiler.
+
 An if-let pattern attempts to match the pattern, and enters the body if the
 match was successful. If the match is irrefutable (when it cannot fail to
 match), use a regular `let`-binding instead. For instance:
 
-```compile_fail,E0162
+```compile_pass
 struct Irrefutable(i32);
 let irr = Irrefutable(0);
 
@@ -362,11 +354,13 @@ println!("{}", x);
 "##,
 
 E0165: r##"
+#### Note: this error code is no longer emitted by the compiler.
+
 A while-let pattern attempts to match the pattern, and enters the body if the
 match was successful. If the match is irrefutable (when it cannot fail to
 match), use a regular `let`-binding inside a `loop` instead. For instance:
 
-```compile_fail,E0165
+```compile_pass,no_run
 struct Irrefutable(i32);
 let irr = Irrefutable(0);
 
@@ -2344,7 +2338,7 @@ local variable that already exists, and hence no temporary is created.
 Temporaries are not always dropped at the end of the enclosing
 statement. In simple cases where the `&` expression is immediately
 stored into a variable, the compiler will automatically extend
-the lifetime of the temporary until the end of the enclosinb
+the lifetime of the temporary until the end of the enclosing
 block. Therefore, an alternative way to fix the original
 program is to write `let tmp = &foo()` and not `let tmp = foo()`:
 

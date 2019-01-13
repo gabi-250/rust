@@ -1,13 +1,3 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use rustc_target::spec::abi::{self, Abi};
 use ast::{AngleBracketedArgs, ParenthesisedArgs, AttrStyle, BareFnTy};
 use ast::{GenericBound, TraitBoundModifier};
@@ -42,6 +32,7 @@ use ast::{UseTree, UseTreeKind};
 use ast::{BinOpKind, UnOp};
 use ast::{RangeEnd, RangeSyntax};
 use {ast, attr};
+use ext::base::DummyResult;
 use source_map::{self, SourceMap, Spanned, respan};
 use syntax_pos::{self, Span, MultiSpan, BytePos, FileName};
 use errors::{self, Applicability, DiagnosticBuilder, DiagnosticId};
@@ -807,6 +798,18 @@ impl<'a> Parser<'a> {
         let mut err = self.struct_span_err(self.span,
                                            &format!("expected identifier, found {}",
                                                     self.this_token_descr()));
+        if let token::Ident(ident, false) = &self.token {
+            if ident.is_reserved() && !ident.is_path_segment_keyword() &&
+                ident.name != keywords::Underscore.name()
+            {
+                err.span_suggestion_with_applicability(
+                    self.span,
+                    "you can escape reserved keywords to use them as identifiers",
+                    format!("r#{}", ident),
+                    Applicability::MaybeIncorrect,
+                );
+            }
+        }
         if let Some(token_descr) = self.token_descr() {
             err.span_label(self.span, format!("expected identifier, found {}", token_descr));
         } else {
@@ -1407,7 +1410,7 @@ impl<'a> Parser<'a> {
                 // definition...
 
                 // We don't allow argument names to be left off in edition 2018.
-                p.parse_arg_general(p.span.rust_2018())
+                p.parse_arg_general(p.span.rust_2018(), true)
             })?;
             generics.where_clause = self.parse_where_clause()?;
 
@@ -1820,7 +1823,7 @@ impl<'a> Parser<'a> {
 
     /// This version of parse arg doesn't necessarily require
     /// identifier names.
-    fn parse_arg_general(&mut self, require_name: bool) -> PResult<'a, Arg> {
+    fn parse_arg_general(&mut self, require_name: bool, is_trait_item: bool) -> PResult<'a, Arg> {
         maybe_whole!(self, NtArg, |x| x);
 
         if let Ok(Some(_)) = self.parse_self_arg() {
@@ -1852,6 +1855,17 @@ impl<'a> Parser<'a> {
                         String::from("<identifier>: <type>"),
                         Applicability::HasPlaceholders,
                     );
+                } else if require_name && is_trait_item {
+                    if let PatKind::Ident(_, ident, _) = pat.node {
+                        err.span_suggestion_with_applicability(
+                            pat.span,
+                            "explicitly ignore parameter",
+                            format!("_: {}", ident),
+                            Applicability::MachineApplicable,
+                        );
+                    }
+
+                    err.note("anonymous parameters are removed in the 2018 edition (see RFC 1685)");
                 }
 
                 return Err(err);
@@ -1864,7 +1878,8 @@ impl<'a> Parser<'a> {
             let parser_snapshot_before_ty = self.clone();
             self.eat_incorrect_doc_comment("a method argument's type");
             let mut ty = self.parse_ty();
-            if ty.is_ok() && self.token == token::Colon {
+            if ty.is_ok() && self.token != token::Comma &&
+               self.token != token::CloseDelim(token::Paren) {
                 // This wasn't actually a type, but a pattern looking like a type,
                 // so we are going to rollback and re-parse for recovery.
                 ty = self.unexpected();
@@ -1917,7 +1932,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a single function argument
     crate fn parse_arg(&mut self) -> PResult<'a, Arg> {
-        self.parse_arg_general(true)
+        self.parse_arg_general(true, false)
     }
 
     /// Parse an argument in a lambda header e.g., |arg, arg|
@@ -2869,6 +2884,7 @@ impl<'a> Parser<'a> {
                 let mut err = self.fatal(&format!("unknown macro variable `{}`", name));
                 err.span_label(self.span, "unknown macro variable");
                 err.emit();
+                self.bump();
                 return
             }
             token::Interpolated(ref nt) => {
@@ -2928,7 +2944,7 @@ impl<'a> Parser<'a> {
                 _ => result.push(self.parse_token_tree().into()),
             }
         }
-        TokenStream::concat(result)
+        TokenStream::new(result)
     }
 
     /// Parse a prefix-unary-operator expr
@@ -3051,6 +3067,7 @@ impl<'a> Parser<'a> {
     ///
     /// This parses an expression accounting for associativity and precedence of the operators in
     /// the expression.
+    #[inline]
     fn parse_assoc_expr(&mut self,
                             already_parsed_attrs: Option<ThinVec<Attribute>>)
                             -> PResult<'a, P<Expr>> {
@@ -3643,8 +3660,6 @@ impl<'a> Parser<'a> {
         maybe_whole!(self, NtArm, |x| x);
 
         let attrs = self.parse_outer_attributes()?;
-        // Allow a '|' before the pats (RFC 1925)
-        self.eat(&token::BinOp(token::Or));
         let pats = self.parse_pats()?;
         let guard = if self.eat_keyword(keywords::If) {
             Some(Guard::If(self.parse_expr()?))
@@ -3711,6 +3726,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse an expression
+    #[inline]
     pub fn parse_expr(&mut self) -> PResult<'a, P<Expr>> {
         self.parse_expr_res(Restrictions::empty(), None)
     }
@@ -3730,6 +3746,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse an expression, subject to the given restrictions
+    #[inline]
     fn parse_expr_res(&mut self, r: Restrictions,
                           already_parsed_attrs: Option<ThinVec<Attribute>>)
                           -> PResult<'a, P<Expr>> {
@@ -3749,6 +3766,9 @@ impl<'a> Parser<'a> {
 
     /// Parse patterns, separated by '|' s
     fn parse_pats(&mut self) -> PResult<'a, Vec<P<Pat>>> {
+        // Allow a '|' before the pats (RFC 1925 + RFC 2530)
+        self.eat(&token::BinOp(token::Or));
+
         let mut pats = Vec::new();
         loop {
             pats.push(self.parse_top_level_pat()?);
@@ -4624,7 +4644,7 @@ impl<'a> Parser<'a> {
                         self.unexpected()?;
                         unreachable!()
                     };
-                    TokenStream::concat(vec![
+                    TokenStream::new(vec![
                         args.into(),
                         TokenTree::Token(token_lo.to(self.prev_span), token::FatArrow).into(),
                         body.into(),
@@ -4962,16 +4982,16 @@ impl<'a> Parser<'a> {
     /// Precondition: already parsed the '{'.
     fn parse_block_tail(&mut self, lo: Span, s: BlockCheckMode) -> PResult<'a, P<Block>> {
         let mut stmts = vec![];
-        let mut recovered = false;
-
         while !self.eat(&token::CloseDelim(token::Brace)) {
             let stmt = match self.parse_full_stmt(false) {
                 Err(mut err) => {
                     err.emit();
                     self.recover_stmt_(SemiColonMode::Ignore, BlockMode::Ignore);
-                    self.eat(&token::CloseDelim(token::Brace));
-                    recovered = true;
-                    break;
+                    Some(Stmt {
+                        id: ast::DUMMY_NODE_ID,
+                        node: StmtKind::Expr(DummyResult::raw_expr(self.span, true)),
+                        span: self.span,
+                    })
                 }
                 Ok(stmt) => stmt,
             };
@@ -4989,7 +5009,6 @@ impl<'a> Parser<'a> {
             id: ast::DUMMY_NODE_ID,
             rules: s,
             span: lo.to(self.prev_span),
-            recovered,
         }))
     }
 
@@ -5473,7 +5492,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                     } else {
-                        match p.parse_arg_general(named_args) {
+                        match p.parse_arg_general(named_args, false) {
                             Ok(arg) => Ok(Some(arg)),
                             Err(mut e) => {
                                 e.emit();

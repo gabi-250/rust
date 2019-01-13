@@ -1,18 +1,9 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 // Type resolution: the phase that finds all the types in the AST with
 // unresolved type variables and replaces "ty_var" types with their
 // substitutions.
 
 use check::FnCtxt;
+use errors::DiagnosticBuilder;
 use rustc::hir;
 use rustc::hir::def_id::{DefId, DefIndex};
 use rustc::hir::intravisit::{self, NestedVisitorMap, Visitor};
@@ -30,6 +21,15 @@ use syntax_pos::Span;
 ///////////////////////////////////////////////////////////////////////////
 // Entry point
 
+// During type inference, partially inferred types are
+// represented using Type variables (ty::Infer). These don't appear in
+// the final TypeckTables since all of the types should have been
+// inferred once typeck_tables_of is done.
+// When type inference is running however, having to update the typeck
+// tables every time a new type is inferred would be unreasonably slow,
+// so instead all of the replacement happens at the end in
+// resolve_type_vars_in_body, which creates a new TypeTables which
+// doesn't contain any inference types.
 impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
     pub fn resolve_type_vars_in_body(&self, body: &'gcx hir::Body) -> &'gcx ty::TypeckTables<'gcx> {
         let item_id = self.tcx.hir().body_owner(body.id());
@@ -44,7 +44,8 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
             wbcx.visit_node_id(arg.pat.span, arg.hir_id);
         }
         wbcx.visit_body(body);
-        wbcx.visit_upvar_borrow_map();
+        wbcx.visit_upvar_capture_map();
+        wbcx.visit_upvar_list_map();
         wbcx.visit_closures();
         wbcx.visit_liberated_fn_sigs();
         wbcx.visit_fru_field_types();
@@ -300,7 +301,7 @@ impl<'cx, 'gcx, 'tcx> Visitor<'gcx> for WritebackCx<'cx, 'gcx, 'tcx> {
 }
 
 impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
-    fn visit_upvar_borrow_map(&mut self) {
+    fn visit_upvar_capture_map(&mut self) {
         for (upvar_id, upvar_capture) in self.fcx.tables.borrow().upvar_capture_map.iter() {
             let new_upvar_capture = match *upvar_capture {
                 ty::UpvarCapture::ByValue => ty::UpvarCapture::ByValue,
@@ -320,6 +321,21 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
             self.tables
                 .upvar_capture_map
                 .insert(*upvar_id, new_upvar_capture);
+        }
+    }
+
+    /// Runs through the function context's upvar list map and adds the same to
+    /// the TypeckTables. upvarlist is a hashmap of the list of upvars referred
+    /// to in a closure..
+    fn visit_upvar_list_map(&mut self) {
+        for (closure_def_id, upvar_list) in self.fcx.tables.borrow().upvar_list.iter() {
+            debug!(
+                "UpvarIDs captured by closure {:?} are: {:?}",
+                closure_def_id, upvar_list
+            );
+            self.tables
+                .upvar_list
+                .insert(*closure_def_id, upvar_list.to_vec());
         }
     }
 
@@ -367,7 +383,8 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
         debug_assert_eq!(fcx_tables.local_id_root, self.tables.local_id_root);
         let common_local_id_root = fcx_tables.local_id_root.unwrap();
 
-        for (&local_id, c_ty) in fcx_tables.user_provided_tys().iter() {
+        let mut errors_buffer = Vec::new();
+        for (&local_id, c_ty) in fcx_tables.user_provided_types().iter() {
             let hir_id = hir::HirId {
                 owner: common_local_id_root.index,
                 local_id,
@@ -384,8 +401,30 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
             };
 
             self.tables
-                .user_provided_tys_mut()
+                .user_provided_types_mut()
                 .insert(hir_id, c_ty.clone());
+
+            if let ty::UserTypeAnnotation::TypeOf(_, user_substs) = c_ty.value {
+                if self.rustc_dump_user_substs {
+                    // This is a unit-testing mechanism.
+                    let node_id = self.tcx().hir().hir_to_node_id(hir_id);
+                    let span = self.tcx().hir().span(node_id);
+                    // We need to buffer the errors in order to guarantee a consistent
+                    // order when emitting them.
+                    let err = self.tcx().sess.struct_span_err(
+                        span,
+                        &format!("user substs: {:?}", user_substs)
+                    );
+                    err.buffer(&mut errors_buffer);
+                }
+            }
+        }
+
+        if !errors_buffer.is_empty() {
+            errors_buffer.sort_by_key(|diag| diag.span.primary_span());
+            for diag in errors_buffer.drain(..) {
+                DiagnosticBuilder::new_diagnostic(self.tcx().sess.diagnostic(), diag).emit();
+            }
         }
     }
 
@@ -582,22 +621,6 @@ impl<'cx, 'gcx, 'tcx> WritebackCx<'cx, 'gcx, 'tcx> {
             debug!("write_substs_to_tcx({:?}, {:?})", hir_id, substs);
             assert!(!substs.needs_infer() && !substs.has_placeholders());
             self.tables.node_substs_mut().insert(hir_id, substs);
-        }
-
-        // Copy over any user-substs
-        if let Some(user_substs) = self.fcx.tables.borrow().user_substs(hir_id) {
-            let user_substs = self.tcx().lift_to_global(&user_substs).unwrap();
-            self.tables.user_substs_mut().insert(hir_id, user_substs);
-
-            // Unit-testing mechanism:
-            if self.rustc_dump_user_substs {
-                let node_id = self.tcx().hir().hir_to_node_id(hir_id);
-                let span = self.tcx().hir().span(node_id);
-                self.tcx().sess.span_err(
-                    span,
-                    &format!("user substs: {:?}", user_substs),
-                );
-            }
         }
     }
 

@@ -1,17 +1,7 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use session::{self, DataTypeKind};
 use ty::{self, Ty, TyCtxt, TypeFoldable, ReprOptions};
 
-use syntax::ast::{self, IntTy, UintTy};
+use syntax::ast::{self, Ident, IntTy, UintTy};
 use syntax::attr;
 use syntax_pos::DUMMY_SP;
 
@@ -191,7 +181,14 @@ fn layout_raw<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
 
         ty::tls::enter_context(&icx, |_| {
             let cx = LayoutCx { tcx, param_env };
-            cx.layout_raw_uncached(ty)
+            let layout = cx.layout_raw_uncached(ty);
+            // Type-level uninhabitedness should always imply ABI uninhabitedness.
+            if let Ok(layout) = layout {
+                if ty.conservative_is_privately_uninhabited(tcx) {
+                    assert!(layout.abi.is_uninhabited());
+                }
+            }
+            layout
         })
     })
 }
@@ -205,12 +202,11 @@ pub fn provide(providers: &mut ty::query::Providers<'_>) {
 
 pub struct LayoutCx<'tcx, C> {
     pub tcx: C,
-    pub param_env: ty::ParamEnv<'tcx>
+    pub param_env: ty::ParamEnv<'tcx>,
 }
 
 impl<'a, 'tcx> LayoutCx<'tcx, TyCtxt<'a, 'tcx, 'tcx>> {
-    fn layout_raw_uncached(&self, ty: Ty<'tcx>)
-                           -> Result<&'tcx LayoutDetails, LayoutError<'tcx>> {
+    fn layout_raw_uncached(&self, ty: Ty<'tcx>) -> Result<&'tcx LayoutDetails, LayoutError<'tcx>> {
         let tcx = self.tcx;
         let param_env = self.param_env;
         let dl = self.data_layout();
@@ -551,13 +547,19 @@ impl<'a, 'tcx> LayoutCx<'tcx, TyCtxt<'a, 'tcx, 'tcx>> {
                 let size = element.size.checked_mul(count, dl)
                     .ok_or(LayoutError::SizeOverflow(ty))?;
 
+                let abi = if count != 0 && ty.conservative_is_privately_uninhabited(tcx) {
+                    Abi::Uninhabited
+                } else {
+                    Abi::Aggregate { sized: true }
+                };
+
                 tcx.intern_layout(LayoutDetails {
                     variants: Variants::Single { index: VariantIdx::new(0) },
                     fields: FieldPlacement::Array {
                         stride: element.size,
                         count
                     },
-                    abi: Abi::Aggregate { sized: true },
+                    abi,
                     align: element.align,
                     size
                 })
@@ -1226,7 +1228,7 @@ impl<'a, 'tcx> LayoutCx<'tcx, TyCtxt<'a, 'tcx, 'tcx>> {
         let adt_kind = adt_def.adt_kind();
         let adt_packed = adt_def.repr.packed();
 
-        let build_variant_info = |n: Option<ast::Name>,
+        let build_variant_info = |n: Option<Ident>,
                                   flds: &[ast::Name],
                                   layout: TyLayout<'tcx>| {
             let mut min_size = Size::ZERO;
@@ -1271,7 +1273,7 @@ impl<'a, 'tcx> LayoutCx<'tcx, TyCtxt<'a, 'tcx, 'tcx>> {
         match layout.variants {
             Variants::Single { index } => {
                 debug!("print-type-size `{:#?}` variant {}",
-                       layout, adt_def.variants[index].name);
+                       layout, adt_def.variants[index].ident);
                 if !adt_def.variants.is_empty() {
                     let variant_def = &adt_def.variants[index];
                     let fields: Vec<_> =
@@ -1279,7 +1281,7 @@ impl<'a, 'tcx> LayoutCx<'tcx, TyCtxt<'a, 'tcx, 'tcx>> {
                     record(adt_kind.into(),
                            adt_packed,
                            None,
-                           vec![build_variant_info(Some(variant_def.name),
+                           vec![build_variant_info(Some(variant_def.ident),
                                                    &fields,
                                                    layout)]);
                 } else {
@@ -1297,7 +1299,7 @@ impl<'a, 'tcx> LayoutCx<'tcx, TyCtxt<'a, 'tcx, 'tcx>> {
                     adt_def.variants.iter_enumerated().map(|(i, variant_def)| {
                         let fields: Vec<_> =
                             variant_def.fields.iter().map(|f| f.ident.name).collect();
-                        build_variant_info(Some(variant_def.name),
+                        build_variant_info(Some(variant_def.ident),
                                            &fields,
                                            layout.for_variant(self, i))
                     })
@@ -1840,7 +1842,11 @@ impl<'a, 'tcx> LayoutCx<'tcx, TyCtxt<'a, 'tcx, 'tcx>> {
                 return Ok(None);
             }
         }
-        if let FieldPlacement::Array { .. } = layout.fields {
+        if let FieldPlacement::Array { count: original_64_bit_count, .. } = layout.fields {
+            // rust-lang/rust#57038: avoid ICE within FieldPlacement::count when count too big
+            if original_64_bit_count > usize::max_value() as u64 {
+                return Err(LayoutError::SizeOverflow(layout.ty));
+            }
             if layout.fields.count() > 0 {
                 return self.find_niche(layout.field(self, 0)?);
             } else {

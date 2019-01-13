@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! This module contains `TyKind` and its major components.
 
 use hir;
@@ -123,7 +113,7 @@ pub enum TyKind<'tcx> {
     Str,
 
     /// An array with the given length. Written as `[T; n]`.
-    Array(Ty<'tcx>, &'tcx ty::Const<'tcx>),
+    Array(Ty<'tcx>, &'tcx ty::LazyConst<'tcx>),
 
     /// The pointee of an array slice.  Written as `[T]`.
     Slice(Ty<'tcx>),
@@ -579,11 +569,40 @@ impl<'a, 'gcx, 'tcx> Binder<ExistentialPredicate<'tcx>> {
 impl<'tcx> serialize::UseSpecializedDecodable for &'tcx List<ExistentialPredicate<'tcx>> {}
 
 impl<'tcx> List<ExistentialPredicate<'tcx>> {
-    pub fn principal(&self) -> ExistentialTraitRef<'tcx> {
+    /// Returns the "principal def id" of this set of existential predicates.
+    ///
+    /// A Rust trait object type consists (in addition to a lifetime bound)
+    /// of a set of trait bounds, which are separated into any number
+    /// of auto-trait bounds, and at most 1 non-auto-trait bound. The
+    /// non-auto-trait bound is called the "principal" of the trait
+    /// object.
+    ///
+    /// Only the principal can have methods or type parameters (because
+    /// auto traits can have neither of them). This is important, because
+    /// it means the auto traits can be treated as an unordered set (methods
+    /// would force an order for the vtable, while relating traits with
+    /// type parameters without knowing the order to relate them in is
+    /// a rather non-trivial task).
+    ///
+    /// For example, in the trait object `dyn fmt::Debug + Sync`, the
+    /// principal bound is `Some(fmt::Debug)`, while the auto-trait bounds
+    /// are the set `{Sync}`.
+    ///
+    /// It is also possible to have a "trivial" trait object that
+    /// consists only of auto traits, with no principal - for example,
+    /// `dyn Send + Sync`. In that case, the set of auto-trait bounds
+    /// is `{Send, Sync}`, while there is no principal. These trait objects
+    /// have a "trivial" vtable consisting of just the size, alignment,
+    /// and destructor.
+    pub fn principal(&self) -> Option<ExistentialTraitRef<'tcx>> {
         match self[0] {
-            ExistentialPredicate::Trait(tr) => tr,
-            other => bug!("first predicate is {:?}", other),
+            ExistentialPredicate::Trait(tr) => Some(tr),
+            _ => None
         }
+    }
+
+    pub fn principal_def_id(&self) -> Option<DefId> {
+        self.principal().map(|d| d.def_id)
     }
 
     #[inline]
@@ -609,8 +628,12 @@ impl<'tcx> List<ExistentialPredicate<'tcx>> {
 }
 
 impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
-    pub fn principal(&self) -> PolyExistentialTraitRef<'tcx> {
-        Binder::bind(self.skip_binder().principal())
+    pub fn principal(&self) -> Option<ty::Binder<ExistentialTraitRef<'tcx>>> {
+        self.skip_binder().principal().map(Binder::bind)
+    }
+
+    pub fn principal_def_id(&self) -> Option<DefId> {
+        self.skip_binder().principal_def_id()
     }
 
     #[inline]
@@ -1406,6 +1429,13 @@ impl RegionKind {
         }
     }
 
+    pub fn is_placeholder(&self) -> bool {
+        match *self {
+            ty::RePlaceholder(..) => true,
+            _ => false,
+        }
+    }
+
     pub fn bound_at_or_above_binder(&self, index: DebruijnIndex) -> bool {
         match *self {
             ty::ReLateBound(debruijn, _) => debruijn >= index,
@@ -1539,6 +1569,51 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
     pub fn is_never(&self) -> bool {
         match self.sty {
             Never => true,
+            _ => false,
+        }
+    }
+
+    /// Checks whether a type is definitely uninhabited. This is
+    /// conservative: for some types that are uninhabited we return `false`,
+    /// but we only return `true` for types that are definitely uninhabited.
+    /// `ty.conservative_is_privately_uninhabited` implies that any value of type `ty`
+    /// will be `Abi::Uninhabited`. (Note that uninhabited types may have nonzero
+    /// size, to account for partial initialisation. See #49298 for details.)
+    pub fn conservative_is_privately_uninhabited(&self, tcx: TyCtxt<'a, 'gcx, 'tcx>) -> bool {
+        // FIXME(varkor): we can make this less conversative by substituting concrete
+        // type arguments.
+        match self.sty {
+            ty::Never => true,
+            ty::Adt(def, _) if def.is_union() => {
+                // For now, `union`s are never considered uninhabited.
+                false
+            }
+            ty::Adt(def, _) => {
+                // Any ADT is uninhabited if either:
+                // (a) It has no variants (i.e. an empty `enum`);
+                // (b) Each of its variants (a single one in the case of a `struct`) has at least
+                //     one uninhabited field.
+                def.variants.iter().all(|var| {
+                    var.fields.iter().any(|field| {
+                        tcx.type_of(field.did).conservative_is_privately_uninhabited(tcx)
+                    })
+                })
+            }
+            ty::Tuple(tys) => tys.iter().any(|ty| ty.conservative_is_privately_uninhabited(tcx)),
+            ty::Array(ty, len) => {
+                match len.assert_usize(tcx) {
+                    // If the array is definitely non-empty, it's uninhabited if
+                    // the type of its elements is uninhabited.
+                    Some(n) if n != 0 => ty.conservative_is_privately_uninhabited(tcx),
+                    _ => false
+                }
+            }
+            ty::Ref(..) => {
+                // References to uninitialised memory is valid for any type, including
+                // uninhabited types, in unsafe code, so we treat all references as
+                // inhabited.
+                false
+            }
             _ => false,
         }
     }
@@ -1875,7 +1950,9 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
             }
             Dynamic(ref obj, region) => {
                 out.push(region);
-                out.extend(obj.principal().skip_binder().substs.regions());
+                if let Some(principal) = obj.principal() {
+                    out.extend(principal.skip_binder().substs.regions());
+                }
             }
             Adt(_, substs) | Opaque(_, substs) => {
                 out.extend(substs.regions())
@@ -1978,6 +2055,32 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
     }
 }
 
+#[derive(Copy, Clone, Debug, Hash, RustcEncodable, RustcDecodable, Eq, PartialEq, Ord, PartialOrd)]
+/// Used in the HIR by using `Unevaluated` everywhere and later normalizing to `Evaluated` if the
+/// code is monomorphic enough for that.
+pub enum LazyConst<'tcx> {
+    Unevaluated(DefId, &'tcx Substs<'tcx>),
+    Evaluated(Const<'tcx>),
+}
+
+impl<'tcx> LazyConst<'tcx> {
+    pub fn map_evaluated<R>(self, f: impl FnOnce(Const<'tcx>) -> Option<R>) -> Option<R> {
+        match self {
+            LazyConst::Evaluated(c) => f(c),
+            LazyConst::Unevaluated(..) => None,
+        }
+    }
+
+    pub fn assert_usize(self, tcx: TyCtxt<'_, '_, '_>) -> Option<u64> {
+        self.map_evaluated(|c| c.assert_usize(tcx))
+    }
+
+    #[inline]
+    pub fn unwrap_usize(&self, tcx: TyCtxt<'_, '_, '_>) -> u64 {
+        self.assert_usize(tcx).expect("expected `LazyConst` to contain a usize")
+    }
+}
+
 /// Typed constant value.
 #[derive(Copy, Clone, Debug, Hash, RustcEncodable, RustcDecodable, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Const<'tcx> {
@@ -1987,37 +2090,15 @@ pub struct Const<'tcx> {
 }
 
 impl<'tcx> Const<'tcx> {
-    pub fn unevaluated(
-        tcx: TyCtxt<'_, '_, 'tcx>,
-        def_id: DefId,
-        substs: &'tcx Substs<'tcx>,
-        ty: Ty<'tcx>,
-    ) -> &'tcx Self {
-        tcx.mk_const(Const {
-            val: ConstValue::Unevaluated(def_id, substs),
-            ty,
-        })
-    }
-
-    #[inline]
-    pub fn from_const_value(
-        tcx: TyCtxt<'_, '_, 'tcx>,
-        val: ConstValue<'tcx>,
-        ty: Ty<'tcx>,
-    ) -> &'tcx Self {
-        tcx.mk_const(Const {
-            val,
-            ty,
-        })
-    }
-
     #[inline]
     pub fn from_scalar(
-        tcx: TyCtxt<'_, '_, 'tcx>,
         val: Scalar,
         ty: Ty<'tcx>,
-    ) -> &'tcx Self {
-        Self::from_const_value(tcx, ConstValue::Scalar(val), ty)
+    ) -> Self {
+        Self {
+            val: ConstValue::Scalar(val),
+            ty,
+        }
     }
 
     #[inline]
@@ -2025,7 +2106,7 @@ impl<'tcx> Const<'tcx> {
         tcx: TyCtxt<'_, '_, 'tcx>,
         bits: u128,
         ty: ParamEnvAnd<'tcx, Ty<'tcx>>,
-    ) -> &'tcx Self {
+    ) -> Self {
         let ty = tcx.lift_to_global(&ty).unwrap();
         let size = tcx.layout_of(ty).unwrap_or_else(|e| {
             panic!("could not compute layout for {:?}: {:?}", ty, e)
@@ -2033,21 +2114,21 @@ impl<'tcx> Const<'tcx> {
         let shift = 128 - size.bits();
         let truncated = (bits << shift) >> shift;
         assert_eq!(truncated, bits, "from_bits called with untruncated value");
-        Self::from_scalar(tcx, Scalar::Bits { bits, size: size.bytes() as u8 }, ty.value)
+        Self::from_scalar(Scalar::Bits { bits, size: size.bytes() as u8 }, ty.value)
     }
 
     #[inline]
-    pub fn zero_sized(tcx: TyCtxt<'_, '_, 'tcx>, ty: Ty<'tcx>) -> &'tcx Self {
-        Self::from_scalar(tcx, Scalar::Bits { bits: 0, size: 0 }, ty)
+    pub fn zero_sized(ty: Ty<'tcx>) -> Self {
+        Self::from_scalar(Scalar::Bits { bits: 0, size: 0 }, ty)
     }
 
     #[inline]
-    pub fn from_bool(tcx: TyCtxt<'_, '_, 'tcx>, v: bool) -> &'tcx Self {
+    pub fn from_bool(tcx: TyCtxt<'_, '_, 'tcx>, v: bool) -> Self {
         Self::from_bits(tcx, v as u128, ParamEnv::empty().and(tcx.types.bool))
     }
 
     #[inline]
-    pub fn from_usize(tcx: TyCtxt<'_, '_, 'tcx>, n: u64) -> &'tcx Self {
+    pub fn from_usize(tcx: TyCtxt<'_, '_, 'tcx>, n: u64) -> Self {
         Self::from_bits(tcx, n as u128, ParamEnv::empty().and(tcx.types.usize))
     }
 
@@ -2113,4 +2194,4 @@ impl<'tcx> Const<'tcx> {
     }
 }
 
-impl<'tcx> serialize::UseSpecializedDecodable for &'tcx Const<'tcx> {}
+impl<'tcx> serialize::UseSpecializedDecodable for &'tcx LazyConst<'tcx> {}

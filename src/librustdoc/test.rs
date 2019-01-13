@@ -1,14 +1,4 @@
-// Copyright 2013-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use errors;
+use errors::{self, FatalError};
 use errors::emitter::ColorConfig;
 use rustc_data_structures::sync::Lrc;
 use rustc_lint;
@@ -21,7 +11,7 @@ use rustc::hir;
 use rustc::hir::intravisit;
 use rustc::session::{self, CompileIncomplete, config};
 use rustc::session::config::{OutputType, OutputTypes, Externs, CodegenOptions};
-use rustc::session::search_paths::{SearchPaths, PathKind};
+use rustc::session::search_paths::{SearchPath, PathKind};
 use syntax::ast;
 use syntax::source_map::SourceMap;
 use syntax::edition::Edition;
@@ -94,9 +84,14 @@ pub fn run(mut options: Options) -> isize {
         target_features::add_configuration(&mut cfg, &sess, &*codegen_backend);
         sess.parse_sess.config = cfg;
 
-        let krate = panictry!(driver::phase_1_parse_input(&driver::CompileController::basic(),
-                                                        &sess,
-                                                        &input));
+        let krate =
+            match driver::phase_1_parse_input(&driver::CompileController::basic(), &sess, &input) {
+                Ok(krate) => krate,
+                Err(mut e) => {
+                    e.emit();
+                    FatalError.raise();
+                }
+            };
         let driver::ExpansionResult { defs, mut hir_forest, .. } = {
             phase_2_configure_and_expand(
                 &sess,
@@ -187,7 +182,7 @@ fn scrape_test_config(krate: &::rustc::hir::Crate) -> TestOptions {
 }
 
 fn run_test(test: &str, cratename: &str, filename: &FileName, line: usize,
-            cfgs: Vec<String>, libs: SearchPaths,
+            cfgs: Vec<String>, libs: Vec<SearchPath>,
             cg: CodegenOptions, externs: Externs,
             should_panic: bool, no_run: bool, as_test_harness: bool,
             compile_fail: bool, mut error_codes: Vec<String>, opts: &TestOptions,
@@ -283,7 +278,7 @@ fn run_test(test: &str, cratename: &str, filename: &FileName, line: usize,
         target_features::add_configuration(&mut cfg, &sess, &*codegen_backend);
         sess.parse_sess.config = cfg;
 
-        let out = Some(outdir.lock().unwrap().path().to_path_buf());
+        let out = Some(outdir.lock().unwrap().path().join("rust_out"));
 
         if no_run {
             control.after_analysis.stop = Compilation::Stop;
@@ -296,8 +291,8 @@ fn run_test(test: &str, cratename: &str, filename: &FileName, line: usize,
                 &cstore,
                 &None,
                 &input,
-                &out,
                 &None,
+                &out,
                 None,
                 &control
             )
@@ -395,10 +390,11 @@ pub fn make_test(s: &str,
     // Now push any outer attributes from the example, assuming they
     // are intended to be crate attributes.
     prog.push_str(&crate_attrs);
+    prog.push_str(&crates);
 
     // Uses libsyntax to parse the doctest and find if there's a main fn and the extern
     // crate already is included.
-    let (already_has_main, already_has_extern_crate) = crate::syntax::with_globals(|| {
+    let (already_has_main, already_has_extern_crate, found_macro) = crate::syntax::with_globals(|| {
         use crate::syntax::{ast, parse::{self, ParseSess}, source_map::FilePathMapping};
         use crate::syntax_pos::FileName;
         use errors::emitter::EmitterWriter;
@@ -416,6 +412,7 @@ pub fn make_test(s: &str,
 
         let mut found_main = false;
         let mut found_extern_crate = cratename.is_none();
+        let mut found_macro = false;
 
         let mut parser = match parse::maybe_new_parser_from_source_str(&sess, filename, source) {
             Ok(p) => p,
@@ -424,7 +421,7 @@ pub fn make_test(s: &str,
                     err.cancel();
                 }
 
-                return (found_main, found_extern_crate);
+                return (found_main, found_extern_crate, found_macro);
             }
         };
 
@@ -452,6 +449,12 @@ pub fn make_test(s: &str,
                         }
                     }
 
+                    if !found_macro {
+                        if let ast::ItemKind::Mac(..) = item.node {
+                            found_macro = true;
+                        }
+                    }
+
                     if found_main && found_extern_crate {
                         break;
                     }
@@ -464,8 +467,27 @@ pub fn make_test(s: &str,
             }
         }
 
-        (found_main, found_extern_crate)
+        (found_main, found_extern_crate, found_macro)
     });
+
+    // If a doctest's `fn main` is being masked by a wrapper macro, the parsing loop above won't
+    // see it. In that case, run the old text-based scan to see if they at least have a main
+    // function written inside a macro invocation. See
+    // https://github.com/rust-lang/rust/issues/56898
+    let already_has_main = if found_macro && !already_has_main {
+        s.lines()
+            .map(|line| {
+                let comment = line.find("//");
+                if let Some(comment_begins) = comment {
+                    &line[0..comment_begins]
+                } else {
+                    line
+                }
+            })
+            .any(|code| code.contains("fn main"))
+    } else {
+        already_has_main
+    };
 
     // Don't inject `extern crate std` because it's already injected by the
     // compiler.
@@ -488,36 +510,77 @@ pub fn make_test(s: &str,
         prog.push_str("\n}");
     }
 
+    debug!("final doctest:\n{}", prog);
+
     (prog, line_offset)
 }
 
 // FIXME(aburka): use a real parser to deal with multiline attributes
 fn partition_source(s: &str) -> (String, String, String) {
-    let mut after_header = false;
+    #[derive(Copy, Clone, PartialEq)]
+    enum PartitionState {
+        Attrs,
+        Crates,
+        Other,
+    }
+    let mut state = PartitionState::Attrs;
     let mut before = String::new();
     let mut crates = String::new();
     let mut after = String::new();
 
     for line in s.lines() {
         let trimline = line.trim();
-        let header = trimline.chars().all(|c| c.is_whitespace()) ||
-            trimline.starts_with("#![") ||
-            trimline.starts_with("#[macro_use] extern crate") ||
-            trimline.starts_with("extern crate");
-        if !header || after_header {
-            after_header = true;
-            after.push_str(line);
-            after.push_str("\n");
-        } else {
-            if trimline.starts_with("#[macro_use] extern crate")
-                || trimline.starts_with("extern crate") {
+
+        // FIXME(misdreavus): if a doc comment is placed on an extern crate statement, it will be
+        // shunted into "everything else"
+        match state {
+            PartitionState::Attrs => {
+                state = if trimline.starts_with("#![") ||
+                    trimline.chars().all(|c| c.is_whitespace()) ||
+                    (trimline.starts_with("//") && !trimline.starts_with("///"))
+                {
+                    PartitionState::Attrs
+                } else if trimline.starts_with("extern crate") ||
+                    trimline.starts_with("#[macro_use] extern crate")
+                {
+                    PartitionState::Crates
+                } else {
+                    PartitionState::Other
+                };
+            }
+            PartitionState::Crates => {
+                state = if trimline.starts_with("extern crate") ||
+                    trimline.starts_with("#[macro_use] extern crate") ||
+                    trimline.chars().all(|c| c.is_whitespace()) ||
+                    (trimline.starts_with("//") && !trimline.starts_with("///"))
+                {
+                    PartitionState::Crates
+                } else {
+                    PartitionState::Other
+                };
+            }
+            PartitionState::Other => {}
+        }
+
+        match state {
+            PartitionState::Attrs => {
+                before.push_str(line);
+                before.push_str("\n");
+            }
+            PartitionState::Crates => {
                 crates.push_str(line);
                 crates.push_str("\n");
             }
-            before.push_str(line);
-            before.push_str("\n");
+            PartitionState::Other => {
+                after.push_str(line);
+                after.push_str("\n");
+            }
         }
     }
+
+    debug!("before:\n{}", before);
+    debug!("crates:\n{}", crates);
+    debug!("after:\n{}", after);
 
     (before, after, crates)
 }
@@ -556,7 +619,7 @@ pub struct Collector {
     names: Vec<String>,
 
     cfgs: Vec<String>,
-    libs: SearchPaths,
+    libs: Vec<SearchPath>,
     cg: CodegenOptions,
     externs: Externs,
     use_headers: bool,
@@ -571,7 +634,7 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn new(cratename: String, cfgs: Vec<String>, libs: SearchPaths, cg: CodegenOptions,
+    pub fn new(cratename: String, cfgs: Vec<String>, libs: Vec<SearchPath>, cg: CodegenOptions,
                externs: Externs, use_headers: bool, opts: TestOptions,
                maybe_sysroot: Option<PathBuf>, source_map: Option<Lrc<SourceMap>>,
                filename: Option<PathBuf>, linker: Option<PathBuf>, edition: Edition) -> Collector {
@@ -779,7 +842,7 @@ impl<'a, 'hir> intravisit::Visitor<'hir> for HirCollector<'a, 'hir> {
         let name = if let hir::ItemKind::Impl(.., ref ty, _) = item.node {
             self.map.node_to_pretty_string(ty.id)
         } else {
-            item.name.to_string()
+            item.ident.to_string()
         };
 
         self.visit_testable(name, &item.attrs, |this| {
@@ -800,7 +863,7 @@ impl<'a, 'hir> intravisit::Visitor<'hir> for HirCollector<'a, 'hir> {
     }
 
     fn visit_foreign_item(&mut self, item: &'hir hir::ForeignItem) {
-        self.visit_testable(item.name.to_string(), &item.attrs, |this| {
+        self.visit_testable(item.ident.to_string(), &item.attrs, |this| {
             intravisit::walk_foreign_item(this, item);
         });
     }
@@ -809,7 +872,7 @@ impl<'a, 'hir> intravisit::Visitor<'hir> for HirCollector<'a, 'hir> {
                      v: &'hir hir::Variant,
                      g: &'hir hir::Generics,
                      item_id: ast::NodeId) {
-        self.visit_testable(v.node.name.to_string(), &v.node.attrs, |this| {
+        self.visit_testable(v.node.ident.to_string(), &v.node.attrs, |this| {
             intravisit::walk_variant(this, v, g, item_id);
         });
     }
@@ -1035,8 +1098,8 @@ fn main() {
 assert_eq!(2+2, 4);";
         let expected =
 "#![allow(unused)]
-fn main() {
 //Ceci n'est pas une `fn main`
+fn main() {
 assert_eq!(2+2, 4);
 }".to_string();
         let output = make_test(input, None, false, &opts);
@@ -1083,8 +1146,8 @@ assert_eq!(2+2, 4);";
 
         let expected =
 "#![allow(unused)]
-fn main() {
 // fn main
+fn main() {
 assert_eq!(2+2, 4);
 }".to_string();
 
@@ -1105,5 +1168,24 @@ assert_eq!(asdf::foo, 4);
 
         let output = make_test(input, Some("asdf"), false, &opts);
         assert_eq!(output, (expected, 3));
+    }
+
+    #[test]
+    fn make_test_main_in_macro() {
+        let opts = TestOptions::default();
+        let input =
+"#[macro_use] extern crate my_crate;
+test_wrapper! {
+    fn main() {}
+}";
+        let expected =
+"#![allow(unused)]
+#[macro_use] extern crate my_crate;
+test_wrapper! {
+    fn main() {}
+}".to_string();
+
+        let output = make_test(input, Some("my_crate"), false, &opts);
+        assert_eq!(output, (expected, 1));
     }
 }

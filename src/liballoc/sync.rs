@@ -1,13 +1,3 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 #![stable(feature = "rust1", since = "1.0.0")]
 
 //! Thread-safe reference-counting pointers.
@@ -24,7 +14,7 @@ use core::fmt;
 use core::cmp::Ordering;
 use core::intrinsics::abort;
 use core::mem::{self, align_of_val, size_of_val};
-use core::ops::Deref;
+use core::ops::{Deref, Receiver};
 use core::ops::{CoerceUnsized, DispatchFromDyn};
 use core::pin::Pin;
 use core::ptr::{self, NonNull};
@@ -303,8 +293,10 @@ impl<T> Arc<T> {
         Arc { ptr: Box::into_raw_non_null(x), phantom: PhantomData }
     }
 
-    #[unstable(feature = "pin", issue = "49150")]
-    pub fn pinned(data: T) -> Pin<Arc<T>> {
+    /// Constructs a new `Pin<Arc<T>>`. If `T` does not implement `Unpin`, then
+    /// `data` will be pinned in memory and unable to be moved.
+    #[stable(feature = "pin", since = "1.33.0")]
+    pub fn pin(data: T) -> Pin<Arc<T>> {
         unsafe { Pin::new_unchecked(Arc::new(data)) }
     }
 
@@ -767,6 +759,9 @@ impl<T: ?Sized> Deref for Arc<T> {
     }
 }
 
+#[unstable(feature = "receiver_trait", issue = "0")]
+impl<T: ?Sized> Receiver for Arc<T> {}
+
 impl<T: Clone> Arc<T> {
     /// Makes a mutable reference into the given `Arc`.
     ///
@@ -952,6 +947,8 @@ unsafe impl<#[may_dangle] T: ?Sized> Drop for Arc<T> {
     /// drop(foo);    // Doesn't print anything
     /// drop(foo2);   // Prints "dropped!"
     /// ```
+    ///
+    /// [`Weak`]: ../../std/sync/struct.Weak.html
     #[inline]
     fn drop(&mut self) {
         // Because `fetch_sub` is already atomic, we do not need to synchronize
@@ -1219,10 +1216,11 @@ impl<T: ?Sized> Clone for Weak<T> {
 #[stable(feature = "downgraded_weak", since = "1.10.0")]
 impl<T> Default for Weak<T> {
     /// Constructs a new `Weak<T>`, without allocating memory.
-    /// Calling [`upgrade`][Weak::upgrade] on the return value always
+    /// Calling [`upgrade`] on the return value always
     /// gives [`None`].
     ///
     /// [`None`]: ../../std/option/enum.Option.html#variant.None
+    /// [`upgrade`]: ../../std/sync/struct.Weak.html#method.upgrade
     ///
     /// # Examples
     ///
@@ -1288,10 +1286,44 @@ impl<T: ?Sized> Drop for Weak<T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
+trait ArcEqIdent<T: ?Sized + PartialEq> {
+    fn eq(&self, other: &Arc<T>) -> bool;
+    fn ne(&self, other: &Arc<T>) -> bool;
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
+impl<T: ?Sized + PartialEq> ArcEqIdent<T> for Arc<T> {
+    #[inline]
+    default fn eq(&self, other: &Arc<T>) -> bool {
+        **self == **other
+    }
+    #[inline]
+    default fn ne(&self, other: &Arc<T>) -> bool {
+        **self != **other
+    }
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
+impl<T: ?Sized + Eq> ArcEqIdent<T> for Arc<T> {
+    #[inline]
+    fn eq(&self, other: &Arc<T>) -> bool {
+        Arc::ptr_eq(self, other) || **self == **other
+    }
+
+    #[inline]
+    fn ne(&self, other: &Arc<T>) -> bool {
+        !Arc::ptr_eq(self, other) && **self != **other
+    }
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
 impl<T: ?Sized + PartialEq> PartialEq for Arc<T> {
     /// Equality for two `Arc`s.
     ///
     /// Two `Arc`s are equal if their inner values are equal.
+    ///
+    /// If `T` also implements `Eq`, two `Arc`s that point to the same value are
+    /// always equal.
     ///
     /// # Examples
     ///
@@ -1302,13 +1334,17 @@ impl<T: ?Sized + PartialEq> PartialEq for Arc<T> {
     ///
     /// assert!(five == Arc::new(5));
     /// ```
+    #[inline]
     fn eq(&self, other: &Arc<T>) -> bool {
-        *(*self) == *(*other)
+        ArcEqIdent::eq(self, other)
     }
 
     /// Inequality for two `Arc`s.
     ///
     /// Two `Arc`s are unequal if their inner values are unequal.
+    ///
+    /// If `T` also implements `Eq`, two `Arc`s that point to the same value are
+    /// never unequal.
     ///
     /// # Examples
     ///
@@ -1319,10 +1355,12 @@ impl<T: ?Sized + PartialEq> PartialEq for Arc<T> {
     ///
     /// assert!(five != Arc::new(6));
     /// ```
+    #[inline]
     fn ne(&self, other: &Arc<T>) -> bool {
-        *(*self) != *(*other)
+        ArcEqIdent::ne(self, other)
     }
 }
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: ?Sized + PartialOrd> PartialOrd for Arc<T> {
     /// Partial comparison for two `Arc`s.
@@ -2004,5 +2042,5 @@ impl<T: ?Sized> AsRef<T> for Arc<T> {
     }
 }
 
-#[unstable(feature = "pin", issue = "49150")]
+#[stable(feature = "pin", since = "1.33.0")]
 impl<T: ?Sized> Unpin for Arc<T> { }

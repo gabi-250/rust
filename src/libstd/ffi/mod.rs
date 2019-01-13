@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Utilities related to FFI bindings.
 //!
 //! This module provides utilities to handle data across non-Rust
@@ -72,32 +62,32 @@
 //!
 //! * **From Rust to C:** [`CString`] represents an owned, C-friendly
 //! string: it is nul-terminated, and has no internal nul characters.
-//! Rust code can create a `CString` out of a normal string (provided
+//! Rust code can create a [`CString`] out of a normal string (provided
 //! that the string doesn't have nul characters in the middle), and
-//! then use a variety of methods to obtain a raw `*mut u8` that can
+//! then use a variety of methods to obtain a raw `*mut `[`u8`] that can
 //! then be passed as an argument to functions which use the C
 //! conventions for strings.
 //!
 //! * **From C to Rust:** [`CStr`] represents a borrowed C string; it
-//! is what you would use to wrap a raw `*const u8` that you got from
-//! a C function. A `CStr` is guaranteed to be a nul-terminated array
-//! of bytes. Once you have a `CStr`, you can convert it to a Rust
-//! `&str` if it's valid UTF-8, or lossily convert it by adding
+//! is what you would use to wrap a raw `*const `[`u8`] that you got from
+//! a C function. A [`CStr`] is guaranteed to be a nul-terminated array
+//! of bytes. Once you have a [`CStr`], you can convert it to a Rust
+//! [`&str`][`str`] if it's valid UTF-8, or lossily convert it by adding
 //! replacement characters.
 //!
 //! [`OsString`] and [`OsStr`] are useful when you need to transfer
 //! strings to and from the operating system itself, or when capturing
-//! the output of external commands. Conversions between `OsString`,
-//! `OsStr` and Rust strings work similarly to those for [`CString`]
+//! the output of external commands. Conversions between [`OsString`],
+//! [`OsStr`] and Rust strings work similarly to those for [`CString`]
 //! and [`CStr`].
 //!
 //! * [`OsString`] represents an owned string in whatever
 //! representation the operating system prefers. In the Rust standard
 //! library, various APIs that transfer strings to/from the operating
-//! system use `OsString` instead of plain strings. For example,
+//! system use [`OsString`] instead of plain strings. For example,
 //! [`env::var_os()`] is used to query environment variables; it
-//! returns an `Option<OsString>`. If the environment variable exists
-//! you will get a `Some(os_string)`, which you can *then* try to
+//! returns an [`Option`]`<`[`OsString`]`>`. If the environment variable
+//! exists you will get a [`Some`]`(os_string)`, which you can *then* try to
 //! convert to a Rust string. This yields a [`Result<>`], so that
 //! your code can detect errors in case the environment variable did
 //! not in fact contain valid Unicode data.
@@ -105,7 +95,7 @@
 //! * [`OsStr`] represents a borrowed reference to a string in a
 //! format that can be passed to the operating system. It can be
 //! converted into an UTF-8 Rust string slice in a similar way to
-//! `OsString`.
+//! [`OsString`].
 //!
 //! # Conversions
 //!
@@ -131,7 +121,7 @@
 //! Additionally, on Windows [`OsString`] implements the
 //! `std::os::windows:ffi::`[`OsStringExt`][windows.OsStringExt]
 //! trait, which provides a [`from_wide`] method. The result of this
-//! method is an `OsString` which can be round-tripped to a Windows
+//! method is an [`OsString`] which can be round-tripped to a Windows
 //! string losslessly.
 //!
 //! [`String`]: ../string/struct.String.html
@@ -160,6 +150,8 @@
 //! [`collect`]: ../iter/trait.Iterator.html#method.collect
 //! [windows.OsStringExt]: ../os/windows/ffi/trait.OsStringExt.html
 //! [`from_wide`]: ../os/windows/ffi/trait.OsStringExt.html#tymethod.from_wide
+//! [`Option`]: ../option/enum.Option.html
+//! [`Some`]: ../option/enum.Option.html#variant.Some
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
@@ -174,7 +166,6 @@ pub use self::os_str::{OsString, OsStr};
 #[stable(feature = "raw_os", since = "1.1.0")]
 pub use core::ffi::c_void;
 
-#[cfg(not(stage0))]
 #[unstable(feature = "c_variadic",
            reason = "the `c_variadic` feature has not been properly tested on \
                      all supported platforms",

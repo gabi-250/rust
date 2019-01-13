@@ -1,13 +1,3 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Implementation of the test-related targets of the build system.
 //!
 //! This file implements the various regression test suites that we execute on
@@ -23,17 +13,17 @@ use std::process::Command;
 
 use build_helper::{self, output};
 
-use builder::{Builder, Compiler, Kind, RunConfig, ShouldRun, Step};
-use cache::{Interned, INTERNER};
-use compile;
-use dist;
-use flags::Subcommand;
-use native;
-use tool::{self, Tool, SourceType};
-use toolstate::ToolState;
-use util::{self, dylib_path, dylib_path_var};
-use Crate as CargoCrate;
-use {DocTests, Mode, GitRepo};
+use crate::builder::{Builder, Compiler, Kind, RunConfig, ShouldRun, Step};
+use crate::cache::{Interned, INTERNER};
+use crate::compile;
+use crate::dist;
+use crate::flags::Subcommand;
+use crate::native;
+use crate::tool::{self, Tool, SourceType};
+use crate::toolstate::ToolState;
+use crate::util::{self, dylib_path, dylib_path_var};
+use crate::Crate as CargoCrate;
+use crate::{DocTests, Mode, GitRepo};
 
 const ADB_TEST_DIR: &str = "/data/tmp/work";
 
@@ -293,13 +283,6 @@ impl Step for Rls {
                                                  SourceType::Submodule,
                                                  &[]);
 
-        // Copy `src/tools/rls/test_data` to a writable drive.
-        let test_workspace_path = builder.out.join("rls-test-data");
-        let test_data_path = test_workspace_path.join("test_data");
-        builder.create_dir(&test_data_path);
-        builder.cp_r(&builder.src.join("src/tools/rls/test_data"), &test_data_path);
-        cargo.env("RLS_TEST_WORKSPACE_DIR", test_workspace_path);
-
         builder.add_rustc_lib_path(compiler, &mut cargo);
         cargo.arg("--")
             .args(builder.config.cmd.test_args());
@@ -426,6 +409,45 @@ impl Step for Miri {
         } else {
             eprintln!("failed to test miri: could not build");
         }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct CompiletestTest {
+    stage: u32,
+    host: Interned<String>,
+}
+
+impl Step for CompiletestTest {
+    type Output = ();
+
+    fn should_run(run: ShouldRun) -> ShouldRun {
+        run.path("src/tools/compiletest")
+    }
+
+    fn make_run(run: RunConfig) {
+        run.builder.ensure(CompiletestTest {
+            stage: run.builder.top_stage,
+            host: run.target,
+        });
+    }
+
+    /// Runs `cargo test` for compiletest.
+    fn run(self, builder: &Builder) {
+        let stage = self.stage;
+        let host = self.host;
+        let compiler = builder.compiler(stage, host);
+
+        let mut cargo = tool::prepare_tool_cargo(builder,
+                                                 compiler,
+                                                 Mode::ToolBootstrap,
+                                                 host,
+                                                 "test",
+                                                 "src/tools/compiletest",
+                                                 SourceType::InTree,
+                                                 &[]);
+
+        try_run(builder, &mut cargo);
     }
 }
 
@@ -577,7 +599,7 @@ impl Step for RustdocJS {
         if let Some(ref nodejs) = builder.config.nodejs {
             let mut command = Command::new(nodejs);
             command.args(&["src/tools/rustdoc-js/tester.js", &*self.host]);
-            builder.ensure(::doc::Std {
+            builder.ensure(crate::doc::Std {
                 target: self.target,
                 stage: builder.top_stage,
             });

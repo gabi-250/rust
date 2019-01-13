@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use core::unicode::property::Pattern_White_Space;
 use std::fmt::{self, Display};
 
@@ -426,13 +416,13 @@ impl<'a, 'gcx, 'tcx> MirBorrowckCtxt<'a, 'gcx, 'tcx> {
                     .span_to_snippet(pat_span)
                     .unwrap();
                 if pat_snippet.starts_with('&') {
-                    let pat_snippet = pat_snippet[1..].trim_left();
+                    let pat_snippet = pat_snippet[1..].trim_start();
                     let suggestion;
                     let to_remove;
                     if pat_snippet.starts_with("mut")
                         && pat_snippet["mut".len()..].starts_with(Pattern_White_Space)
                     {
-                        suggestion = pat_snippet["mut".len()..].trim_left();
+                        suggestion = pat_snippet["mut".len()..].trim_start();
                         to_remove = "&mut";
                     } else {
                         suggestion = pat_snippet;

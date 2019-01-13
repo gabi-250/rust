@@ -1,13 +1,3 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! A classic liveness analysis based on dataflow over the AST.  Computes,
 //! for each local variable in a function, whether that variable is live
 //! at a given point.  Program execution points are identified by their
@@ -525,6 +515,7 @@ fn visit_expr<'a, 'tcx>(ir: &mut IrMaps<'a, 'tcx>, expr: &'tcx Expr) {
       hir::ExprKind::Box(..) |
       hir::ExprKind::Yield(..) |
       hir::ExprKind::Type(..) |
+      hir::ExprKind::Err |
       hir::ExprKind::Path(hir::QPath::TypeRelative(..)) => {
           intravisit::walk_expr(ir, expr);
       }
@@ -1197,8 +1188,8 @@ impl<'a, 'tcx> Liveness<'a, 'tcx> {
             }
 
             hir::ExprKind::Call(ref f, ref args) => {
-                // FIXME(canndrew): This is_never should really be an is_uninhabited
-                let succ = if self.tables.expr_ty(expr).is_never() {
+                let m = self.ir.tcx.hir().get_module_parent(expr.id);
+                let succ = if self.ir.tcx.is_ty_uninhabited_from(m, self.tables.expr_ty(expr)) {
                     self.s.exit_ln
                 } else {
                     succ
@@ -1208,8 +1199,8 @@ impl<'a, 'tcx> Liveness<'a, 'tcx> {
             }
 
             hir::ExprKind::MethodCall(.., ref args) => {
-                // FIXME(canndrew): This is_never should really be an is_uninhabited
-                let succ = if self.tables.expr_ty(expr).is_never() {
+                let m = self.ir.tcx.hir().get_module_parent(expr.id);
+                let succ = if self.ir.tcx.is_ty_uninhabited_from(m, self.tables.expr_ty(expr)) {
                     self.s.exit_ln
                 } else {
                     succ
@@ -1264,7 +1255,8 @@ impl<'a, 'tcx> Liveness<'a, 'tcx> {
                 self.propagate_through_exprs(inputs, succ)
             }
 
-            hir::ExprKind::Lit(..) | hir::ExprKind::Path(hir::QPath::TypeRelative(..)) => {
+            hir::ExprKind::Lit(..) | hir::ExprKind::Err |
+            hir::ExprKind::Path(hir::QPath::TypeRelative(..)) => {
                 succ
             }
 
@@ -1531,7 +1523,7 @@ fn check_expr<'a, 'tcx>(this: &mut Liveness<'a, 'tcx>, expr: &'tcx Expr) {
         hir::ExprKind::Block(..) | hir::ExprKind::AddrOf(..) |
         hir::ExprKind::Struct(..) | hir::ExprKind::Repeat(..) |
         hir::ExprKind::Closure(..) | hir::ExprKind::Path(_) | hir::ExprKind::Yield(..) |
-        hir::ExprKind::Box(..) | hir::ExprKind::Type(..) => {
+        hir::ExprKind::Box(..) | hir::ExprKind::Type(..) | hir::ExprKind::Err => {
             intravisit::walk_expr(this, expr);
         }
     }
@@ -1657,11 +1649,15 @@ impl<'a, 'tcx> Liveness<'a, 'tcx> {
     fn report_dead_assign(&self, hir_id: HirId, sp: Span, var: Variable, is_argument: bool) {
         if let Some(name) = self.should_warn(var) {
             if is_argument {
-                self.ir.tcx.lint_hir(lint::builtin::UNUSED_ASSIGNMENTS, hir_id, sp,
-                    &format!("value passed to `{}` is never read", name));
+                self.ir.tcx.struct_span_lint_hir(lint::builtin::UNUSED_ASSIGNMENTS, hir_id, sp,
+                &format!("value passed to `{}` is never read", name))
+                .help("maybe it is overwritten before being read?")
+                .emit();
             } else {
-                self.ir.tcx.lint_hir(lint::builtin::UNUSED_ASSIGNMENTS, hir_id, sp,
-                    &format!("value assigned to `{}` is never read", name));
+                self.ir.tcx.struct_span_lint_hir(lint::builtin::UNUSED_ASSIGNMENTS, hir_id, sp,
+                &format!("value assigned to `{}` is never read", name))
+                .help("maybe it is overwritten before being read?")
+                .emit();
             }
         }
     }

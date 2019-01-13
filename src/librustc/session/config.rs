@@ -1,20 +1,10 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Contains infrastructure for configuring the compiler, including parsing
 //! command line options.
 
 use std::str::FromStr;
 
 use session::{early_error, early_warn, Session};
-use session::search_paths::SearchPaths;
+use session::search_paths::SearchPath;
 
 use rustc_target::spec::{LinkerFlavor, PanicStrategy, RelroLevel};
 use rustc_target::spec::{Target, TargetTriple};
@@ -374,7 +364,7 @@ top_level_options!(
         lint_cap: Option<lint::Level> [TRACKED],
         describe_lints: bool [UNTRACKED],
         output_types: OutputTypes [TRACKED],
-        search_paths: SearchPaths [UNTRACKED],
+        search_paths: Vec<SearchPath> [UNTRACKED],
         libs: Vec<(String, Option<String>, Option<cstore::NativeLibraryKind>)> [TRACKED],
         maybe_sysroot: Option<PathBuf> [TRACKED],
 
@@ -593,7 +583,7 @@ impl Default for Options {
             lint_cap: None,
             describe_lints: false,
             output_types: OutputTypes(BTreeMap::new()),
-            search_paths: SearchPaths::new(),
+            search_paths: vec![],
             maybe_sysroot: None,
             target_triple: TargetTriple::from_triple(host_triple()),
             test: false,
@@ -1135,6 +1125,8 @@ options! {CodegenOptions, CodegenSetter, basic_codegen_options,
         "enable incremental compilation"),
     default_linker_libraries: Option<bool> = (None, parse_opt_bool, [UNTRACKED],
         "allow the linker to link its default libraries"),
+    linker_flavor: Option<LinkerFlavor> = (None, parse_linker_flavor, [UNTRACKED],
+                                           "Linker flavor"),
 }
 
 options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
@@ -1235,6 +1227,8 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "verify incr. comp. hashes of green query instances"),
     incremental_ignore_spans: bool = (false, parse_bool, [UNTRACKED],
         "ignore spans during ICH computation -- used for testing"),
+    instrument_mcount: bool = (false, parse_bool, [TRACKED],
+        "insert function instrument code for mcount-based tracing"),
     dump_dep_graph: bool = (false, parse_bool, [UNTRACKED],
         "dump the dependency graph to $RUST_DEP_GRAPH (default: /tmp/dep_graph.gv)"),
     query_dep_graph: bool = (false, parse_bool, [UNTRACKED],
@@ -1269,8 +1263,6 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "set the MIR optimization level (0-3, default: 1)"),
     mutable_noalias: Option<bool> = (None, parse_opt_bool, [TRACKED],
         "emit noalias metadata for mutable references (default: yes on LLVM >= 6)"),
-    arg_align_attributes: bool = (false, parse_bool, [TRACKED],
-        "emit align metadata for reference arguments"),
     dump_mir: Option<String> = (None, parse_opt_string, [UNTRACKED],
         "dump MIR state to file.
         `val` is used to select which passes and functions to dump. For example:
@@ -1289,6 +1281,8 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "emit Retagging MIR statements, interpreted e.g., by miri; implies -Zmir-opt-level=0"),
     perf_stats: bool = (false, parse_bool, [UNTRACKED],
         "print some performance-related statistics"),
+    query_stats: bool = (false, parse_bool, [UNTRACKED],
+        "print some statistics about the query system"),
     hir_stats: bool = (false, parse_bool, [UNTRACKED],
         "print some statistics about AST and HIR"),
     always_encode_mir: bool = (false, parse_bool, [TRACKED],
@@ -1297,8 +1291,6 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "pass `-install_name @rpath/...` to the macOS linker"),
     sanitizer: Option<Sanitizer> = (None, parse_sanitizer, [TRACKED],
                                     "Use a sanitizer"),
-    linker_flavor: Option<LinkerFlavor> = (None, parse_linker_flavor, [UNTRACKED],
-                                           "Linker flavor"),
     fuel: Option<(String, u64)> = (None, parse_optimization_fuel, [TRACKED],
         "set the optimization fuel quota for a crate"),
     print_fuel: Option<String> = (None, parse_opt_string, [TRACKED],
@@ -1319,12 +1311,8 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "Disable the instrumentation pre-inliner, useful for profiling / PGO."),
     relro_level: Option<RelroLevel> = (None, parse_relro_level, [TRACKED],
         "choose which RELRO level to use"),
-    nll_subminimal_causes: bool = (false, parse_bool, [UNTRACKED],
-        "when tracking region error causes, accept subminimal results for faster execution."),
     nll_facts: bool = (false, parse_bool, [UNTRACKED],
                        "dump facts from NLL analysis into side files"),
-    disable_nll_user_type_assert: bool = (false, parse_bool, [UNTRACKED],
-        "disable user provided type assertion in NLL"),
     nll_dont_emit_read_for_match: bool = (false, parse_bool, [UNTRACKED],
         "in match codegen, do not include FakeRead statements (used by mir-borrowck)"),
     dont_buffer_diagnostics: bool = (false, parse_bool, [UNTRACKED],
@@ -2115,9 +2103,9 @@ pub fn build_session_options_and_crate_config(
         }
     };
 
-    let mut search_paths = SearchPaths::new();
+    let mut search_paths = vec![];
     for s in &matches.opt_strs("L") {
-        search_paths.add_path(&s[..], error_format);
+        search_paths.push(SearchPath::from_cli_opt(&s[..], error_format));
     }
 
     let libs = matches
@@ -2535,6 +2523,7 @@ mod tests {
     use session::config::{build_configuration, build_session_options_and_crate_config};
     use session::config::{LtoCli, CrossLangLto};
     use session::build_session;
+    use session::search_paths::SearchPath;
     use std::collections::{BTreeMap, BTreeSet};
     use std::iter::FromIterator;
     use std::path::PathBuf;
@@ -2790,48 +2779,48 @@ mod tests {
 
         // Reference
         v1.search_paths
-            .add_path("native=abc", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("native=abc", super::ErrorOutputType::Json(false)));
         v1.search_paths
-            .add_path("crate=def", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("crate=def", super::ErrorOutputType::Json(false)));
         v1.search_paths
-            .add_path("dependency=ghi", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("dependency=ghi", super::ErrorOutputType::Json(false)));
         v1.search_paths
-            .add_path("framework=jkl", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("framework=jkl", super::ErrorOutputType::Json(false)));
         v1.search_paths
-            .add_path("all=mno", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("all=mno", super::ErrorOutputType::Json(false)));
 
         v2.search_paths
-            .add_path("native=abc", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("native=abc", super::ErrorOutputType::Json(false)));
         v2.search_paths
-            .add_path("dependency=ghi", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("dependency=ghi", super::ErrorOutputType::Json(false)));
         v2.search_paths
-            .add_path("crate=def", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("crate=def", super::ErrorOutputType::Json(false)));
         v2.search_paths
-            .add_path("framework=jkl", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("framework=jkl", super::ErrorOutputType::Json(false)));
         v2.search_paths
-            .add_path("all=mno", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("all=mno", super::ErrorOutputType::Json(false)));
 
         v3.search_paths
-            .add_path("crate=def", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("crate=def", super::ErrorOutputType::Json(false)));
         v3.search_paths
-            .add_path("framework=jkl", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("framework=jkl", super::ErrorOutputType::Json(false)));
         v3.search_paths
-            .add_path("native=abc", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("native=abc", super::ErrorOutputType::Json(false)));
         v3.search_paths
-            .add_path("dependency=ghi", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("dependency=ghi", super::ErrorOutputType::Json(false)));
         v3.search_paths
-            .add_path("all=mno", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("all=mno", super::ErrorOutputType::Json(false)));
 
         v4.search_paths
-            .add_path("all=mno", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("all=mno", super::ErrorOutputType::Json(false)));
         v4.search_paths
-            .add_path("native=abc", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("native=abc", super::ErrorOutputType::Json(false)));
         v4.search_paths
-            .add_path("crate=def", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("crate=def", super::ErrorOutputType::Json(false)));
         v4.search_paths
-            .add_path("dependency=ghi", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("dependency=ghi", super::ErrorOutputType::Json(false)));
         v4.search_paths
-            .add_path("framework=jkl", super::ErrorOutputType::Json(false));
+            .push(SearchPath::from_cli_opt("framework=jkl", super::ErrorOutputType::Json(false)));
 
         assert!(v1.dep_tracking_hash() == v2.dep_tracking_hash());
         assert!(v1.dep_tracking_hash() == v3.dep_tracking_hash());

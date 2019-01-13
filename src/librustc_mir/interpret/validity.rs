@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use std::fmt::Write;
 use std::hash::Hash;
 use std::ops::RangeInclusive;
@@ -17,7 +7,7 @@ use rustc::ty::layout::{self, Size, Align, TyLayout, LayoutOf, VariantIdx};
 use rustc::ty;
 use rustc_data_structures::fx::FxHashSet;
 use rustc::mir::interpret::{
-    Scalar, AllocType, EvalResult, EvalErrorKind,
+    Scalar, AllocKind, EvalResult, EvalErrorKind,
 };
 
 use super::{
@@ -256,7 +246,7 @@ impl<'rt, 'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>>
         variant_id: VariantIdx,
         new_op: OpTy<'tcx, M::PointerTag>
     ) -> EvalResult<'tcx> {
-        let name = old_op.layout.ty.ty_adt_def().unwrap().variants[variant_id].name;
+        let name = old_op.layout.ty.ty_adt_def().unwrap().variants[variant_id].ident.name;
         self.visit_elem(new_op, PathElem::Variant(name))
     }
 
@@ -388,7 +378,7 @@ impl<'rt, 'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>>
                             "integer pointer in non-ZST reference", self.path);
                         // Skip validation entirely for some external statics
                         let alloc_kind = self.ecx.tcx.alloc_map.lock().get(ptr.alloc_id);
-                        if let Some(AllocType::Static(did)) = alloc_kind {
+                        if let Some(AllocKind::Static(did)) = alloc_kind {
                             // `extern static` cannot be validated as they have no body.
                             // FIXME: Statics from other crates are also skipped.
                             // They might be checked at a different type, but for now we
