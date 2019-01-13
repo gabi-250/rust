@@ -17,7 +17,7 @@ use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::mir::operand::{OperandValue, OperandRef};
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use context::CodegenCx;
-use value::Value;
+use value::{Instruction, Value};
 use rustc::hir::def_id::DefId;
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{Align, Size, TyLayout};
@@ -48,7 +48,7 @@ pub struct BuilderPosition(usize, usize, usize);
 
 pub struct Builder<'a, 'll: 'a, 'tcx: 'll> {
     pub cx: &'a CodegenCx<'ll, 'tcx>,
-    pub builder: RefCell<BuilderPosition>,
+    pub builder: BuilderPosition,
 }
 
 impl ty::layout::LayoutOf for Builder<'_, '_, 'tcx> {
@@ -92,16 +92,16 @@ impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 
 impl Builder<'a, 'll, 'tcx> {
 
-    fn emit_instr(&mut self, asm: String) {
-        let mut builder = self.builder.borrow_mut();
-        let llfn = builder.0;
-        let llbb = builder.1;
-        let instr = builder.2;
+    fn emit_instr(&mut self, inst: Instruction) -> Value {
+        let llfn = self.builder.0;
+        let llbb = self.builder.1;
+        let instr_idx = self.builder.2;
+        // move to the next instruction
+        self.builder.2 += 1;
         let mut module = self.cx.module.borrow_mut();
         module.functions[llfn].basic_blocks[llbb].instrs
-            .insert(instr, asm);
-        // move to the next instruction
-        builder.2 += 1;
+            .insert(instr_idx, inst);
+        Value::Instruction(llfn, llbb, instr_idx)
     }
 }
 
@@ -133,7 +133,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // FIXME? this is an invalid position and must be overwritten
         Builder {
             cx,
-            builder: RefCell::new(BuilderPosition(0, 0, 0))
+            builder: BuilderPosition(0, 0, 0),
         }
     }
 
@@ -146,15 +146,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn llfn(&self) -> Value {
-        let bb = self.builder.borrow();
         // the parent of the current basic block
-        let fn_index = bb.0;
+        let fn_index = self.builder.0;
         Value::Function(fn_index)
     }
 
     fn llbb(&self) -> BasicBlock {
-        BasicBlock(self.builder.borrow().0,
-                   self.builder.borrow().1)
+        BasicBlock(self.builder.0,
+                   self.builder.1)
     }
 
     fn count_insn(&self, category: &str) {
@@ -170,7 +169,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let llbb = llbb.1;
         let instr =
             self.cx.module.borrow().functions[llfn].basic_blocks[llbb].instrs.len();
-        self.builder.replace(BuilderPosition(llfn, llbb, instr));
+        self.builder = BuilderPosition(llfn, llbb, instr);
     }
 
     fn position_at_start(&mut self, llbb: BasicBlock) {
@@ -178,21 +177,20 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn ret_void(&mut self) {
-        self.emit_instr("ret".to_string());
+        let _ = self.emit_instr(Instruction::Ret(None));
     }
 
     fn ret(&mut self, v: Value) {
-         eprintln!("ret {:?}", v);
+        let _ = self.emit_instr(Instruction::Ret(Some(v)));
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        let br_instr = {
+        let mut label;
+        {
             let module = self.cx.module.borrow();
-            format!(
-                "jmp {}",
-                module.functions[dest.0].basic_blocks[dest.1].label)
-        };
-        self.emit_instr(br_instr);
+            label = module.functions[dest.0].basic_blocks[dest.1].label.to_string();
+        }
+        let _ = self.emit_instr(Instruction::Br(label));
     }
 
     fn cond_br(
@@ -225,7 +223,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn unreachable(&mut self) {
-        // FIXME?
+        unimplemented!("unreachable");
     }
 
     fn add(
@@ -454,7 +452,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ty: Type,
         name: &str, align: Align
     )-> Value {
-        let cur_fn = self.builder.borrow().0;
+        let cur_fn = self.builder.0;
         let mut module = self.cx.module.borrow_mut();
         let local_idx = module.functions[cur_fn].alloca(self.cx, ty, name, align);
         Value::Local(cur_fn, local_idx)
@@ -519,7 +517,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         align: Align
     )-> Value {
-        unimplemented!("store");
+        self.store_with_flags(val, ptr, align, MemFlags::empty())
     }
 
     fn atomic_store(
@@ -539,7 +537,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         flags: MemFlags,
     )-> Value {
-        unimplemented!("store_with_flags");
+        // FIXME: ignore the flags for now
+        self.emit_instr(Instruction::Store(ptr, val))
     }
 
     fn gep(
@@ -1038,8 +1037,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         typ: &str,
         llfn: Value,
         args: &'b [Value]
-    ) -> Cow<'b, [Value]>
-        where [Value] : ToOwned {
+    ) -> Cow<'b, [Value]> {
         unimplemented!("check_call");
     }
 
@@ -1057,8 +1055,17 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         args: &[Value],
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        //unimplemented!("call to {:?} with args {:?}", llfn, args);
-        Value::None
+        if funclet.is_some() {
+            unimplemented!("call funclet: {:?}", funclet);
+        }
+        match llfn {
+            Value::Function(usize) => {
+                self.emit_instr(Instruction::Call(usize, args.to_vec()))
+            },
+            _ => {
+                bug!("expected Value::Function, found {:?}", llfn);
+            }
+        }
     }
 
     fn zext(

@@ -247,7 +247,7 @@ impl CodegenCx<'ll, 'tcx> {
         };
         let mut borrowed_consts = self.i_consts.borrow_mut();
         borrowed_consts.push(iconst);
-        Value::ConstUint(borrowed_consts.len() - 1)
+        Value::ConstInt(borrowed_consts.len() - 1)
     }
 
     fn const_unsigned(

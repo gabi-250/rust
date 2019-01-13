@@ -50,7 +50,7 @@ pub unsafe fn codegen(
     config: &ModuleConfig,
     timeline: &mut Timeline
 ) -> Result<CompiledModule, FatalError> {
-    if config.no_integrated_as {
+    if true || config.no_integrated_as {
         let module_name = Some(&module.name[..]);
 
         let assembly =

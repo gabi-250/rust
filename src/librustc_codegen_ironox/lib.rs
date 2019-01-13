@@ -90,9 +90,10 @@ mod mono_item;
 mod registers;
 mod value;
 
+use constant::{UnsignedConst, SignedConst};
 use context::CodegenCx;
 use type_::Type;
-use value::Value;
+use value::{Instruction, Value};
 use ir::function::IronOxFunction;
 use ir::struct_::IronOxStruct;
 
@@ -150,6 +151,8 @@ pub struct ModuleIronOx {
     pub functions: Vec<IronOxFunction>,
     /// All the structs in the module
     pub structs: Vec<IronOxStruct>,
+    pub u_consts: Vec<UnsignedConst>,
+    pub i_consts: Vec<SignedConst>,
 }
 
 impl ModuleIronOx {
@@ -157,6 +160,8 @@ impl ModuleIronOx {
         ModuleIronOx {
             functions: Default::default(),
             structs: Default::default(),
+            u_consts: Default::default(),
+            i_consts: Default::default(),
         }
     }
 
@@ -175,7 +180,47 @@ impl ModuleIronOx {
     }
 
     pub fn asm(&self) -> String {
-        "nop".to_string()
+        let mut asm = "".to_string();
+        for f in &self.functions {
+            asm.push_str(&format!("{}:\n", f.name));
+            for bb in &f.basic_blocks {
+                asm.push_str(&format!("{}_{}:\n", f.name, bb.label));
+                for inst in &bb.instrs {
+                    match inst {
+                        Instruction::Br(target) => {
+                            asm.push_str(&format!("jmp {}_{}\n", f.name, target));
+                        },
+                        Instruction::Ret(Some(val)) => {
+                            match val {
+                                Value::ConstUint(idx) => {
+                                    let value = self.u_consts[*idx].value;
+                                    asm.push_str(&format!("mov {}, %rax\n", value));
+                                    asm.push_str("ret\n");
+
+                                },
+                                _ => {
+                                    unimplemented!("Ret: {:?}", val);
+                                }
+                            }
+                        },
+                        Instruction::Ret(None) => {
+                            asm.push_str("ret\n");
+                        },
+                        Instruction::Call(ref fn_idx, ref args) => {
+                            for (idx, arg) in args.iter().enumerate() {
+                                unimplemented!("arg {:?}: {:?}", idx, arg);
+                            }
+                            asm.push_str(
+                                &format!("call {}\n", self.functions[*fn_idx].name));
+                        },
+                        Instruction::Store(_, _) => {
+                            asm.push_str("nop\n");
+                        }
+                    }
+                }
+            }
+        }
+        asm
     }
 }
 

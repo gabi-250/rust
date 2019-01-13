@@ -8,14 +8,14 @@
 
 use type_::Type;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct UnsignedConst {
     pub ty: Type,
     pub value: u128,
     pub allowed_range: (u128, u128),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SignedConst {
     pub ty: Type,
     pub value: i128,

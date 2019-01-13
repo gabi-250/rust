@@ -9,7 +9,7 @@
 use rustc_codegen_ssa::traits::CodegenObject;
 
 use context::CodegenCx;
-use value::Value;
+use value::{Instruction, Value};
 
 macro_rules! asm {
     ($m:expr, $($args:expr)*) => {
@@ -27,7 +27,7 @@ pub struct BasicBlock(pub usize, pub usize);
 #[derive(Debug, PartialEq)]
 pub struct BasicBlockData {
     pub label: String,
-    pub instrs: Vec<String>,
+    pub instrs: Vec<Instruction>,
     pub parent: Value,
     pub terminator: Option<String>,
 }
@@ -41,8 +41,6 @@ impl BasicBlockData {
             terminator: None,
         };
         eprintln!("parent {:?}", parent);
-        asm!(bb,
-             format!("{}:", label));
         let parent = match parent {
             Value::Function(p) => p,
             _ => bug!("The parent of a basic block has to be a function")
