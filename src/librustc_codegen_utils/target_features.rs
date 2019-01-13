@@ -35,6 +35,7 @@ pub const AARCH64_WHITELIST: &[(&str, Option<&str>)] = &[
 ];
 
 pub const X86_WHITELIST: &[(&str, Option<&str>)] = &[
+    ("adx", Some("adx_target_feature")),
     ("aes", None),
     ("avx", None),
     ("avx2", None),
@@ -50,6 +51,7 @@ pub const X86_WHITELIST: &[(&str, Option<&str>)] = &[
     ("avx512vpopcntdq", Some("avx512_target_feature")),
     ("bmi1", None),
     ("bmi2", None),
+    ("cmpxchg16b", Some("cmpxchg16b_target_feature")),
     ("fma", None),
     ("fxsr", None),
     ("lzcnt", None),
