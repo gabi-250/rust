@@ -1158,6 +1158,8 @@ where
 }
 
 pub fn default_provide(providers: &mut ty::query::Providers) {
+    proc_macro_decls::provide(providers);
+    plugin::build::provide(providers);
     hir::provide(providers);
     borrowck::provide(providers);
     mir::provide(providers);
@@ -1167,6 +1169,7 @@ pub fn default_provide(providers: &mut ty::query::Providers) {
     typeck::provide(providers);
     ty::provide(providers);
     traits::provide(providers);
+    stability::provide(providers);
     reachable::provide(providers);
     rustc_passes::provide(providers);
     rustc_traits::provide(providers);
@@ -1211,15 +1214,6 @@ where
         middle::entry::find_entry_point(sess, &hir_map, name)
     });
 
-    sess.plugin_registrar_fn
-        .set(time(sess, "looking for plugin registrar", || {
-            plugin::build::find_plugin_registrar(sess.diagnostic(), &hir_map)
-        }));
-    sess.proc_macro_decls_static
-        .set(proc_macro_decls::find(&hir_map));
-
-    time(sess, "loop checking", || loops::check_crate(sess, &hir_map));
-
     let mut local_providers = ty::query::Providers::default();
     default_provide(&mut local_providers);
     codegen_backend.provide(&mut local_providers);
@@ -1247,7 +1241,17 @@ where
         |tcx| {
             // Do some initialization of the DepGraph that can only be done with the
             // tcx available.
-            rustc_incremental::dep_graph_tcx_init(tcx);
+            time(sess, "dep graph tcx init", || rustc_incremental::dep_graph_tcx_init(tcx));
+
+            time(sess, "looking for plugin registrar", || {
+                plugin::build::find_plugin_registrar(tcx)
+            });
+
+            time(sess, "looking for derive registrar", || {
+                proc_macro_decls::find(tcx)
+            });
+
+            time(sess, "loop checking", || loops::check_crate(tcx));
 
             time(sess, "attribute checking", || {
                 hir::check_attr::check_crate(tcx)

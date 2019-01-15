@@ -25,9 +25,9 @@ use syntax_pos::{Span, DUMMY_SP};
 use errors::{DiagnosticBuilder, Handler};
 use visit::{self, FnKind, Visitor};
 use parse::ParseSess;
-use symbol::{keywords, Symbol};
+use symbol::Symbol;
 
-use std::{env};
+use std::env;
 
 macro_rules! set {
     ($field: ident) => {{
@@ -191,7 +191,7 @@ declare_features! (
     (active, slice_patterns, "1.0.0", Some(23121), None),
 
     // Allows the definition of `const` functions with some advanced features.
-    (active, const_fn, "1.2.0", Some(24111), None),
+    (active, const_fn, "1.2.0", Some(57563), None),
 
     // Allows accessing fields of unions inside `const` functions.
     (active, const_fn_union, "1.27.0", Some(51909), None),
@@ -243,9 +243,6 @@ declare_features! (
     //
     // rustc internal
     (active, omit_gdb_pretty_printer_section, "1.5.0", None, None),
-
-    // Allows `cfg(target_vendor = "...")`.
-    (active, cfg_target_vendor, "1.5.0", Some(29718), None),
 
     // Allows attributes on expressions and non-item statements.
     (active, stmt_expr_attributes, "1.6.0", Some(15701), None),
@@ -375,9 +372,6 @@ declare_features! (
     // Generic associated types (RFC 1598)
     (active, generic_associated_types, "1.23.0", Some(44265), None),
 
-    // `extern` in paths
-    (active, extern_in_paths, "1.23.0", Some(55600), None),
-
     // Infer static outlives requirements (RFC 2093).
     (active, infer_static_outlives_requirements, "1.26.0", Some(54185), None),
 
@@ -506,6 +500,9 @@ declare_features! (
     // Allows the use of `#[derive(Anything)]` as sugar for `#[derive_Anything]`.
     (removed, custom_derive, "1.0.0", Some(29644), None,
      Some("subsumed by `#[proc_macro_derive]`")),
+    // Paths of the form: `extern::foo::bar`
+    (removed, extern_in_paths, "1.33.0", Some(55600), None,
+     Some("subsumed by `::foo::bar` paths")),
 );
 
 declare_features! (
@@ -686,6 +683,8 @@ declare_features! (
     (accepted, if_while_or_patterns, "1.33.0", Some(48215), None),
     // Allows `use x::y;` to search `x` in the current scope.
     (accepted, uniform_paths, "1.32.0", Some(53130), None),
+    // Allows `cfg(target_vendor = "...")`.
+    (accepted, cfg_target_vendor, "1.33.0", Some(29718), None),
 );
 
 // If you change this, please modify `src/doc/unstable-book` as well. You must
@@ -1181,7 +1180,6 @@ pub const BUILTIN_ATTRIBUTES: &[(&str, AttributeType, AttributeGate)] = &[
 // cfg(...)'s that are feature gated
 const GATED_CFGS: &[(&str, &str, fn(&Features) -> bool)] = &[
     // (name in cfg, feature, function to check if the feature is enabled)
-    ("target_vendor", "cfg_target_vendor", cfg_fn!(cfg_target_vendor)),
     ("target_thread_local", "cfg_target_thread_local", cfg_fn!(cfg_target_thread_local)),
     ("target_has_atomic", "cfg_target_has_atomic", cfg_fn!(cfg_target_has_atomic)),
     ("rustdoc", "doc_cfg", cfg_fn!(doc_cfg)),
@@ -1827,25 +1825,6 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
             _ => {}
         }
         visit::walk_impl_item(self, ii);
-    }
-
-    fn visit_path(&mut self, path: &'a ast::Path, _id: NodeId) {
-        for segment in &path.segments {
-            // Identifiers we are going to check could come from a legacy macro (e.g., `#[test]`).
-            // For such macros identifiers must have empty context, because this context is
-            // used during name resolution and produced names must be unhygienic for compatibility.
-            // On the other hand, we need the actual non-empty context for feature gate checking
-            // because it's hygienic even for legacy macros. As previously stated, such context
-            // cannot be kept in identifiers, so it's kept in paths instead and we take it from
-            // there while keeping location info from the ident span.
-            let span = segment.ident.span.with_ctxt(path.span.ctxt());
-            if segment.ident.name == keywords::Extern.name() {
-                gate_feature_post!(&self, extern_in_paths, span,
-                                   "`extern` in paths is experimental");
-            }
-        }
-
-        visit::walk_path(self, path);
     }
 
     fn visit_vis(&mut self, vis: &'a ast::Visibility) {

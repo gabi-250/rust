@@ -120,6 +120,16 @@ struct BindingError {
     target: BTreeSet<Span>,
 }
 
+struct TypoSuggestion {
+    candidate: Symbol,
+
+    /// The kind of the binding ("crate", "module", etc.)
+    kind: &'static str,
+
+    /// An appropriate article to refer to the binding ("a", "an", etc.)
+    article: &'static str,
+}
+
 impl PartialOrd for BindingError {
     fn partial_cmp(&self, other: &BindingError) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
@@ -1005,7 +1015,7 @@ enum ModuleOrUniformRoot<'a> {
     CrateRootAndExternPrelude,
 
     /// Virtual module that denotes resolution in extern prelude.
-    /// Used for paths starting with `::` on 2018 edition or `extern::`.
+    /// Used for paths starting with `::` on 2018 edition.
     ExternPrelude,
 
     /// Virtual module that denotes resolution in current scope.
@@ -1448,7 +1458,7 @@ impl PrimitiveTypeTable {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct ExternPreludeEntry<'a> {
     extern_crate_item: Option<&'a NameBinding<'a>>,
     pub introduced_by_item: bool,
@@ -2017,16 +2027,14 @@ impl<'a> Resolver<'a> {
         if ident.name == keywords::Invalid.name() {
             return Some(LexicalScopeBinding::Def(Def::Err));
         }
-        if ns == TypeNS {
-            ident.span = if ident.name == keywords::SelfUpper.name() {
-                // FIXME(jseyfried) improve `Self` hygiene
-                ident.span.with_ctxt(SyntaxContext::empty())
-            } else {
-                ident.span.modern()
-            }
+        ident.span = if ident.name == keywords::SelfUpper.name() {
+            // FIXME(jseyfried) improve `Self` hygiene
+            ident.span.with_ctxt(SyntaxContext::empty())
+        } else if ns == TypeNS {
+            ident.span.modern()
         } else {
-            ident = ident.modern_and_legacy();
-        }
+            ident.span.modern_and_legacy()
+        };
 
         // Walk backwards up the ribs in scope.
         let record_used = record_used_id.is_some();
@@ -3293,8 +3301,19 @@ impl<'a> Resolver<'a> {
             let mut levenshtein_worked = false;
 
             // Try Levenshtein algorithm.
-            if let Some(candidate) = this.lookup_typo_candidate(path, ns, is_expected, span) {
-                err.span_label(ident_span, format!("did you mean `{}`?", candidate));
+            let suggestion = this.lookup_typo_candidate(path, ns, is_expected, span);
+            if let Some(suggestion) = suggestion {
+                let msg = format!(
+                    "{} {} with a similar name exists",
+                    suggestion.article, suggestion.kind
+                );
+                err.span_suggestion_with_applicability(
+                    ident_span,
+                    &msg,
+                    suggestion.candidate.to_string(),
+                    Applicability::MaybeIncorrect,
+                );
+
                 levenshtein_worked = true;
             }
 
@@ -3817,8 +3836,7 @@ impl<'a> Resolver<'a> {
                             self.resolve_self(&mut ctxt, self.current_module)));
                         continue;
                     }
-                    if name == keywords::Extern.name() ||
-                       name == keywords::PathRoot.name() && ident.span.rust_2018() {
+                    if name == keywords::PathRoot.name() && ident.span.rust_2018() {
                         module = Some(ModuleOrUniformRoot::ExternPrelude);
                         continue;
                     }
@@ -3985,8 +4003,8 @@ impl<'a> Resolver<'a> {
         };
 
         // We're only interested in `use` paths which should start with
-        // `{{root}}` or `extern` currently.
-        if first_name != keywords::Extern.name() && first_name != keywords::PathRoot.name() {
+        // `{{root}}` currently.
+        if first_name != keywords::PathRoot.name() {
             return
         }
 
@@ -4185,19 +4203,25 @@ impl<'a> Resolver<'a> {
         None
     }
 
-    fn lookup_typo_candidate<FilterFn>(&mut self,
-                                       path: &[Segment],
-                                       ns: Namespace,
-                                       filter_fn: FilterFn,
-                                       span: Span)
-                                       -> Option<Symbol>
-        where FilterFn: Fn(Def) -> bool
+    fn lookup_typo_candidate<FilterFn>(
+        &mut self,
+        path: &[Segment],
+        ns: Namespace,
+        filter_fn: FilterFn,
+        span: Span,
+    ) -> Option<TypoSuggestion>
+    where
+        FilterFn: Fn(Def) -> bool,
     {
-        let add_module_candidates = |module: Module, names: &mut Vec<Name>| {
+        let add_module_candidates = |module: Module, names: &mut Vec<TypoSuggestion>| {
             for (&(ident, _), resolution) in module.resolutions.borrow().iter() {
                 if let Some(binding) = resolution.borrow().binding {
                     if filter_fn(binding.def()) {
-                        names.push(ident.name);
+                        names.push(TypoSuggestion {
+                            candidate: ident.name,
+                            article: binding.def().article(),
+                            kind: binding.def().kind_name(),
+                        });
                     }
                 }
             }
@@ -4211,7 +4235,11 @@ impl<'a> Resolver<'a> {
                 // Locals and type parameters
                 for (ident, def) in &rib.bindings {
                     if filter_fn(*def) {
-                        names.push(ident.name);
+                        names.push(TypoSuggestion {
+                            candidate: ident.name,
+                            article: def.article(),
+                            kind: def.kind_name(),
+                        });
                     }
                 }
                 // Items in scope
@@ -4224,7 +4252,13 @@ impl<'a> Resolver<'a> {
                     } else {
                         // Items from the prelude
                         if !module.no_implicit_prelude {
-                            names.extend(self.extern_prelude.iter().map(|(ident, _)| ident.name));
+                            names.extend(self.extern_prelude.iter().map(|(ident, _)| {
+                                TypoSuggestion {
+                                    candidate: ident.name,
+                                    article: "a",
+                                    kind: "crate",
+                                }
+                            }));
                             if let Some(prelude) = self.prelude {
                                 add_module_candidates(prelude, &mut names);
                             }
@@ -4236,7 +4270,13 @@ impl<'a> Resolver<'a> {
             // Add primitive types to the mix
             if filter_fn(Def::PrimTy(Bool)) {
                 names.extend(
-                    self.primitive_type_table.primitive_types.iter().map(|(name, _)| name)
+                    self.primitive_type_table.primitive_types.iter().map(|(name, _)| {
+                        TypoSuggestion {
+                            candidate: *name,
+                            article: "a",
+                            kind: "primitive type",
+                        }
+                    })
                 )
             }
         } else {
@@ -4253,9 +4293,16 @@ impl<'a> Resolver<'a> {
 
         let name = path[path.len() - 1].ident.name;
         // Make sure error reporting is deterministic.
-        names.sort_by_cached_key(|name| name.as_str());
-        match find_best_match_for_name(names.iter(), &name.as_str(), None) {
-            Some(found) if found != name => Some(found),
+        names.sort_by_cached_key(|suggestion| suggestion.candidate.as_str());
+
+        match find_best_match_for_name(
+            names.iter().map(|suggestion| &suggestion.candidate),
+            &name.as_str(),
+            None,
+        ) {
+            Some(found) if found != name => names
+                .into_iter()
+                .find(|suggestion| suggestion.candidate == found),
             _ => None,
         }
     }
@@ -5112,6 +5159,9 @@ impl<'a> Resolver<'a> {
         }
         self.extern_prelude.get(&ident.modern()).cloned().and_then(|entry| {
             if let Some(binding) = entry.extern_crate_item {
+                if !speculative && entry.introduced_by_item {
+                    self.record_use(ident, TypeNS, binding, false);
+                }
                 Some(binding)
             } else {
                 let crate_id = if !speculative {

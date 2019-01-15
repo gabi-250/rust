@@ -59,6 +59,7 @@ use std::hash::{Hash, Hasher};
 use std::fmt;
 use std::mem;
 use std::ops::{Deref, Bound};
+use std::ptr;
 use std::iter;
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -168,7 +169,7 @@ impl<'gcx: 'tcx, 'tcx> CtxtInterners<'tcx> {
 
                 // Make sure we don't end up with inference
                 // types/regions in the global interner
-                if local as *const _ as usize == global as *const _ as usize {
+                if ptr::eq(local, global) {
                     bug!("Attempted to intern `{:?}` which contains \
                         inference types/regions in the global type context",
                         &ty_struct);
@@ -1135,9 +1136,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
 
     /// Returns true if self is the same as self.global_tcx().
     fn is_global(self) -> bool {
-        let local = self.interners as *const _;
-        let global = &self.global_interners as *const _;
-        local as usize == global as usize
+        ptr::eq(self.interners, &self.global_interners)
     }
 
     /// Create a type context and call the closure with a `TyCtxt` reference
@@ -1683,6 +1682,7 @@ impl<'gcx> GlobalCtxt<'gcx> {
             let new_icx = ty::tls::ImplicitCtxt {
                 tcx,
                 query: icx.query.clone(),
+                diagnostics: icx.diagnostics,
                 layout_depth: icx.layout_depth,
                 task_deps: icx.task_deps,
             };
@@ -1787,11 +1787,13 @@ pub mod tls {
     use std::fmt;
     use std::mem;
     use std::marker::PhantomData;
+    use std::ptr;
     use syntax_pos;
     use ty::query;
     use errors::{Diagnostic, TRACK_DIAGNOSTICS};
     use rustc_data_structures::OnDrop;
     use rustc_data_structures::sync::{self, Lrc, Lock};
+    use rustc_data_structures::thin_vec::ThinVec;
     use dep_graph::TaskDeps;
 
     #[cfg(not(parallel_queries))]
@@ -1811,9 +1813,13 @@ pub mod tls {
         /// by `enter_local` with a new local interner
         pub tcx: TyCtxt<'tcx, 'gcx, 'tcx>,
 
-        /// The current query job, if any. This is updated by start_job in
+        /// The current query job, if any. This is updated by JobOwner::start in
         /// ty::query::plumbing when executing a query
         pub query: Option<Lrc<query::QueryJob<'gcx>>>,
+
+        /// Where to store diagnostics for the current query job, if any.
+        /// This is updated by JobOwner::start in ty::query::plumbing when executing a query
+        pub diagnostics: Option<&'a Lock<ThinVec<Diagnostic>>>,
 
         /// Used to prevent layout from recursing too deeply.
         pub layout_depth: usize,
@@ -1880,8 +1886,9 @@ pub mod tls {
     fn track_diagnostic(diagnostic: &Diagnostic) {
         with_context_opt(|icx| {
             if let Some(icx) = icx {
-                if let Some(ref query) = icx.query {
-                    query.diagnostics.lock().push(diagnostic.clone());
+                if let Some(ref diagnostics) = icx.diagnostics {
+                    let mut diagnostics = diagnostics.lock();
+                    diagnostics.extend(Some(diagnostic.clone()));
                 }
             }
         })
@@ -1948,6 +1955,7 @@ pub mod tls {
             let icx = ImplicitCtxt {
                 tcx,
                 query: None,
+                diagnostics: None,
                 layout_depth: 0,
                 task_deps: None,
             };
@@ -1977,6 +1985,7 @@ pub mod tls {
         };
         let icx = ImplicitCtxt {
             query: None,
+            diagnostics: None,
             tcx,
             layout_depth: 0,
             task_deps: None,
@@ -2021,8 +2030,7 @@ pub mod tls {
     {
         with_context(|context| {
             unsafe {
-                let gcx = tcx.gcx as *const _ as usize;
-                assert!(context.tcx.gcx as *const _ as usize == gcx);
+                assert!(ptr::eq(context.tcx.gcx, tcx.gcx));
                 let context: &ImplicitCtxt<'_, '_, '_> = mem::transmute(context);
                 f(context)
             }
@@ -2040,10 +2048,8 @@ pub mod tls {
     {
         with_context(|context| {
             unsafe {
-                let gcx = tcx.gcx as *const _ as usize;
-                let interners = tcx.interners as *const _ as usize;
-                assert!(context.tcx.gcx as *const _ as usize == gcx);
-                assert!(context.tcx.interners as *const _ as usize == interners);
+                assert!(ptr::eq(context.tcx.gcx, tcx.gcx));
+                assert!(ptr::eq(context.tcx.interners, tcx.interners));
                 let context: &ImplicitCtxt<'_, '_, '_> = mem::transmute(context);
                 f(context)
             }
