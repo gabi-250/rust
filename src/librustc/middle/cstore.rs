@@ -164,7 +164,7 @@ pub enum ExternCrateSource {
     ),
     // Crate is loaded by `use`.
     Use,
-    /// Crate is implicitly loaded by an absolute or an `extern::` path.
+    /// Crate is implicitly loaded by an absolute path.
     Path,
 }
 
