@@ -23,8 +23,8 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         callee_ty: Ty<'tcx>,
         fn_ty: &FnType<'tcx, Ty<'tcx>>,
-        args: &[OperandRef<'tcx, &'ll Value>],
-        llresult: &'ll Value,
+        args: &[OperandRef<'tcx, Value>],
+        llresult: Value,
         span: Span,
     ) {
         unimplemented!("codegen_intrinsic_call");
@@ -34,11 +34,11 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("abort");
     }
 
-    fn assume(&mut self, val: &'ll Value) {
+    fn assume(&mut self, val: Value) {
         unimplemented!("assume");
     }
 
-    fn expect(&mut self, cond: &'ll Value, expected: bool) -> &'ll Value {
+    fn expect(&mut self, cond: Value, expected: bool) -> Value {
         unimplemented!("expect");
     }
 }

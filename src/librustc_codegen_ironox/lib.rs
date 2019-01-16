@@ -75,11 +75,17 @@ mod consts;
 mod context;
 mod debuginfo;
 mod declare;
+mod function;
 mod intrinsic;
 mod ironox_type;
 mod metadata;
 mod mono_item;
 mod value;
+
+use context::CodegenCx;
+use ironox_type::Type;
+use value::Value;
+use function::IronOxFunction;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -92,7 +98,7 @@ impl Clone for TargetMachineIronOx {
 
 impl ExtraBackendMethods for IronOxCodegenBackend {
     fn new_metadata(&self, _sess: &Session, _mod_name: &str) -> ModuleIronOx {
-        ModuleIronOx { asm: "".to_string() }
+        ModuleIronOx::new()
     }
 
     fn write_metadata<'b, 'gcx>(
@@ -129,8 +135,30 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     }
 }
 
+#[derive(Debug)]
 pub struct ModuleIronOx {
-    asm: String
+    pub functions: Vec<IronOxFunction>,
+}
+
+impl ModuleIronOx {
+    pub fn new() -> ModuleIronOx {
+        ModuleIronOx {
+            functions: vec![],
+        }
+    }
+
+    pub fn add_function_with_type(
+        &mut self,
+        cx: &CodegenCx,
+        name: &str,
+        fn_type: Type) -> Value {
+        self.functions.push(IronOxFunction::new(cx, name, fn_type));
+        Value::Function(self.functions.len() - 1)
+    }
+
+    pub fn asm(&self) -> String {
+        "not actual asm".to_string()
+    }
 }
 
 pub struct ModuleBufferIronOx {}
@@ -171,6 +199,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     ) -> Result<LtoModuleCodegen<Self>, FatalError> {
         unimplemented!("run_fat_lto");
     }
+
     fn run_thin_lto(
         cgcx: &CodegenContext<Self>,
         modules: Vec<(String, Self::ThinBuffer)>,
@@ -214,7 +243,7 @@ impl WriteBackendMethods for IronOxCodegenBackend {
                 .stdin(Stdio::piped()).spawn().expect("failed to run as");
             {
                 let stdin = cmd.stdin.as_mut().expect("failed to open stdin");
-                stdin.write_all(module.module_llvm.asm.as_bytes())
+                stdin.write_all(module.module_llvm.asm().as_bytes())
                     .expect("failed to write to stdin");
             }
             Ok(CompiledModule {

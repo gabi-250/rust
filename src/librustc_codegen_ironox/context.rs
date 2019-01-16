@@ -15,49 +15,72 @@ use libc::c_uint;
 use rustc::mir::mono::Stats;
 
 use rustc::session::Session;
+
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{LayoutOf, LayoutError, self, TyLayout, Size};
 use rustc::util::nodemap::FxHashMap;
+use rustc_codegen_ssa::base::wants_msvc_seh;
+use rustc_codegen_ssa::callee::resolve_and_get_fn;
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
 use rustc::mir::interpret::{Scalar, Allocation};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
 
-use basic_block::BasicBlock;
+use basic_block::{BasicBlock, BasicBlockData};
 use value::Value;
-use ironox_type::Type;
+use ironox_type::{Type, LLType};
+use function::IronOxFunction;
 use debuginfo::DIScope;
 
-impl BackendTypes for CodegenCx<'ll, 'tcx> {
-    type Value = &'ll Value;
-    type BasicBlock = &'ll BasicBlock;
-    type Type = &'ll Type;
-    type Funclet = ();
+use super::ModuleIronOx;
 
+impl BackendTypes for CodegenCx<'ll, 'tcx> {
+    type Value = Value;
+    type BasicBlock = BasicBlock;
+    type Type = Type;
+    type Funclet = ();
     type DIScope = &'ll DIScope;
+}
+
+pub struct IronOxContext<'ll> {
+    pub module: &'ll mut ::ModuleIronOx
 }
 
 pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     pub stats: RefCell<Stats>,
     pub codegen_unit: Arc<CodegenUnit<'tcx>>,
-    pub instances: RefCell<FxHashMap<Instance<'tcx>, &'ll Value>>,
+    pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
+    pub module: RefCell<&'ll mut ModuleIronOx>,
+    pub vtables: RefCell<
+        FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>,
+    eh_personality: Cell<Option<Value>>,
+    pub types: RefCell<Vec<LLType>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
     pub fn new(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-           codegen_unit: Arc<CodegenUnit<'tcx>>,
-           module: &'ll ::ModuleIronOx)
+               codegen_unit: Arc<CodegenUnit<'tcx>>,
+               module: &'ll mut ModuleIronOx)
                  -> CodegenCx<'ll, 'tcx> {
         CodegenCx {
             tcx,
             codegen_unit,
             stats: RefCell::new(Stats::default()),
             instances: Default::default(),
+            module: RefCell::new(module),
+            vtables: Default::default(),
+            eh_personality: Default::default(),
+            types: Default::default(),
         }
+    }
+
+    pub fn ty_size(&self, ty: Type) -> u64 {
+        // FIXME: implement
+        8
     }
 }
 
@@ -88,29 +111,72 @@ impl ty::layout::HasDataLayout for CodegenCx<'ll, 'tcx> {
 }
 
 impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
+
     fn vtables(&self) -> &RefCell<
-        FxHashMap<(Ty<'tcx>, ty::PolyExistentialTraitRef<'tcx>), &'ll Value>
-    > {
-        unimplemented!("vtables");
+        FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>
+    {
+        &self.vtables
     }
 
-    fn instances(&self) -> &RefCell<FxHashMap<Instance<'tcx>, &'ll Value>> {
+    fn instances(&self) -> &RefCell<FxHashMap<Instance<'tcx>, Value>> {
         &self.instances
     }
 
-    fn get_fn(&self, instance: Instance<'tcx>) -> &'ll Value {
-        unimplemented!("get_fn");
+    fn get_fn(&self, instance: Instance<'tcx>) ->
+        Value {
+        if let Some(ref llfn) = self.instances.borrow().get(&instance) {
+            // The function has already been defined
+            return **llfn;
+        }
+
+        let sym_name = self.tcx.symbol_name(instance).as_str();
+        let llfn = if let Some(llfn) = self.get_declared_value(&sym_name) {
+            // FIXME:
+            llfn
+        } else {
+            // Otherwise, it probably exists in an external lib...
+            let fn_sig = instance.fn_sig(self.tcx);
+            let llfn = self.declare_fn(&sym_name, fn_sig);
+            // visbility, linkage......
+            llfn
+        };
+        self.instances.borrow_mut().insert(instance, llfn);
+        llfn
     }
 
-    fn get_param(&self, llfn: &'ll Value, index: c_uint) -> &'ll Value {
-        unimplemented!("get_param");
+    fn get_param(&self, llfn: Value, index: c_uint) -> Value {
+        let llfn_index = match llfn {
+            Value::Function(i) => i,
+            _ => bug!("llfn must be a function! Found: {:?}", llfn),
+        };
+        self.module.borrow().functions[llfn_index].get_param(index as usize)
     }
 
-    fn eh_personality(&self) -> &'ll Value {
-        unimplemented!("eh_personality");
+    fn eh_personality(&self) -> Value {
+        if let Some(llpersonality) = self.eh_personality.get() {
+            return llpersonality
+        }
+        let tcx = self.tcx;
+        let llfn = match tcx.lang_items().eh_personality() {
+            Some(def_id) if !wants_msvc_seh(self.sess()) => {
+                resolve_and_get_fn(self, def_id, tcx.intern_substs(&[]))
+            }
+            _ => {
+                let name = if wants_msvc_seh(self.sess()) {
+                    unimplemented!("Unsupported platform: MSVC")
+                } else {
+                    "rust_eh_personality"
+                };
+                let fty = self.type_variadic_func(&[], self.type_i32());
+                self.declare_cfn(name, fty)
+            }
+        };
+        //attributes::apply_target_cpu_attr(self, llfn);
+        self.eh_personality.set(Some(llfn));
+        llfn
     }
 
-    fn eh_unwind_resume(&self) -> &'ll Value {
+    fn eh_unwind_resume(&self) -> Value {
         unimplemented!("eh_unwind_resume");
     }
 
@@ -134,72 +200,68 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self.codegen_unit
     }
 
-    fn used_statics(&self) -> &RefCell<Vec<&'ll Value>> {
+    fn used_statics(&self) -> &RefCell<Vec<Value>> {
         unimplemented!("used_statics");
     }
 
-    fn set_frame_pointer_elimination(&self, llfn: &'ll Value) {
-        unimplemented!("set_frame_pointer_elimination");
+    fn set_frame_pointer_elimination(&self, llfn: Value) {
+        // FIXME
     }
 
-    fn apply_target_cpu_attr(&self, llfn: &'ll Value) {
-        unimplemented!("apply_target_cpu_attr");
+    fn apply_target_cpu_attr(&self, llfn: Value) {
+        // FIXME
     }
 
     fn create_used_variable(&self) {
         unimplemented!("create_used_variable");
     }
 
-    fn closure_env_needs_indirect_debuginfo(&self) -> bool {
-        unimplemented!("closure_env_needs_indirect_debuginfo");
-    }
 }
 
 // common?
-
 impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
-    fn const_null(&self, t: &'ll Type) -> &'ll Value {
+    fn const_null(&self, t: Type) -> Value {
         unimplemented!("const_null");
     }
 
-    fn const_undef(&self, t: &'ll Type) -> &'ll Value {
+    fn const_undef(&self, t: Type) -> Value {
         unimplemented!("const_undef");
     }
 
-    fn const_int(&self, t: &'ll Type, i: i64) -> &'ll Value {
+    fn const_int(&self, t: Type, i: i64) -> Value {
         unimplemented!("const_int");
     }
 
-    fn const_uint(&self, t: &'ll Type, i: u64) -> &'ll Value {
+    fn const_uint(&self, t: Type, i: u64) -> Value {
         unimplemented!("const_uint");
     }
 
-    fn const_uint_big(&self, t: &'ll Type, u: u128) -> &'ll Value {
+    fn const_uint_big(&self, t: Type, u: u128) -> Value {
         unimplemented!("const_uint_big");
     }
 
-    fn const_bool(&self, val: bool) -> &'ll Value {
+    fn const_bool(&self, val: bool) -> Value {
         unimplemented!("const_bool");
     }
 
-    fn const_i32(&self, i: i32) -> &'ll Value {
+    fn const_i32(&self, i: i32) -> Value {
         unimplemented!("const_i32");
     }
 
-    fn const_u32(&self, i: u32) -> &'ll Value {
+    fn const_u32(&self, i: u32) -> Value {
         unimplemented!("const_u32");
     }
 
-    fn const_u64(&self, i: u64) -> &'ll Value {
+    fn const_u64(&self, i: u64) -> Value {
         unimplemented!("const_u64");
     }
 
-    fn const_usize(&self, i: u64) -> &'ll Value {
+    fn const_usize(&self, i: u64) -> Value {
         unimplemented!("const_usize");
     }
 
-    fn const_u8(&self, i: u8) -> &'ll Value {
+    fn const_u8(&self, i: u8) -> Value {
         unimplemented!("const_u8");
     }
 
@@ -207,67 +269,69 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         s: LocalInternedString,
         null_terminated: bool,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("const_cstr");
     }
 
-    fn const_str_slice(&self, s: LocalInternedString) -> &'ll Value {
+    fn const_str_slice(&self, s: LocalInternedString) -> Value {
         unimplemented!("const_str_slice");
     }
 
     fn const_fat_ptr(
         &self,
-        ptr: &'ll Value,
-        meta: &'ll Value
-    ) -> &'ll Value {
+        ptr: Value,
+        meta: Value
+    ) -> Value {
         unimplemented!("const_fat_ptr");
     }
 
     fn const_struct(
         &self,
-        elts: &[&'ll Value],
+        elts: &[Value],
         packed: bool
-    ) -> &'ll Value {
-        unimplemented!("const_struct");
+    ) -> Value {
+        unimplemented!("const struct {:?}", elts);
+        // FIXME calculate the size of the struct
+        Value::ConstUndef
     }
 
-    fn const_array(&self, ty: &'ll Type, elts: &[&'ll Value]) -> &'ll Value {
+    fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
         unimplemented!("const_array");
     }
 
-    fn const_vector(&self, elts: &[&'ll Value]) -> &'ll Value {
+    fn const_vector(&self, elts: &[Value]) -> Value {
         unimplemented!("const_vector");
     }
 
-    fn const_bytes(&self, bytes: &[u8]) -> &'ll Value {
+    fn const_bytes(&self, bytes: &[u8]) -> Value {
         unimplemented!("const_bytes");
     }
 
-    fn const_get_elt(&self, v: &'ll Value, idx: u64) -> &'ll Value {
+    fn const_get_elt(&self, v: Value, idx: u64) -> Value {
         unimplemented!("const_get_elt");
     }
 
-    fn const_get_real(&self, v: &'ll Value) -> Option<(f64, bool)> {
+    fn const_get_real(&self, v: Value) -> Option<(f64, bool)> {
         unimplemented!("const_get_real");
     }
 
-    fn const_to_uint(&self, v: &'ll Value) -> u64 {
+    fn const_to_uint(&self, v: Value) -> u64 {
         unimplemented!("const_to_uint");
     }
 
-    fn is_const_integral(&self, v: &'ll Value) -> bool {
+    fn is_const_integral(&self, v: Value) -> bool {
         unimplemented!("is_const_integral");
     }
 
-    fn is_const_real(&self, v: &'ll Value) -> bool {
+    fn is_const_real(&self, v: Value) -> bool {
         unimplemented!("is_const_real");
     }
 
-    fn const_to_opt_u128(&self, v: &'ll Value, sign_ext: bool) -> Option<u128> {
+    fn const_to_opt_u128(&self, v: Value, sign_ext: bool) -> Option<u128> {
         unimplemented!("const_to_opt_u128");
     }
 
-    fn const_ptrcast(&self, val: &'ll Value, ty: &'ll Type) -> &'ll Value {
+    fn const_ptrcast(&self, val: Value, ty: Type) -> Value {
         unimplemented!("const_ptrcast");
     }
 
@@ -275,9 +339,24 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         cv: Scalar,
         layout: &layout::Scalar,
-        llty: &'ll Type,
-    ) -> &'ll Value {
-        unimplemented!("scalar_to_backend");
+        llty: Type,
+    ) -> Value {
+        let bitsize = if layout.is_bool() { 1 } else { layout.value.size(self).bits() };
+        match cv {
+            Scalar::Bits { size: 0, .. } => {
+                assert_eq!(0, layout.value.size(self).bytes());
+                self.const_undef(self.type_ix(0))
+            },
+            Scalar::Bits { bits, size } => {
+                assert_eq!(size as u64, layout.value.size(self).bytes());
+                let llval = self.const_uint_big(self.type_ix(bitsize), bits);
+                // FIXME
+                llval
+            },
+            Scalar::Ptr(ptr) => {
+                unimplemented!("Scalar::Ptr");
+            }
+        }
     }
 
     fn from_const_alloc(
@@ -285,7 +364,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         layout: TyLayout<'tcx>,
         alloc: &Allocation,
         offset: Size,
-    ) -> PlaceRef<'tcx, &'ll Value> {
+    ) -> PlaceRef<'tcx, Value> {
         unimplemented!("from_const_alloc");
     }
 }

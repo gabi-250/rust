@@ -34,7 +34,7 @@ impl PreDefineMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     visibility: Visibility,
                     symbol_name: &str) {
 
-        // insert an empty value for now
-        self.instances.borrow_mut().insert(instance, &Value {});
+        // FIXME: this should not be a ConstUndef (it should be a function)
+        self.instances.borrow_mut().insert(instance, Value::ConstUndef);
     }
 }

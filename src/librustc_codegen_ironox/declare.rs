@@ -10,7 +10,7 @@
 
 use context::CodegenCx;
 use ironox_type::Type;
-use rustc::ty::PolyFnSig;
+use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
 use value::Value;
 
@@ -18,16 +18,16 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn declare_global(
         &self,
-        name: &str, ty: &'ll Type
-    ) -> &'ll Value {
+        name: &str, ty: Type
+    ) -> Value {
         unimplemented!("declare_global");
     }
 
     fn declare_cfn(
         &self,
         name: &str,
-        fn_type: &'ll Type
-    ) -> &'ll Value {
+        fn_type: Type
+    ) -> Value {
         unimplemented!("declare_cfn");
     }
 
@@ -35,19 +35,19 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str,
         sig: PolyFnSig<'tcx>,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("declare_fn");
     }
 
     fn define_global(
         &self,
         name: &str,
-        ty: &'ll Type
-    ) -> Option<&'ll Value> {
+        ty: Type
+    ) -> Option<Value> {
         unimplemented!("define_global");
     }
 
-    fn define_private_global(&self, ty: &'ll Type) -> &'ll Value {
+    fn define_private_global(&self, ty: Type) -> Value {
         unimplemented!("define_private_global");
     }
 
@@ -55,7 +55,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str,
         fn_sig: PolyFnSig<'tcx>,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("define_fn");
     }
 
@@ -63,15 +63,17 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str,
         fn_sig: PolyFnSig<'tcx>,
-    ) -> &'ll Value {
+    ) -> Value {
         unimplemented!("define_internal_fn");
     }
 
-    fn get_declared_value(&self, name: &str) -> Option<&'ll Value> {
+    fn get_declared_value(&self, name: &str) -> Option<Value> {
         unimplemented!("get_declared_value");
     }
 
-    fn get_defined_value(&self, name: &str) -> Option<&'ll Value> {
-        unimplemented!("get_defined_value");
+    fn get_defined_value(&self, name: &str) -> Option<Value> {
+        // FIXME: check if the value is a declaration (defined outside
+        // of the current translation unit)
+        self.get_declared_value(name)
     }
 }

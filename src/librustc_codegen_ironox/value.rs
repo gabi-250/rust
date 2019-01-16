@@ -6,12 +6,25 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt;
 use std::hash::{Hash, Hasher};
 
-#[allow(dead_code)]
-#[derive(Debug, PartialEq)]
-pub struct Value {}
+/// The unique identifier of an IronOx value.
+///
+/// Each enum variant has one or more indices that can be used to retrieve the
+/// value from the context.
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Value {
+    /// The index of an `IronOxFunction` function in the module.
+    Function(usize),
+    /// A `(function index, local index)` pair that can be used to retrieve a
+    /// local value.
+    Local(usize, usize),
+    /// An unspecified constant. This is just a wrapper around a `Type`.
+    ConstUndef,
+    BigConst(u128),
+    Global,
+    None,
+}
 
 impl Eq for Value {}
 
