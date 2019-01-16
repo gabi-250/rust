@@ -8,6 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use abi::FnTypeExt;
 use context::CodegenCx;
 use type_::Type;
 use value::Value;
@@ -29,7 +30,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         fn_type: Type
     ) -> Value {
-        unimplemented!("declare_cfn");
+        self.module.borrow_mut().add_function_with_type(self, name, fn_type)
     }
 
     fn declare_fn(
@@ -37,7 +38,15 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         sig: PolyFnSig<'tcx>,
     ) -> Value {
-        unimplemented!("declare_fn");
+        // Normalize the signature.
+        let sig = self.tcx.normalize_erasing_late_bound_regions(
+            ty::ParamEnv::reveal_all(),
+            &sig);
+        // Get the IronOx function type that corresponds to this signature.
+        let fn_type = self.new_fn_type(sig, &[]).ironox_type(self);
+        // Create a function of type fn_type.
+        let fn_val = self.declare_cfn(name, fn_type);
+        fn_val
     }
 
     fn define_global(

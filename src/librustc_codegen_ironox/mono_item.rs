@@ -33,8 +33,10 @@ impl PreDefineMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     linkage: Linkage,
                     visibility: Visibility,
                     symbol_name: &str) {
-
-        // FIXME: this should not be a ConstUndef (it should be a function)
-        self.instances.borrow_mut().insert(instance, Value::ConstUndef);
+        let mono_sig = instance.fn_sig(self.tcx);
+        // Create an IronOx function for this instance.
+        let fn_decl = self.declare_fn(symbol_name, mono_sig);
+        // Map the instance to the IronOx function it corresponds to.
+        self.instances.borrow_mut().insert(instance, fn_decl);
     }
 }
