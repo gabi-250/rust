@@ -8,3 +8,6 @@ git clean -dffx # If upstream removes a submodule, remove the files from disk.
 # Note that the gdb must be Python enabled.
 PATH=/opt/gdb-8.2/bin:${PATH} RUST_BACKTRACE=1 \
 ./x.py test --config .buildbot.toml
+
+# Make sure there are no compile errors
+RUST_BACKTRACE=1 ./x.py check --config .buildbot-ironox.toml
