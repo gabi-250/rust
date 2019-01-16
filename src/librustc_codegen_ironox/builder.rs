@@ -8,10 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::common::{IntPredicate, RealPredicate, AtomicOrdering,
     SynchronizationScope, AtomicRmwBinOp};
 use rustc_codegen_ssa::MemFlags;
+use libc::c_char;
+use rustc_codegen_ssa::traits::*;
+use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::mir::operand::{OperandValue, OperandRef};
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use context::CodegenCx;
@@ -28,6 +30,7 @@ use syntax;
 
 use ir::basic_block::{BasicBlock, BasicBlockData};
 use type_::Type;
+use value::Instruction;
 
 impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type Value = <CodegenCx<'ll, 'tcx> as BackendTypes>::Value;
@@ -38,8 +41,14 @@ impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type DIScope = <CodegenCx<'ll, 'tcx> as BackendTypes>::DIScope;
 }
 
+
+/// Identifies the current insertion point: function index, basic block index,
+/// instruction index.
+pub struct BuilderPosition(usize, usize, usize);
+
 pub struct Builder<'a, 'll: 'a, 'tcx: 'll> {
     pub cx: &'a CodegenCx<'ll, 'tcx>,
+    pub builder: RefCell<BuilderPosition>,
 }
 
 impl ty::layout::LayoutOf for Builder<'_, '_, 'tcx> {
@@ -82,8 +91,16 @@ impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 }
 
 impl Builder<'a, 'll, 'tcx> {
-    fn emit_instr(&mut self, asm: String) {
-        unimplemented!("emit_instr");
+    fn emit_instr(&mut self, inst: Instruction) {
+        let mut builder = self.builder.borrow_mut();
+        let llfn = builder.0;
+        let llbb = builder.1;
+        let inst_idx = builder.2;
+        let mut module = self.cx.module.borrow_mut();
+        module.functions[llfn].basic_blocks[llbb].instrs
+            .insert(inst_idx, inst);
+        // move to the next instruction
+        builder.2 += 1;
     }
 }
 
@@ -113,6 +130,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // FIXME? this is an invalid position and must be overwritten
         Builder {
             cx,
+            builder: RefCell::new(BuilderPosition(0, 0, 0))
         }
     }
 
@@ -125,11 +143,15 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn llfn(&self) -> Value {
-        unimplemented!("llfn");
+        let bb = self.builder.borrow();
+        // the parent of the current basic block
+        let fn_index = bb.0;
+        Value::Function(fn_index)
     }
 
     fn llbb(&self) -> BasicBlock {
-        unimplemented!("llbb");
+        BasicBlock(self.builder.borrow().0,
+                   self.builder.borrow().1)
     }
 
     fn count_insn(&self, category: &str) {
@@ -145,6 +167,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let llbb = llbb.1;
         let instr =
             self.cx.module.borrow().functions[llfn].basic_blocks[llbb].instrs.len();
+        self.builder.replace(BuilderPosition(llfn, llbb, instr));
     }
 
     fn position_at_start(&mut self, llbb: BasicBlock) {
@@ -152,7 +175,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn ret_void(&mut self) {
-        self.emit_instr("ret".to_string());
+        self.emit_instr(Instruction::None);
     }
 
     fn ret(&mut self, v: Value) {
@@ -160,13 +183,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        let br_instr = {
-            let module = self.cx.module.borrow();
-            format!(
-                "jmp {}",
-                module.functions[dest.0].basic_blocks[dest.1].label)
-        };
-        self.emit_instr(br_instr);
+        // FIXME: emit the real instruction
+        self.emit_instr(Instruction::None);
     }
 
     fn cond_br(
@@ -510,7 +528,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         flags: MemFlags,
     )-> Value {
-        ptr
+        unimplemented!("store_with_flags");
     }
 
     fn gep(

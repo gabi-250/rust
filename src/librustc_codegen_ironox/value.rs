@@ -35,6 +35,7 @@ pub enum Value {
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum Instruction {
     // FIXME: implement
+    None,
 }
 
 impl Eq for Value {}
