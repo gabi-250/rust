@@ -30,7 +30,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         fn_type: Type
     ) -> Value {
-        self.module.borrow_mut().add_function_with_type(self, name, fn_type)
+        self.module.borrow_mut().add_function(self, name, fn_type)
     }
 
     fn declare_fn(

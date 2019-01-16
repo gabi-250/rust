@@ -143,17 +143,26 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 
 #[derive(Debug)]
 pub struct ModuleIronOx {
+    /// The functions defined in this module
     pub functions: Vec<IronOxFunction>,
+    /// All the structs in the module
+    pub structs: Vec<IronOxStruct>,
 }
 
 impl ModuleIronOx {
     pub fn new() -> ModuleIronOx {
         ModuleIronOx {
-            functions: vec![],
+            functions: Default::default(),
+            structs: Default::default(),
         }
     }
 
-    pub fn add_function_with_type(
+    pub fn add_struct(&mut self, components: &[Value]) -> Value {
+        self.structs.push(IronOxStruct::new(components));
+        Value::ConstStruct(self.structs.len() - 1)
+    }
+
+    pub fn add_function(
         &mut self,
         cx: &CodegenCx,
         name: &str,
@@ -163,7 +172,7 @@ impl ModuleIronOx {
     }
 
     pub fn asm(&self) -> String {
-        "not actual asm".to_string()
+        "nop".to_string()
     }
 }
 
