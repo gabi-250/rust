@@ -8,7 +8,7 @@
 
 use super::basic_block::BasicBlockData;
 use type_::{LLType, Type};
-use value::Value;
+use value::{Instruction, Value};
 use context::CodegenCx;
 
 use rustc::ty::FnSig;
@@ -51,6 +51,19 @@ impl IronOxFunction {
             },
             _ => bug!("Expected LLFnType, found {}", fn_type)
         }
+    }
+
+    /// Insert the instruction at a specified position in a basic block.
+    pub fn insert_inst(
+        &mut self,
+        bb_idx: usize,
+        inst_idx: usize,
+        inst: Instruction) {
+        assert!(
+            bb_idx < self.basic_blocks.len()
+                && inst_idx <= self.basic_blocks[bb_idx].instrs.len(),
+            "Invalid insertion point!");
+        self.basic_blocks[bb_idx].instrs.insert(inst_idx, inst)
     }
 
     /// Return the specified parameter.
