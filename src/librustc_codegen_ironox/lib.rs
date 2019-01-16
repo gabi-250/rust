@@ -66,26 +66,31 @@ mod back {
     pub mod write;
 }
 
+mod ir {
+    pub mod basic_block;
+    pub mod function;
+    pub mod struct_;
+}
+
 mod abi;
 mod asm;
 mod base;
-mod basic_block;
 mod builder;
 mod consts;
 mod context;
 mod debuginfo;
 mod declare;
-mod function;
 mod intrinsic;
-mod ironox_type;
+mod type_;
 mod metadata;
 mod mono_item;
 mod value;
 
 use context::CodegenCx;
-use ironox_type::Type;
+use type_::Type;
 use value::Value;
-use function::IronOxFunction;
+use ir::function::IronOxFunction;
+use ir::struct_::IronOxStruct;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());

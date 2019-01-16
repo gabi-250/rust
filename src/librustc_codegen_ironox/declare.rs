@@ -9,10 +9,11 @@
 // except according to those terms.
 
 use context::CodegenCx;
-use ironox_type::Type;
+use type_::Type;
+use value::Value;
+
 use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
-use value::Value;
 
 impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 

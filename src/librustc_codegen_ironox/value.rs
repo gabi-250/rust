@@ -7,6 +7,7 @@
 // except according to those terms.
 
 use std::hash::{Hash, Hasher};
+use type_::Type;
 
 /// The unique identifier of an IronOx value.
 ///
@@ -23,7 +24,17 @@ pub enum Value {
     ConstUndef,
     BigConst(u128),
     Global,
+    /// The index of an `IronOxStruct` in the `structs` vec from `ModuleIronOx`.
+    ConstStruct(usize),
+    /// The parameter of an `IronOxFunction`. This is just a wrapper around a `Type`.
+    Param(Type),
+    /// A placeholder for unimplemented Values. This variant will be removed.
     None,
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum Instruction {
+    // FIXME: implement
 }
 
 impl Eq for Value {}

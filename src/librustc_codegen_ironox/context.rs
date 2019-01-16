@@ -29,11 +29,11 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
 
-use basic_block::{BasicBlock, BasicBlockData};
-use value::Value;
-use ironox_type::{Type, LLType};
-use function::IronOxFunction;
 use debuginfo::DIScope;
+use ir::basic_block::{BasicBlock, BasicBlockData};
+use ir::function::IronOxFunction;
+use value::Value;
+use type_::{Type, LLType};
 
 use super::ModuleIronOx;
 
