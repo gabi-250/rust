@@ -8,10 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::common::{IntPredicate, RealPredicate, AtomicOrdering,
     SynchronizationScope, AtomicRmwBinOp};
 use rustc_codegen_ssa::MemFlags;
+use libc::c_char;
+use rustc_codegen_ssa::traits::*;
+use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::mir::operand::{OperandValue, OperandRef};
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use context::CodegenCx;
@@ -28,6 +30,7 @@ use syntax;
 
 use ir::basic_block::{BasicBlock, BasicBlockData};
 use type_::Type;
+use value::Instruction;
 
 impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type Value = <CodegenCx<'ll, 'tcx> as BackendTypes>::Value;
@@ -38,8 +41,30 @@ impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type DIScope = <CodegenCx<'ll, 'tcx> as BackendTypes>::DIScope;
 }
 
+
+/// Identifies the current insertion point.
+pub struct BuilderPosition {
+    /// The index of the function.
+    fn_idx: usize,
+    /// The index of the basic block to which to add instructions.
+    bb_idx: usize,
+    /// The position at which to add the next instruction in the current basic block.
+    inst_idx: usize,
+}
+
+impl BuilderPosition {
+    fn new(fn_idx: usize, bb_idx: usize, inst_idx: usize) -> BuilderPosition {
+        BuilderPosition {
+            fn_idx,
+            bb_idx,
+            inst_idx,
+        }
+    }
+}
+
 pub struct Builder<'a, 'll: 'a, 'tcx: 'll> {
     pub cx: &'a CodegenCx<'ll, 'tcx>,
+    pub builder: BuilderPosition,
 }
 
 impl ty::layout::LayoutOf for Builder<'_, '_, 'tcx> {
@@ -82,8 +107,13 @@ impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 }
 
 impl Builder<'a, 'll, 'tcx> {
-    fn emit_instr(&mut self, asm: String) {
-        unimplemented!("emit_instr");
+    /// Add the instruction at the current `BuilderPosition`.
+    fn emit_instr(&mut self, inst: Instruction) {
+        let mut module = self.cx.module.borrow_mut();
+        module.get_function(self.builder.fn_idx)
+            .insert_inst(self.builder.bb_idx, self.builder.inst_idx, inst);
+        // move to the next instruction
+        self.builder.inst_idx += 1;
     }
 }
 
@@ -113,6 +143,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // FIXME? this is an invalid position and must be overwritten
         Builder {
             cx,
+            builder: BuilderPosition::new(0, 0, 0)
         }
     }
 
@@ -125,11 +156,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn llfn(&self) -> Value {
-        unimplemented!("llfn");
+        // The function this builder is adding instructions to.
+        Value::Function(self.builder.fn_idx)
     }
 
     fn llbb(&self) -> BasicBlock {
-        unimplemented!("llbb");
+        // The BasicBlock this builder is adding instructions to.
+        BasicBlock(self.builder.fn_idx,
+                   self.builder.bb_idx)
     }
 
     fn count_insn(&self, category: &str) {
@@ -143,8 +177,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn position_at_end(&mut self, llbb: BasicBlock) {
         let llfn = llbb.0;
         let llbb = llbb.1;
+        // The next instruction will be inserted as the last instruction in
+        // the basic block.
         let instr =
             self.cx.module.borrow().functions[llfn].basic_blocks[llbb].instrs.len();
+        self.builder = BuilderPosition::new(llfn, llbb, instr);
     }
 
     fn position_at_start(&mut self, llbb: BasicBlock) {
@@ -152,7 +189,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn ret_void(&mut self) {
-        self.emit_instr("ret".to_string());
+        self.emit_instr(Instruction::None);
     }
 
     fn ret(&mut self, v: Value) {
@@ -160,13 +197,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        let br_instr = {
-            let module = self.cx.module.borrow();
-            format!(
-                "jmp {}",
-                module.functions[dest.0].basic_blocks[dest.1].label)
-        };
-        self.emit_instr(br_instr);
+        // FIXME: emit the real instruction
+        self.emit_instr(Instruction::None);
     }
 
     fn cond_br(
@@ -510,7 +542,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         flags: MemFlags,
     )-> Value {
-        ptr
+        unimplemented!("store_with_flags");
     }
 
     fn gep(
