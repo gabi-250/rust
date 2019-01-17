@@ -6,8 +6,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use basic_block::BasicBlockData;
-use ironox_type::{LLType, Type};
+use super::basic_block::BasicBlockData;
+use type_::{LLType, Type};
 use value::Value;
 use context::CodegenCx;
 
@@ -19,10 +19,14 @@ use rustc::ty::layout::Align;
 pub struct IronOxFunction {
     /// The name of the function.
     pub name: String,
+    /// The type of the function.
+    pub ironox_type: Type,
     /// The basic blocks of the function.
     pub basic_blocks: Vec<BasicBlockData>,
     /// The parameters of the function.
     pub params: Vec<Value>,
+    /// The return type of the function.
+    pub ret: Value,
 }
 
 impl IronOxFunction {
@@ -32,12 +36,17 @@ impl IronOxFunction {
         fn_type: Type) -> IronOxFunction {
         match cx.types.borrow()[fn_type] {
             LLType::FnType { ref args, ref ret } => {
-                // FIXME: populate params
+                let ret = Value::Param(*ret);
                 let mut params = Vec::with_capacity(args.len());
+                for (index, arg_ty) in args.iter().enumerate() {
+                    params.push(Value::Param(*arg_ty));
+                }
                 IronOxFunction {
                     name: name.to_string(),
+                    ironox_type: fn_type,
                     basic_blocks: vec![],
                     params,
+                    ret,
                 }
             },
             _ => bug!("Expected LLFnType, found {}", fn_type)

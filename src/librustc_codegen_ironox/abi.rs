@@ -11,7 +11,7 @@
 use builder::Builder;
 use context::CodegenCx;
 use value::Value;
-use ironox_type::Type;
+use type_::Type;
 
 use rustc::ty::{self, Ty, Instance};
 use rustc_codegen_ssa::traits::{AbiMethods, AbiBuilderMethods, ArgTypeMethods,

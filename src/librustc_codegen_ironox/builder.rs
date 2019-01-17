@@ -26,8 +26,8 @@ use std::ffi::CStr;
 use std::ops::{Deref, Range};
 use syntax;
 
-use basic_block::{BasicBlock, BasicBlockData};
-use ironox_type::Type;
+use ir::basic_block::{BasicBlock, BasicBlockData};
+use type_::Type;
 
 impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type Value = <CodegenCx<'ll, 'tcx> as BackendTypes>::Value;
