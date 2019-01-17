@@ -149,7 +149,8 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             mode => unimplemented!("{:?}", mode)
         };
         // Create the types of the arguments.
-        let mut arg_tys = vec![];
+        let mut arg_tys = Vec::with_capacity(self.args.len());
+
         for arg in &self.args {
             let arg_ty = match arg.mode {
                 PassMode::Ignore => continue,

@@ -58,7 +58,10 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub vtables: RefCell<
         FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>,
     eh_personality: Cell<Option<Value>>,
+    /// All the types defined in this context.
     pub types: RefCell<Vec<LLType>>,
+    /// The index of an `LLType` in `types`.
+    pub type_cache: RefCell<FxHashMap<LLType, Type>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -75,6 +78,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             vtables: Default::default(),
             eh_personality: Default::default(),
             types: Default::default(),
+            type_cache: Default::default(),
         }
     }
 
