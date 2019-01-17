@@ -82,6 +82,7 @@ mod debuginfo;
 mod declare;
 mod intrinsic;
 mod type_;
+mod type_of;
 mod metadata;
 mod mono_item;
 mod value;
