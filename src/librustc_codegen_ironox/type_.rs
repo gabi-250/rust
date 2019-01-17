@@ -9,6 +9,7 @@
 // except according to those terms.
 
 use context::CodegenCx;
+use type_of::LayoutIronOxExt;
 use value::Value;
 
 use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods};
@@ -46,25 +47,46 @@ pub enum LLType {
         args: Vec<Type>,
         ret: Type
     },
-    /// A scalar type.
+    Array {
+        length: u64,
+    },
+    PtrTo {
+        pointee: Type,
+    },
     Scalar(ScalarType),
-    /// A placeholder for types. This will be removed later.
-    None,
+    StructType {
+        name: Option<String>,
+        members: Vec<Type>
+    },
+    Void,
 }
 
 impl CodegenCx<'ll, 'tcx> {
-    crate fn type_named_struct(&self, name: &str) -> &Type {
-        unimplemented!("type_named_struct");
+    crate fn type_named_struct(&self, name: &str) -> Type {
+        let mut borrowed_types = self.types.borrow_mut();
+        let struct_type = LLType::StructType {
+            name: Some(name.to_string()),
+            members: vec![],
+        };
+        borrowed_types.push(struct_type);
+        borrowed_types.len() - 1
     }
 
-    crate fn set_struct_body(&self, ty: &Type, els: &[&Type], packed: bool) {
-        unimplemented!("set_struct_body");
+    crate fn set_struct_body(&self, ty: Type, els: &[Type], packed: bool) {
+        let mut borrowed_types = self.types.borrow_mut();
+        if let LLType::StructType{ ref name, ref mut members } = borrowed_types[ty] {
+            *members = els.to_vec();
+            return;
+        }
+        bug!("expected LLType::StructType, found {:?}", borrowed_types[ty]);
     }
 }
 
 impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn type_void(&self) -> Type {
-        unimplemented!("type_void");
+        let mut borrowed_types = self.types.borrow_mut();
+        borrowed_types.push(LLType::Void);
+        borrowed_types.len() - 1
     }
 
     fn type_metadata(&self) -> Type {
@@ -158,11 +180,23 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         els: &[Type],
         packed: bool
     ) -> Type {
-        unimplemented!("type_struct");
+        let mut borrowed_types = self.types.borrow_mut();
+        let mut members = els.to_vec();
+        let struct_type = LLType::StructType {
+            name: None,
+            members,
+        };
+        borrowed_types.push(struct_type);
+        borrowed_types.len() - 1
     }
 
     fn type_array(&self, ty: Type, len: u64) -> Type {
-        unimplemented!("type_array");
+        let mut borrowed_types = self.types.borrow_mut();
+        let array_type = LLType::Array {
+            length: len,
+        };
+        borrowed_types.push(array_type);
+        borrowed_types.len() - 1
     }
 
     fn type_vector(&self, ty: Type, len: u64) -> Type {
@@ -174,7 +208,9 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_ptr_to(&self, ty: Type) -> Type {
-        unimplemented!("type_ptr_to");
+        let mut borrowed_types = self.types.borrow_mut();
+        borrowed_types.push(LLType::PtrTo { pointee: ty });
+        borrowed_types.len() - 1
     }
 
     fn element_type(&self, ty: Type) -> Type {
@@ -200,7 +236,13 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn val_ty(&self, v: Value) -> Type {
         // FIXME: return the real type
         let mut borrowed_types = self.types.borrow_mut();
-        borrowed_types.push(LLType::None);
+        match v {
+            Value::ConstStruct(_) => {
+                // FIXME: implement
+            },
+            _ => {}
+        }
+
         borrowed_types.len() - 1
     }
 
@@ -211,38 +253,11 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
 impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn backend_type(&self, ty: TyLayout<'tcx>) -> Type {
-        let ironox_ty = match ty.ty.sty {
-            ty::Ref(_, ty, _) |
-            ty::RawPtr(ty::TypeAndMut { ty, .. }) => {
-                self.type_ptr_to(self.backend_type(self.layout_of(ty)))
-            }
-            ty::Adt(def, _) if def.is_box() => {
-                let mut borrowed_types = self.types.borrow_mut();
-                // FIXME: return the real type
-                borrowed_types.push(LLType::None);
-                borrowed_types.len() - 1
-            }
-            ty::FnPtr(sig) => {
-                let mut borrowed_types = self.types.borrow_mut();
-                // FIXME: return the real type
-                borrowed_types.push(LLType::None);
-                borrowed_types.len() - 1
-            }
-            _ => {
-                let mut borrowed_types = self.types.borrow_mut();
-                // FIXME: return the real type
-                borrowed_types.push(LLType::None);
-                borrowed_types.len() - 1
-            }
-        };
-        ironox_ty
+        ty.ironox_type(self)
     }
 
     fn immediate_backend_type(&self, ty: TyLayout<'tcx>) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
-        // FIXME: return the real type
-        borrowed_types.push(LLType::None);
-        borrowed_types.len() - 1
+        ty.immediate_ironox_type(self)
     }
 
     fn is_backend_immediate(&self, ty: TyLayout<'tcx>) -> bool {
