@@ -28,7 +28,10 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
             Value::Local(_, _) => {
                 bug!("the address of a local cannot be known statically");
             },
-            _ => {
+            Value::ConstStruct(idx) => {
+                Value::StructPtr(idx)
+            },
+            x => {
                 unimplemented!("addr_of {:?}", cv);
             }
         }

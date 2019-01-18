@@ -8,9 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use abi::FnTypeExt;
 use context::CodegenCx;
 use type_of::LayoutIronOxExt;
-use value::Value;
+use value::{Instruction, Value};
 
 use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods};
 use rustc_codegen_ssa::common::TypeKind;
@@ -30,6 +31,8 @@ pub enum ScalarType {
     I8,
     /// A 32-bit integer value.
     I32,
+    /// A 64-bit integer value.
+    I64,
     /// An integer value which has a target-dependent size.
     ISize,
     /// An integer value of a custom size.
@@ -67,7 +70,7 @@ impl CodegenCx<'ll, 'tcx> {
     /// If the type already exists in the type cache, its index in the type
     /// vector is returned. Otherwise, it is added to the type vector, and to
     /// the type cache.
-    fn add_type(&self, ll_type: LLType) -> Type {
+    pub fn add_type(&self, ll_type: LLType) -> Type {
         let mut types = self.types.borrow_mut();
         // If ll_type is not in types, it will be inserted at the end of the
         // types vector.
@@ -136,7 +139,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_i64(&self) -> Type {
-        unimplemented!("type_i64");
+        self.add_type(LLType::Scalar(ScalarType::I64))
     }
 
     fn type_i128(&self) -> Type {
@@ -238,19 +241,49 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn val_ty(&self, v: Value) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
         match v {
-            Value::Local(fn_index, local_index) => {
-                self.module.borrow().functions[fn_index].local_ty(local_index)
-            },
             Value::ConstUint(const_idx) => {
+
+                eprintln!("Uint");
                 self.u_consts.borrow()[const_idx].ty
             },
             Value::ConstInt(const_idx) => {
+                eprintln!("int");
                 self.i_consts.borrow()[const_idx].ty
             },
+            Value::Param(ty) => {
+                ty
+            },
+            Value::Instruction(fn_idx, bb_idx, inst_idx) => {
+                let inst =
+                    &self.module.borrow()
+                        .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
+                match inst {
+                    Instruction::Alloca(_, ty, _) => {
+                        *ty
+                    },
+                    x => {
+                        unimplemented!("instruction {:?}", x);
+                    }
+                }
+            },
+            Value::StructPtr(idx) => {
+                let unnamed_struct = &self.unnamed_structs.borrow()[idx];
+                let mut comp_tys =
+                    Vec::with_capacity(unnamed_struct.components.len());
+                for elt in &unnamed_struct.components {
+                    comp_tys.push(self.val_ty(*elt));
+                }
+                let ty_struct = self.type_struct(&comp_tys, false);
+                self.type_ptr_to(ty_struct)
+            },
+            Value::Function(fn_idx) => {
+                self.module.borrow().functions[fn_idx].ironox_type
+            }
             x => {
-                unimplemented!("type of {:?}", x);
+                // XXX
+                let mut types = self.types.borrow_mut();
+                unimplemented!("type of {:?} {:?}", x, types);
             }
         }
     }
@@ -315,6 +348,6 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn fn_ptr_backend_type(&self, ty: &FnType<'tcx, Ty<'tcx>>) -> Type {
-        unimplemented!("fn_ptr_backend_type");
+        ty.ptr_to_ironox_type(self)
     }
 }

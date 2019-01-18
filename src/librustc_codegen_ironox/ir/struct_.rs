@@ -4,7 +4,7 @@ use value::Value;
 #[derive(Debug)]
 pub struct IronOxStruct {
     /// The fields of the `struct`.
-    components: Vec<Value>,
+    pub components: Vec<Value>,
 }
 
 impl IronOxStruct {

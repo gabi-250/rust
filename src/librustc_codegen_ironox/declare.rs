@@ -30,7 +30,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         fn_type: Type
     ) -> Value {
-        eprintln!("Declare cfun of type {:?}", fn_type);
+        eprintln!("Declare cfun of type {:?}", self.types.borrow()[fn_type]);
         let fn_val =
             self.module.borrow_mut().add_function(self, name, fn_type);
         self.named_globals.borrow_mut().insert(name.to_string(), fn_val);
@@ -84,7 +84,9 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_declared_value(&self, name: &str) -> Option<Value> {
-        unimplemented!("get_declared_value");
+        eprintln!("all functions {:?}", self.module.borrow().functions);
+        eprintln!("get_declared_value {:?}", name);
+        None
     }
 
     fn get_defined_value(&self, name: &str) -> Option<Value> {

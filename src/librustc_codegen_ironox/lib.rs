@@ -220,6 +220,9 @@ impl ModuleIronOx {
                         },
                         Instruction::Store(_, _) => {
                             asm.push_str("nop\n");
+                        },
+                        Instruction::Alloca(_, _, _) => {
+                            asm.push_str("nop\n");
                         }
                     }
                 }

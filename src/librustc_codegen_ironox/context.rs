@@ -33,6 +33,7 @@ use syntax::symbol::LocalInternedString;
 use debuginfo::DIScope;
 use ir::basic_block::{BasicBlock, BasicBlockData};
 use ir::function::IronOxFunction;
+use ir::struct_::IronOxStruct;
 use constant::{UnsignedConst, SignedConst};
 use value::Value;
 use type_::{Type, LLType, IxLlcx};
@@ -70,6 +71,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub global_cache: RefCell<FxHashMap<Value, Value>>,
     pub u_consts: RefCell<Vec<UnsignedConst>>,
     pub i_consts: RefCell<Vec<SignedConst>>,
+    pub unnamed_structs: RefCell<Vec<IronOxStruct>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -92,6 +94,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             global_cache: Default::default(),
             u_consts: Default::default(),
             i_consts: Default::default(),
+            unnamed_structs: Default::default(),
         }
     }
 
@@ -141,6 +144,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn get_fn(&self, instance: Instance<'tcx>) ->
         Value {
+        eprintln!("get_fn {:?}", instance);
         if let Some(ref llfn) = self.instances.borrow().get(&instance) {
             // The function has already been defined
             return **llfn;
@@ -166,7 +170,10 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::Function(i) => i,
             _ => bug!("llfn must be a function! Found: {:?}", llfn),
         };
-        self.module.borrow().functions[llfn_index].get_param(index as usize)
+        let p = self.module.borrow().functions[llfn_index].get_param(index as usize);
+
+        eprintln!("returning {:?}", p);
+        p
     }
 
     fn eh_personality(&self) -> Value {
@@ -347,9 +354,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
-        unimplemented!("const struct {:?}", elts);
-        // FIXME calculate the size of the struct
-        Value::None
+        let mut structs = self.unnamed_structs.borrow_mut();
+        structs.push(IronOxStruct::new(elts));
+        Value::ConstStruct(structs.len() - 1)
     }
 
     fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
@@ -389,7 +396,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_ptrcast(&self, val: Value, ty: Type) -> Value {
-        unimplemented!("const_ptrcast");
+        val
+        //unimplemented!("const_ptrcast");
     }
 
     fn scalar_to_backend(

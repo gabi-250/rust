@@ -467,11 +467,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ty: Type,
         name: &str, align: Align
     )-> Value {
-        let cur_fn = self.builder.fn_idx;
-        let mut module = self.cx.module.borrow_mut();
-        // XXX
-        let local_idx = 0;//module.functions[cur_fn].alloca(self.cx, ty, name, align);
-        Value::Local(cur_fn, local_idx)
+        self.emit_instr(Instruction::Alloca(name.to_string(), ty, align))
     }
 
     fn dynamic_alloca(
@@ -1074,11 +1070,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             unimplemented!("call funclet: {:?}", funclet);
         }
         match llfn {
-            Value::Function(usize) => {
-                self.emit_instr(Instruction::Call(usize, args.to_vec()))
+            Value::Function(idx) => {
+                self.emit_instr(Instruction::Call(idx, args.to_vec()))
             },
             _ => {
-                bug!("expected Value::Function, found {:?}", llfn);
+                eprintln!("expected Value::Function, found  {:?} {:?}",
+                          llfn, self.types.borrow());
+
+                self.emit_instr(Instruction::Call(0, args.to_vec()))
             }
         }
     }

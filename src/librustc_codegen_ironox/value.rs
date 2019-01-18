@@ -9,6 +9,8 @@
 use std::hash::{Hash, Hasher};
 use type_::Type;
 
+use rustc::ty::layout::Align;
+
 /// The unique identifier of an IronOx value.
 ///
 /// Each enum variant has one or more indices that can be used to retrieve the
@@ -34,6 +36,7 @@ pub enum Value {
     Param(Type),
     /// An instruction: (functiton index, basic block index, instruction index).
     Instruction(usize, usize, usize),
+    StructPtr(usize),
     None,
 }
 
@@ -47,6 +50,7 @@ pub enum Instruction {
     Ret(Option<Value>),
     /// Call (function, args)
     Call(usize, Vec<Value>),
+    Alloca(String, Type, Align),
 }
 
 impl Eq for Value {}
