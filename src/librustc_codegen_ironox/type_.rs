@@ -9,6 +9,7 @@
 // except according to those terms.
 
 use context::CodegenCx;
+use type_of::LayoutIronOxExt;
 use value::Value;
 
 use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods};
@@ -21,7 +22,7 @@ use rustc_target::abi::LayoutOf;
 use rustc_target::abi::call::{CastTarget, FnType, Reg};
 
 /// The type of a scalar.
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ScalarType {
     /// A 1-bit integer value.
     I1,
@@ -39,32 +40,69 @@ pub enum ScalarType {
 pub type Type = usize;
 
 /// The actual types.
-#[derive(PartialEq, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum LLType {
     /// A function type.
     FnType {
         args: Vec<Type>,
         ret: Type
     },
-    /// A scalar type.
+    Array {
+        length: u64,
+    },
+    PtrTo {
+        pointee: Type,
+    },
     Scalar(ScalarType),
-    /// A placeholder for types. This will be removed later.
-    None,
+    StructType {
+        name: Option<String>,
+        members: Vec<Type>
+    },
+    Void,
 }
 
 impl CodegenCx<'ll, 'tcx> {
-    crate fn type_named_struct(&self, name: &str) -> &Type {
-        unimplemented!("type_named_struct");
+    /// Add the specified `LLType` to the vector of `Type`s for this context.
+    ///
+    /// If the type already exists in the type cache, its index in the type
+    /// vector is returned. Otherwise, it is added to the type vector, and to
+    /// the type cache.
+    fn add_type(&self, ll_type: LLType) -> Type {
+        let mut types = self.types.borrow_mut();
+        // If ll_type is not in types, it will be inserted at the end of the
+        // types vector.
+        let ty_idx = types.len();
+        // FIXME: don't always clone ll_type.
+        match self.type_cache.borrow_mut().insert(ll_type.clone(), ty_idx) {
+            Some(ty) => ty,
+            None => {
+                types.push(ll_type);
+                ty_idx
+            }
+        }
     }
 
-    crate fn set_struct_body(&self, ty: &Type, els: &[&Type], packed: bool) {
-        unimplemented!("set_struct_body");
+    crate fn type_named_struct(&self, name: &str) -> Type {
+        let struct_type = LLType::StructType {
+            name: Some(name.to_string()),
+            members: vec![],
+        };
+        self.add_type(struct_type)
+    }
+
+    crate fn set_struct_body(&self, ty: Type, els: &[Type], packed: bool) {
+        let mut types = self.types.borrow_mut();
+        if let LLType::StructType{ ref name, ref mut members } = types[ty] {
+            *members = els.to_vec();
+            return;
+        }
+        bug!("expected LLType::StructType, found {:?}", types[ty]);
     }
 }
 
 impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn type_void(&self) -> Type {
-        unimplemented!("type_void");
+        self.add_type(LLType::Void)
     }
 
     fn type_metadata(&self) -> Type {
@@ -72,15 +110,11 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_i1(&self) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
-        borrowed_types.push(LLType::Scalar(ScalarType::I1));
-        borrowed_types.len() - 1
+        self.add_type(LLType::Scalar(ScalarType::I1))
     }
 
     fn type_i8(&self) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
-        borrowed_types.push(LLType::Scalar(ScalarType::I8));
-        borrowed_types.len() - 1
+        self.add_type(LLType::Scalar(ScalarType::I8))
     }
 
     fn type_i16(&self) -> Type {
@@ -88,9 +122,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_i32(&self) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
-        borrowed_types.push(LLType::Scalar(ScalarType::I32));
-        borrowed_types.len() - 1
+        self.add_type(LLType::Scalar(ScalarType::I32))
     }
 
     fn type_i64(&self) -> Type {
@@ -102,15 +134,11 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_ix(&self, num_bits: u64) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
-        borrowed_types.push(LLType::Scalar(ScalarType::Ix(num_bits)));
-        borrowed_types.len() - 1
+        self.add_type(LLType::Scalar(ScalarType::Ix(num_bits)))
     }
 
     fn type_isize(&self) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
-        borrowed_types.push(LLType::Scalar(ScalarType::ISize));
-        borrowed_types.len() - 1
+        self.add_type(LLType::Scalar(ScalarType::ISize))
     }
 
     fn type_f32(&self) -> Type {
@@ -130,7 +158,6 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         args: &[Type],
         ret: Type
     ) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
         // define the types of the arguments of the function
         let mut ll_args = vec![];
         for arg in args {
@@ -141,8 +168,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             args: ll_args,
             ret: ret.clone(),
         };
-        borrowed_types.push(fn_type);
-        borrowed_types.len() - 1
+        self.add_type(fn_type)
     }
 
     fn type_variadic_func(
@@ -158,11 +184,15 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         els: &[Type],
         packed: bool
     ) -> Type {
-        unimplemented!("type_struct");
+        let mut members = els.to_vec();
+        self.add_type(LLType::StructType {
+            name: None,
+            members,
+        })
     }
 
     fn type_array(&self, ty: Type, len: u64) -> Type {
-        unimplemented!("type_array");
+        self.add_type(LLType::Array { length: len })
     }
 
     fn type_vector(&self, ty: Type, len: u64) -> Type {
@@ -174,7 +204,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_ptr_to(&self, ty: Type) -> Type {
-        unimplemented!("type_ptr_to");
+        self.add_type(LLType::PtrTo { pointee: ty })
     }
 
     fn element_type(&self, ty: Type) -> Type {
@@ -198,10 +228,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn val_ty(&self, v: Value) -> Type {
-        // FIXME: return the real type
-        let mut borrowed_types = self.types.borrow_mut();
-        borrowed_types.push(LLType::None);
-        borrowed_types.len() - 1
+        unimplemented!("val_ty({:?})", v);
     }
 
     fn scalar_lltypes(&self) -> &RefCell<FxHashMap<Ty<'tcx>, Self::Type>> {
@@ -211,38 +238,11 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
 impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn backend_type(&self, ty: TyLayout<'tcx>) -> Type {
-        let ironox_ty = match ty.ty.sty {
-            ty::Ref(_, ty, _) |
-            ty::RawPtr(ty::TypeAndMut { ty, .. }) => {
-                self.type_ptr_to(self.backend_type(self.layout_of(ty)))
-            }
-            ty::Adt(def, _) if def.is_box() => {
-                let mut borrowed_types = self.types.borrow_mut();
-                // FIXME: return the real type
-                borrowed_types.push(LLType::None);
-                borrowed_types.len() - 1
-            }
-            ty::FnPtr(sig) => {
-                let mut borrowed_types = self.types.borrow_mut();
-                // FIXME: return the real type
-                borrowed_types.push(LLType::None);
-                borrowed_types.len() - 1
-            }
-            _ => {
-                let mut borrowed_types = self.types.borrow_mut();
-                // FIXME: return the real type
-                borrowed_types.push(LLType::None);
-                borrowed_types.len() - 1
-            }
-        };
-        ironox_ty
+        ty.ironox_type(self)
     }
 
     fn immediate_backend_type(&self, ty: TyLayout<'tcx>) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
-        // FIXME: return the real type
-        borrowed_types.push(LLType::None);
-        borrowed_types.len() - 1
+        ty.immediate_ironox_type(self)
     }
 
     fn is_backend_immediate(&self, ty: TyLayout<'tcx>) -> bool {
