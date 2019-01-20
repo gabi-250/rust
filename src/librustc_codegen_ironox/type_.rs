@@ -29,6 +29,8 @@ pub enum ScalarType {
     I1,
     /// An 8-bit integer value.
     I8,
+    /// A 16-bit integer value.
+    I16,
     /// A 32-bit integer value.
     I32,
     /// A 64-bit integer value.
@@ -37,6 +39,12 @@ pub enum ScalarType {
     ISize,
     /// An integer value of a custom size.
     Ix(u64),
+}
+
+impl ToString for ScalarType {
+    fn to_string(&self) -> String {
+        format!("{:?}", *self).to_string()
+    }
 }
 
 /// A `Type` is an index into the vector of types in the codegen context.
@@ -72,17 +80,15 @@ impl CodegenCx<'ll, 'tcx> {
     /// the type cache.
     pub fn add_type(&self, ll_type: LLType) -> Type {
         let mut types = self.types.borrow_mut();
+        let mut type_cache = self.type_cache.borrow_mut();
         // If ll_type is not in types, it will be inserted at the end of the
         // types vector.
         let ty_idx = types.len();
-        // FIXME: don't always clone ll_type.
-        match self.type_cache.borrow_mut().insert(ll_type.clone(), ty_idx) {
-            Some(ty) => ty,
-            None => {
-                types.push(ll_type);
-                ty_idx
-            }
-        }
+        *type_cache.entry(ll_type.clone()).or_insert_with(|| {
+            // FIXME: don't always clone ll_type.
+            types.push(ll_type);
+            ty_idx
+        })
     }
 
     crate fn type_named_struct(&self, name: &str) -> Type {
@@ -131,7 +137,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_i16(&self) -> Type {
-        unimplemented!("type_i16");
+        self.add_type(LLType::Scalar(ScalarType::I16))
     }
 
     fn type_i32(&self) -> Type {
@@ -243,12 +249,9 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn val_ty(&self, v: Value) -> Type {
         match v {
             Value::ConstUint(const_idx) => {
-
-                eprintln!("Uint");
                 self.u_consts.borrow()[const_idx].ty
             },
             Value::ConstInt(const_idx) => {
-                eprintln!("int");
                 self.i_consts.borrow()[const_idx].ty
             },
             Value::Param(ty) => {

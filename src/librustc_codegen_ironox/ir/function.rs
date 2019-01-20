@@ -43,6 +43,10 @@ impl IronOxFunction {
                 let mut params = Vec::with_capacity(args.len());
                 for (index, arg_ty) in args.iter().enumerate() {
                     params.push(Value::Param(*arg_ty));
+                    eprintln!("pushing Param({}): {:?}",
+                              params.len(),
+                              cx.pretty_ty(*arg_ty));
+                    eprintln!("\n\n{:?}\n\n", cx.types);
                 }
                 IronOxFunction {
                     name: name.to_string(),

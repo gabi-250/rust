@@ -1073,6 +1073,12 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             Value::Function(idx) => {
                 self.emit_instr(Instruction::Call(idx, args.to_vec()))
             },
+            Value::Param(ty) => {
+                eprintln!("expected Value::Function, found  {:?}", self.pretty_ty(ty));
+
+                self.emit_instr(Instruction::Call(0, args.to_vec()))
+
+            },
             _ => {
                 eprintln!("expected Value::Function, found  {:?} {:?}",
                           llfn, self.types.borrow());

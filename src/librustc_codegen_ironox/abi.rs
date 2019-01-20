@@ -63,6 +63,7 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
                 } else if let PassMode::Cast(cast) = ty.mode {
                     unimplemented!("PassMode::Cast");
                 } else {
+                    eprintln!("store {:?} at {:?}", val, dst);
                     OperandValue::Immediate(val).store(self, dst);
                 }
             }
@@ -171,6 +172,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
 
     fn ptr_to_ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type {
         let fn_ty = self.ironox_type(cx);
+        eprintln!("add ptr to {}", fn_ty);
         cx.add_type(LLType::PtrTo { pointee: fn_ty })
     }
 }

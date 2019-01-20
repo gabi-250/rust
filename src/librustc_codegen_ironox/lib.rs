@@ -189,6 +189,7 @@ impl ModuleIronOx {
         for f in &self.functions {
             asm.push_str(&format!("{}:\n", f.name));
             for bb in &f.basic_blocks {
+                eprintln!("codegnning: {:?}", bb.instrs);
                 asm.push_str(&format!("{}_{}:\n", f.name, bb.label));
                 for inst in &bb.instrs {
                     match inst {
@@ -204,7 +205,7 @@ impl ModuleIronOx {
 
                                 },
                                 _ => {
-                                    unimplemented!("Ret: {:?}", val);
+                                    eprintln!("unimplemented Ret: {:?}", val);
                                 }
                             }
                         },
@@ -213,7 +214,7 @@ impl ModuleIronOx {
                         },
                         Instruction::Call(ref fn_idx, ref args) => {
                             for (idx, arg) in args.iter().enumerate() {
-                                unimplemented!("arg {:?}: {:?}", idx, arg);
+                                eprintln!("push arg {:?}: {:?}", idx, arg);
                             }
                             asm.push_str(
                                 &format!("call {}\n", self.functions[*fn_idx].name));

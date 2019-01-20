@@ -30,7 +30,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         fn_type: Type
     ) -> Value {
-        eprintln!("Declare cfun of type {:?}", self.types.borrow()[fn_type]);
+        eprintln!("Declare cfun {} of type {}", name, self.pretty_ty(fn_type));
         let fn_val =
             self.module.borrow_mut().add_function(self, name, fn_type);
         self.named_globals.borrow_mut().insert(name.to_string(), fn_val);

@@ -102,6 +102,34 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
         // FIXME: implement
         8
     }
+
+    pub fn pretty_ty(&self, ty: Type) -> String {
+        eprintln!("ty is {} {:?}", ty, self.types.borrow()[ty]);
+        match self.types.borrow()[ty] {
+            LLType::Void => "Void".to_string(),
+            LLType::PtrTo { pointee } => {
+                format!("PtrTo {}", self.pretty_ty(pointee)).to_string()
+            },
+            LLType::Array { .. } => "Array".to_string(),
+            LLType::Scalar(scalar_ty) => scalar_ty.to_string(),
+            LLType::FnType { ref args, ref ret } => {
+                let mut str_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    str_args.push(self.pretty_ty(*arg));
+                }
+                let ret_ty = self.pretty_ty(*ret);
+                format!("FnType {{ args:{} ret:{} }}",
+                        str_args.join(","), ret_ty).to_string()
+            },
+            LLType::StructType { ref name, ref members } => {
+                let mut str_members = Vec::with_capacity(members.len());
+                for mem in members {
+                    str_members.push(self.pretty_ty(*mem));
+                }
+                format!("Struct {:?} {{ {} }}", name, str_members.join(","))
+            }
+        }
+    }
 }
 
 impl ty::layout::HasTyCtxt<'tcx> for CodegenCx<'ll, 'tcx> {

@@ -36,7 +36,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             let llty = match self.ty.sty {
                 ty::Ref(_, ty, _) |
                 ty::RawPtr(ty::TypeAndMut { ty, .. }) => {
-                    cx.type_ptr_to(cx.layout_of(ty).ironox_type(cx))
+                    let tt = cx.layout_of(ty).ironox_type(cx);
+                    cx.type_ptr_to(tt)
                 }
                 ty::Adt(def, _) if def.is_box() => {
                     cx.type_ptr_to(cx.layout_of(self.ty.boxed_ty()).ironox_type(cx))
@@ -103,6 +104,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             };
             // FIXME: Packed is always false. Structs are never packed.
             let packed = false;
+
             match self.fields {
                 layout::FieldPlacement::Union(_) => {
                     unimplemented!("Union");
