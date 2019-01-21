@@ -8,14 +8,54 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
+use errors::{Handler, FatalError};
+use rustc::session::config::OutputType;
+use rustc::util::time_graph::Timeline;
+use rustc_codegen_ssa::{ModuleCodegen, CompiledModule};
+use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig, run_assembler};
 
-macro_rules! asm {
-    ($m:expr, $($args:expr)*) => {
-        $(
-            $m.asm.push_str(&format!("{}\n", $args));
-        )*
+use std::fs;
+use std::path::PathBuf;
+
+use IronOxCodegenBackend;
+use ModuleIronOx;
+
+/// Write the assembler instructions from a `module` to the specified `path`.
+fn write_module(
+    module: &ModuleIronOx,
+    path: &PathBuf,
+    diag_handler: &Handler) {
+    if let Err(e) = fs::write(path, module.asm()) {
+        diag_handler.err(&format!("failed to write asm file {}", e));
     }
 }
 
-// FIXME not yet implemented
+pub unsafe fn codegen(
+    cgcx: &CodegenContext<IronOxCodegenBackend>,
+    diag_handler: &Handler,
+    module: ModuleCodegen<ModuleIronOx>,
+    config: &ModuleConfig,
+    timeline: &mut Timeline
+) -> Result<CompiledModule, FatalError> {
+    // no_integrated_as has to be true in order for the IronOx backend to work.
+    if !config.no_integrated_as {
+        bug!("IronOx does not have an integrated assembler!");
+    }
+    let module_name = Some(&module.name[..]);
+    // The path to the assembly file in which to write the module.
+    let asm_path =
+        cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
+    write_module(&module.module_llvm, &asm_path, diag_handler);
+    // The path to the object file in which to assemble the module.
+    let obj_path = cgcx.output_filenames
+        .temp_path(OutputType::Object, module_name);
+    // Run the assembler to produce the object file from the assembly.
+    run_assembler(cgcx, diag_handler, &asm_path, &obj_path);
+    Ok(CompiledModule {
+        name: module.name.clone(),
+        kind: module.kind,
+        object: Some(obj_path),
+        bytecode: None,
+        bytecode_compressed: None,
+    })
+}
