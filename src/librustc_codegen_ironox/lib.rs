@@ -147,12 +147,19 @@ pub struct ModuleIronOx {
 }
 
 impl ModuleIronOx {
+    /// Create an empty module.
     pub fn new() -> ModuleIronOx {
         ModuleIronOx {
             functions: vec![],
         }
     }
 
+    /// Get the function at index `fn_idx`.
+    pub fn get_function(&mut self, fn_idx: usize) -> &mut IronOxFunction {
+        &mut self.functions[fn_idx]
+    }
+
+    /// Add a new function of a particular `Type`.
     pub fn add_function_with_type(
         &mut self,
         cx: &CodegenCx,
@@ -163,7 +170,7 @@ impl ModuleIronOx {
     }
 
     pub fn asm(&self) -> String {
-        "not actual asm".to_string()
+        "nop".to_string()
     }
 }
 
