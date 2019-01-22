@@ -213,6 +213,10 @@ impl<'a, 'hir> NodeCollector<'a, 'hir> {
             DepNode::new_no_params(DepKind::Krate),
             crate_hash_input,
         );
+        eprintln!("{:?}: The crate hash is {:?} {:?}",
+                  crate_disambiguator,
+                  crate_hash,
+                  crate_hash.to_smaller_hash());
 
         let svh = Svh::new(crate_hash.to_smaller_hash());
         (self.map, svh)

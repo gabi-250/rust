@@ -29,19 +29,20 @@ pub struct BasicBlockData {
 
 impl BasicBlockData {
     pub fn new(cx: &CodegenCx, label: &str, parent: Value) -> BasicBlock {
+        let parent_idx = match parent {
+            Value::Function(p) => p,
+            _ => bug!("The parent of a basic block has to be a function")
+        };
+        let mut parent_fn = &mut cx.module.borrow_mut().functions[parent_idx];
         let mut bb = BasicBlockData {
-            label: label.to_string(),
+            label: format!("{}_{}", parent_fn.name, label),
             instrs: vec![],
             parent: parent,
             terminator: None,
         };
-        let parent = match parent {
-            Value::Function(p) => p,
-            _ => bug!("The parent of a basic block has to be a function")
-        };
         // the new basic block is the child of the specified `parent`
         // basic block
-        let bb_index = cx.module.borrow_mut().functions[parent].add_bb(bb);
-        BasicBlock(parent, bb_index)
+        let bb_index = parent_fn.add_bb(bb);
+        BasicBlock(parent_idx, bb_index)
     }
 }

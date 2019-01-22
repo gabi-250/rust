@@ -254,7 +254,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::ConstInt(const_idx) => {
                 self.i_consts.borrow()[const_idx].ty
             },
-            Value::Param(ty) => {
+            Value::Param(_, ty) => {
                 ty
             },
             Value::Instruction(fn_idx, bb_idx, inst_idx) => {
@@ -263,6 +263,9 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                         .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
                 match inst {
                     Instruction::Alloca(_, ty, _) => {
+                        *ty
+                    },
+                    Instruction::Cast(_, ty) => {
                         *ty
                     },
                     x => {

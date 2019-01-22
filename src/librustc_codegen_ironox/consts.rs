@@ -25,9 +25,6 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
         kind: Option<&str>,
     ) -> Value {
         match cv {
-            Value::Local(_, _) => {
-                bug!("the address of a local cannot be known statically");
-            },
             Value::ConstStruct(idx) => {
                 eprintln!("addr of const struct");
                 Value::StructPtr(idx)

@@ -104,32 +104,34 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
     }
 
     pub fn pretty_ty(&self, ty: Type) -> String {
-        eprintln!("ty is {} {:?}", ty, self.types.borrow()[ty]);
-        match self.types.borrow()[ty] {
-            LLType::Void => "Void".to_string(),
-            LLType::PtrTo { pointee } => {
-                format!("PtrTo {}", self.pretty_ty(pointee)).to_string()
-            },
-            LLType::Array { .. } => "Array".to_string(),
-            LLType::Scalar(scalar_ty) => scalar_ty.to_string(),
-            LLType::FnType { ref args, ref ret } => {
-                let mut str_args = Vec::with_capacity(args.len());
-                for arg in args {
-                    str_args.push(self.pretty_ty(*arg));
-                }
-                let ret_ty = self.pretty_ty(*ret);
-                format!("FnType {{ args:{} ret:{} }}",
-                        str_args.join(","), ret_ty).to_string()
-            },
-            LLType::StructType { ref name, ref members } => {
-                let mut str_members = Vec::with_capacity(members.len());
-                for mem in members {
-                    str_members.push(self.pretty_ty(*mem));
-                }
-                format!("Struct {:?} {{ {} }}", name, str_members.join(","))
-            }
-        }
+        "".to_string()
+/*        eprintln!("ty is {} {:?}", ty, self.types.borrow()[ty]);*/
+        //match self.types.borrow()[ty] {
+            //LLType::Void => "Void".to_string(),
+            //LLType::PtrTo { pointee } => {
+                //format!("PtrTo {}", self.pretty_ty(pointee)).to_string()
+            //},
+            //LLType::Array { .. } => "Array".to_string(),
+            //LLType::Scalar(scalar_ty) => scalar_ty.to_string(),
+            //LLType::FnType { ref args, ref ret } => {
+                //let mut str_args = Vec::with_capacity(args.len());
+                //for arg in args {
+                    //str_args.push(self.pretty_ty(*arg));
+                //}
+                //let ret_ty = self.pretty_ty(*ret);
+                //format!("FnType {{ args:{} ret:{} }}",
+                        //str_args.join(","), ret_ty).to_string()
+            //},
+            //LLType::StructType { ref name, ref members } => {
+                //let mut str_members = Vec::with_capacity(members.len());
+                //for mem in members {
+                    //str_members.push(self.pretty_ty(*mem));
+                //}
+                //format!("Struct {:?} {{ {} }}", name, str_members.join(","))
+            //}
+        /*}*/
     }
+
 }
 
 impl ty::layout::HasTyCtxt<'tcx> for CodegenCx<'ll, 'tcx> {
@@ -237,7 +239,8 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn check_overflow(&self) -> bool {
-        unimplemented!("check_overflow");
+        false
+        //unimplemented!("check_overflow");
     }
 
     fn stats(&self) -> &RefCell<Stats> {
@@ -326,7 +329,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_bool(&self, val: bool) -> Value {
-        unimplemented!("const_bool");
+        self.const_unsigned(self.type_i1(),
+                            val as u128,
+                            (u8::min_value() as u128, u8::max_value() as u128))
     }
 
     fn const_i32(&self, i: i32) -> Value {
@@ -420,10 +425,22 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_to_opt_u128(&self, v: Value, sign_ext: bool) -> Option<u128> {
-        unimplemented!("const_to_opt_u128");
+        match v {
+            Value::ConstUint(i) => {
+                Some(self.u_consts.borrow()[i].value)
+            },
+            Value::ConstInt(i) => {
+                unimplemented!("signed integers");
+                //Some(self.i_consts.borrow()[i].value)
+            }
+            _ => {
+                None
+            }
+        }
     }
 
     fn const_ptrcast(&self, val: Value, ty: Type) -> Value {
+        eprintln!("ptrcast {:?} to {:?}", val, self.types.borrow()[ty]);
         val
         //unimplemented!("const_ptrcast");
     }
@@ -437,14 +454,23 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         let bitsize = if layout.is_bool() { 1 } else { layout.value.size(self).bits() };
         match cv {
             Scalar::Bits { size: 0, .. } => {
+                eprintln!("scalar::bits 0");
+                eprintln!("{:?} to {:?}", cv, llty);
                 assert_eq!(0, layout.value.size(self).bytes());
                 self.const_undef(self.type_ix(0))
             },
             Scalar::Bits { bits, size } => {
+                eprintln!("scalar::bits {} {}", bits, size);
+                eprintln!("{:?} to {:?}", cv, llty);
                 assert_eq!(size as u64, layout.value.size(self).bytes());
                 let llval = self.const_uint_big(self.type_ix(bitsize), bits);
-                // FIXME
-                llval
+                if layout.value == layout::Pointer {
+                    unimplemented!("scalar_to_backend: layout::Pointer");
+                } else {
+                    eprintln!("must bitcast! {:?} to {:?}", llval, llty);
+                    // FIXME? bitcast llval to llty
+                    llval
+                }
             },
             Scalar::Ptr(ptr) => {
                 unimplemented!("Scalar::Ptr");

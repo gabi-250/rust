@@ -174,7 +174,18 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn set_value_name(&mut self, value: Value, name: &str) {
+        let mut module = self.cx.module.borrow_mut();
         // FIXME: rename the value
+        match value {
+            Value::Param(idx, ty) => {
+                eprintln!("rename {} {:?} to {}", idx,
+                          self.types.borrow()[ty], name);
+                module.functions[idx].rename_local(value, name.to_string());
+            }
+            _ => {
+                unimplemented!("set_value_name: {:?}", value);
+            }
+        }
     }
 
     fn position_at_end(&mut self, llbb: BasicBlock) {
@@ -214,7 +225,18 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         then_llbb: BasicBlock,
         else_llbb: BasicBlock,
     ) {
-        unimplemented!("cond_br");
+        let mut true_label;
+        let mut false_label;
+        {
+            let module = self.cx.module.borrow();
+            true_label =
+                module.functions[then_llbb.0].basic_blocks[then_llbb.1
+                ].label.to_string();
+            false_label =
+                module.functions[else_llbb.0].basic_blocks[else_llbb.1]
+                .label.to_string();
+        }
+        self.emit_instr(Instruction::CondBr(cond, true_label, false_label));
     }
 
     fn switch(
@@ -246,7 +268,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        unimplemented!("add");
+        eprintln!("{:?} + {:?}", lhs, rhs);
+        self.emit_instr(Instruction::Add(lhs, rhs))
     }
 
     fn fadd(
@@ -582,7 +605,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        unimplemented!("trunc");
+        // XXX truncate
+        val
     }
 
     fn sext(
@@ -662,7 +686,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        unimplemented!("bitcast");
+        // XXX cast
+        //unimplemented!("bitcast {:?} to {:?}", val, self.types.borrow()[dest_ty]);
+        val
     }
 
     fn intcast(
@@ -672,6 +698,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         is_signed: bool
     )-> Value {
         val
+        //self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn pointercast(
@@ -679,8 +706,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        // FIXME? nothing to do
         val
+        //self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn icmp(
@@ -688,7 +715,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         op: IntPredicate,
         lhs: Value, rhs: Value
     )-> Value {
-        unimplemented!("icmp");
+        match op {
+            IntPredicate::IntEQ => {
+                self.emit_instr(Instruction::Eq(lhs, rhs))
+            },
+            _ => {
+                unimplemented!("icmp");
+            }
+        }
     }
 
     fn fcmp(
@@ -898,6 +932,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         idx: u64
     )-> Value {
         // FIXME: insert elt into agg_val at idx
+        eprintln!("insert {:?} into {:?} at index {}", elt, agg_val, idx);
+        let types = self.types.borrow();
+        for i in 0..types.len() {
+            eprintln!("{}: {:?}", i, types[i]);
+        }
         elt
     }
 
@@ -1073,11 +1112,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             Value::Function(idx) => {
                 self.emit_instr(Instruction::Call(idx, args.to_vec()))
             },
-            Value::Param(ty) => {
+            Value::Param(idx, ty) => {
                 eprintln!("expected Value::Function, found  {:?}", self.pretty_ty(ty));
-
                 self.emit_instr(Instruction::Call(0, args.to_vec()))
-
             },
             _ => {
                 eprintln!("expected Value::Function, found  {:?} {:?}",

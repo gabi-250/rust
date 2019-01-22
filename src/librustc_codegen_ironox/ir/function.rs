@@ -13,10 +13,13 @@ use context::CodegenCx;
 
 use rustc::ty::FnSig;
 use rustc::ty::layout::Align;
+use rustc::util::nodemap::FxHashMap;
 
 /// An IronOx function.
 #[derive(PartialEq, Debug)]
 pub struct IronOxFunction {
+    /// The index of the function in the module.
+    pub idx: usize,
     /// The name of the function.
     pub name: String,
     /// The type of the function.
@@ -25,30 +28,34 @@ pub struct IronOxFunction {
     pub basic_blocks: Vec<BasicBlockData>,
     pub stack_size: u64,
     // Type, offset from rbp
-    pub locals: Vec<(Type, u64)>,
+    pub locals: FxHashMap<Value, String>,
     /// The parameters of the function.
     pub params: Vec<Value>,
     /// The return type of the function.
     pub ret: Value,
+    //pub values: Vec<LLValue>,
 }
 
 impl IronOxFunction {
     pub fn new(
         cx: &CodegenCx,
+        idx: usize,
         name: &str,
         fn_type: Type) -> IronOxFunction {
         match cx.types.borrow()[fn_type] {
             LLType::FnType { ref args, ref ret } => {
-                let ret = Value::Param(*ret);
+                // XXX ret should not have an index...
+                let ret = Value::Param(0, *ret);
                 let mut params = Vec::with_capacity(args.len());
                 for (index, arg_ty) in args.iter().enumerate() {
-                    params.push(Value::Param(*arg_ty));
+                    params.push(Value::Param(index, *arg_ty));
                     eprintln!("pushing Param({}): {:?}",
                               params.len(),
                               cx.pretty_ty(*arg_ty));
                     eprintln!("\n\n{:?}\n\n", cx.types);
                 }
                 IronOxFunction {
+                    idx,
                     name: name.to_string(),
                     ironox_type: fn_type,
                     basic_blocks: vec![],
@@ -56,6 +63,7 @@ impl IronOxFunction {
                     ret,
                     locals: Default::default(),
                     stack_size: 8,
+                    //values: Default::default(),
                 }
             },
             _ => bug!("Expected LLFnType, found {}", fn_type)
@@ -80,39 +88,15 @@ impl IronOxFunction {
         self.params[index]
     }
 
-    pub fn alloca(
-        &mut self,
-        cx: &CodegenCx,
-        ty: Type,
-        name: &str,
-        align: Align) -> usize {
-        eprintln!("alloca {:?} of type {:?}", name, ty);
-        self.insert_local(cx, ty, name)
-    }
-
-    fn insert_local(
-        &mut self,
-        cx: &CodegenCx,
-        ty: Type,
-        name: &str) -> usize {
-        // XXX ignore the alignment and name for now
-        // map the local to its offset from rbp
-        self.locals.push((ty, self.stack_size));
-        self.stack_size += cx.ty_size(ty);
-        self.locals.len() - 1
-    }
-
-    pub fn local_ty(
-        &self,
-        local_idx: usize) -> Type {
-        self.locals[local_idx].0
-    }
-
     /// Add a new basic block to this function.
     ///
     /// The basic block is inserted after the last basic block in the function.
     pub fn add_bb(&mut self, bb: BasicBlockData) -> usize {
         self.basic_blocks.push(bb);
         self.basic_blocks.len() - 1
+    }
+
+    pub fn rename_local(&mut self, v: Value, name: String) {
+        self.locals.insert(v, name);
     }
 }

@@ -15,13 +15,10 @@ use rustc::ty::layout::Align;
 ///
 /// Each enum variant has one or more indices that can be used to retrieve the
 /// value from the context.
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Copy, Clone, Eq, Debug, Hash)]
 pub enum Value {
     /// The index of an `IronOxFunction` function in the module.
     Function(usize),
-    /// A `(function index, local index)` pair that can be used to retrieve a
-    /// local value.
-    Local(usize, usize),
     /// An unspecified constant. This is just a wrapper around a `Type`.
     ConstUndef(Type),
     /// The index of an `UnsignedConst` in `u_consts`.
@@ -33,7 +30,7 @@ pub enum Value {
     /// The index of an `IronOxStruct` in the `structs` vec from `ModuleIronOx`.
     ConstStruct(usize),
     /// The parameter of an `IronOxFunction`. This is just a wrapper around a `Type`.
-    Param(Type),
+    Param(usize, Type),
     /// An instruction: (functiton index, basic block index, instruction index).
     Instruction(usize, usize, usize),
     StructPtr(usize),
@@ -46,17 +43,13 @@ pub enum Instruction {
     Store(Value, Value),
     /// An unconditional branch to a label.
     Br(String),
+    CondBr(Value, String, String),
     /// Return instruction.
     Ret(Option<Value>),
     /// Call (function, args)
     Call(usize, Vec<Value>),
     Alloca(String, Type, Align),
-}
-
-impl Eq for Value {}
-
-impl Hash for Value {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-        (self as *const Self).hash(hasher);
-    }
+    Cast(Value, Type),
+    Add(Value, Value),
+    Eq(Value, Value),
 }

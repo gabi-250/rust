@@ -8,6 +8,7 @@ use rustc_data_structures::stable_hasher::{HashStable, StableHasherResult,
                                            StableHasher};
 use ich::{Fingerprint, StableHashingContext, NodeIdHashingMode};
 use std::fmt;
+use std::fs;
 use std::hash::Hash;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
@@ -180,6 +181,15 @@ impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for CodegenUnit<'tcx> {
             let mut hasher = StableHasher::new();
             mono_item.hash_stable(hcx, &mut hasher);
             let mono_item_fingerprint = hasher.finish();
+            let codegen_unit = format!("Codegenunit : {:?}\n", self.name);
+            let hash = format!("Hash: {:?}", mono_item_fingerprint);
+            if let Err(_e) = fs::write("hasherlog" , codegen_unit) {
+                panic!("could not write hasherlog");
+            }
+            if let Err(_e) = fs::write("hasherlog" , hash) {
+                panic!("could not write hasherlog");
+            }
+
             (mono_item_fingerprint, attrs)
         }).collect();
 

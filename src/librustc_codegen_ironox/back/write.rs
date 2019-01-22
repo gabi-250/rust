@@ -11,7 +11,7 @@
 use errors::{Handler, FatalError};
 use rustc::session::config::OutputType;
 use rustc::util::time_graph::Timeline;
-use rustc_codegen_ssa::{ModuleCodegen, CompiledModule};
+use rustc_codegen_ssa::{ModuleCodegen, CompiledModule, ModuleKind};
 use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig, run_assembler};
 
 use std::fs;
@@ -37,24 +37,24 @@ pub unsafe fn codegen(
     config: &ModuleConfig,
     timeline: &mut Timeline
 ) -> Result<CompiledModule, FatalError> {
-    // no_integrated_as has to be true in order for the IronOx backend to work.
-    if !config.no_integrated_as {
-        bug!("IronOx does not have an integrated assembler!");
-    }
     let module_name = Some(&module.name[..]);
     // The path to the assembly file in which to write the module.
     let asm_path =
         cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
     write_module(&module.module_llvm, &asm_path, diag_handler);
     // The path to the object file in which to assemble the module.
-    let obj_path = cgcx.output_filenames
-        .temp_path(OutputType::Object, module_name);
-    // Run the assembler to produce the object file from the assembly.
-    run_assembler(cgcx, diag_handler, &asm_path, &obj_path);
+    let mut obj_path = None;
+    // no_integrated_as has to be true in order for the IronOx backend to work.
+    if config.no_integrated_as {
+        obj_path = Some(
+            cgcx.output_filenames.temp_path(OutputType::Object, module_name));
+        // Run the assembler to produce the object file from the assembly.
+        run_assembler(cgcx, diag_handler, &asm_path, &obj_path.clone().unwrap());
+    }
     Ok(CompiledModule {
         name: module.name.clone(),
         kind: module.kind,
-        object: Some(obj_path),
+        object: obj_path,
         bytecode: None,
         bytecode_compressed: None,
     })
