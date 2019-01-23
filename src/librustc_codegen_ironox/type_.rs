@@ -69,17 +69,15 @@ impl CodegenCx<'ll, 'tcx> {
     /// the type cache.
     fn add_type(&self, ll_type: LLType) -> Type {
         let mut types = self.types.borrow_mut();
+        let mut type_cache = self.type_cache.borrow_mut();
         // If ll_type is not in types, it will be inserted at the end of the
         // types vector.
         let ty_idx = types.len();
-        // FIXME: don't always clone ll_type.
-        match self.type_cache.borrow_mut().insert(ll_type.clone(), ty_idx) {
-            Some(ty) => ty,
-            None => {
-                types.push(ll_type);
-                ty_idx
-            }
-        }
+        *type_cache.entry(ll_type.clone()).or_insert_with(|| {
+            // FIXME: don't always clone ll_type.
+            types.push(ll_type);
+            ty_idx
+        })
     }
 
     crate fn type_named_struct(&self, name: &str) -> Type {
