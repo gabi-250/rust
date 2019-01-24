@@ -12,6 +12,7 @@ pub struct InstrAsm {
 pub struct ModuleAsm<'a> {
     module: &'a ModuleIronOx,
     compiled_insts: FxHashMap<&'a Instruction, InstrAsm>,
+    compiled_params: FxHashMap<Value, InstrAsm>,
     stack_size: usize,
 }
 
@@ -20,6 +21,7 @@ impl ModuleAsm<'a> {
         ModuleAsm {
             module,
             compiled_insts: Default::default(),
+            compiled_params: Default::default(),
             stack_size: 0,
         }
     }
@@ -56,6 +58,29 @@ impl ModuleAsm<'a> {
         }
     }
 
+    pub fn compile_sub(&mut self, inst: &'a Instruction) -> InstrAsm {
+        if let Instruction::Sub(lhs, rhs) = inst {
+            let mut asm = "".to_string();
+            let (new_asm, arg1) = self.compile_value(*lhs);
+            asm.push_str(&new_asm);
+            let (new_asm, arg2) = self.compile_value(*rhs);
+            asm.push_str(&new_asm);
+            asm.push_str("\txor %rax, %rax\n");
+            asm.push_str(&format!("\tadd {}, %rax\n", arg1));
+            asm.push_str(&format!("\tsub {}, %rax\n", arg2));
+            // FIXME:
+            let param_size = 8;
+            asm.push_str(&format!("\tsub ${}, %rsp\n", param_size));
+            self.stack_size += param_size;
+            //
+            let result = format!("-{}(%rbp)", self.stack_size);
+            asm.push_str(&format!("\tmov %rax, {}\n", result));
+            InstrAsm { asm, result }
+        } else {
+            bug!("expected Instruction::Add");
+        }
+    }
+
     pub fn compile_value(&mut self, value: Value) -> (String, String) {
         match value {
             Value::ConstUint(idx) => {
@@ -63,19 +88,31 @@ impl ModuleAsm<'a> {
                 ("".to_string(), format!("${}", value))
             },
             Value::Param(idx, _) => {
+
+                if let Some(instr_asm) = self.compiled_params.get(&value) {
+                    let ret = ("".to_string(), instr_asm.result.clone());
+                    return ret;
+                }
                 // FIXME:
                 let param_size = 8;
                 let reg = ModuleAsm::get_func_arg_str(idx);
                 let mut asm = format!("\tsub ${}, %rsp\n", param_size);
                 self.stack_size += param_size;
-                asm.push_str(&format!("\tmov {}, -{}(%rbp)\n", reg, self.stack_size));
-                (asm, format!("-{}(%rbp)", self.stack_size))
+                let result = format!("-{}(%rbp)", self.stack_size);
+                asm.push_str(&format!("\tmov {}, {}\n", reg, result));
+                let instr_asm = InstrAsm{ asm: asm.clone(), result: result.clone() };
+                self.compiled_params.insert(value, instr_asm);
+                (asm, result)
             },
             Value::Instruction(fn_idx, bb_idx, idx) => {
                 let inst = &self.module.functions[fn_idx].
                     basic_blocks[bb_idx].instrs[idx];
                 if let Some(inst_asm) = self.compiled_insts.get(inst) {
-                    return ("".to_string(), inst_asm.result.clone());
+                    if let Instruction::Br(..) = inst {
+                        // nope
+                    } else {
+                        return ("".to_string(), inst_asm.result.clone());
+                    }
                 }
                 self.compile_instruction(value)
             },
@@ -91,6 +128,11 @@ impl ModuleAsm<'a> {
             inst = &self.module.functions[fn_idx].basic_blocks[bb_idx].instrs[idx];
         } else {
             bug!("can only compile a Value::Instruction");
+        }
+
+        if let Some(instr_asm) = self.compiled_insts.get(inst) {
+            let ret = (instr_asm.asm.clone(), instr_asm.result.clone());
+            return ret;
         }
 
         let mut asm = "".to_string();
@@ -117,12 +159,19 @@ impl ModuleAsm<'a> {
                 asm.push_str(&new_asm);
                 let (new_asm, source) = self.compile_value(*v2);
                 asm.push_str(&new_asm);
-                asm.push_str(&format!("\tmov {}, %rax\n", dest));
-                asm.push_str(&format!("\tmovq {}, (%rax)\n", source));
+                asm.push_str(&format!("\tlea {}, %rax\n", dest));
+                // if dest is a pointer:
+                //asm.push_str(&format!("\tmov {}, %rax\n", dest));
+                asm.push_str(&format!("\tmovq {}, %rbx\n", source));
+                asm.push_str("\tmovq %rbx, (%rax)\n");
                 (asm, dest)
             },
             Instruction::Add(v1, v2) => {
                 let instr_asm = self.compile_add(inst);
+                (instr_asm.asm, instr_asm.result.clone())
+            },
+            Instruction::Sub(v1, v2) => {
+                let instr_asm = self.compile_sub(inst);
                 (instr_asm.asm, instr_asm.result.clone())
             },
             Instruction::Call(ref fn_idx, ref args) => {
@@ -143,14 +192,62 @@ impl ModuleAsm<'a> {
                 asm.push_str(&format!("\tmov %rax, {}\n", result));
                 (asm, result)
             },
+
+            Instruction::Alloca(_, ty, ty_size, align) => {
+                asm.push_str(&format!("\tsub ${}, %rsp\n", ty_size));
+                self.stack_size += *ty_size as usize;
+                let result = format!("-{}(%rbp)", self.stack_size);
+                (asm, result)
+            },
+            Instruction::Eq(v1, v2) | Instruction::Lt(v1, v2) => {
+                let (new_asm, dest) = self.compile_value(*v1);
+                asm.push_str(&new_asm);
+                let (new_asm, source) = self.compile_value(*v2);
+                asm.push_str(&new_asm);
+                asm.push_str(&format!("\tcmpq {}, {}\n", source, dest));
+                (asm, "".to_string())
+            },
+            Instruction::CondBr(cond, bb1, bb2) => {
+                match cond {
+                    Value::Instruction(fn_idx, bb_idx, idx) => {
+                        let cond_inst =
+                            &self.module.functions[*fn_idx]
+                                .basic_blocks[*bb_idx].instrs[*idx];
+                        match cond_inst {
+                            Instruction::Eq(_, _) => {
+                                let _ = self.compile_instruction(*cond);
+                                asm.push_str(&format!("\tje {}\n", bb1));
+                                asm.push_str(&format!("\tjmp {}\n", bb2));
+                                (asm, "".to_string())
+                            },
+                            Instruction::Lt(_, _) => {
+                                let _ = self.compile_instruction(*cond);
+                                asm.push_str(&format!("\tjl {}\n", bb1));
+                                asm.push_str(&format!("\tjmp {}\n", bb2));
+                                (asm, "".to_string())
+                            },
+                            x => {
+                                unimplemented!("cond br: {:?}", cond);
+                            }
+                        }
+                    },
+                    _ => {
+                        bug!("cond must be a Value::Instruction, not {:?}", cond);
+                    }
+                }
+            },
             _ => {
-                unimplemented!("instruction");
+                unimplemented!("instruction {:?}", inst);
             },
         };
         let ret = instr_asm.clone();
         self.compiled_insts.insert(inst,
                                    InstrAsm { asm: instr_asm.0, result: instr_asm.1 });
         ret
+    }
+
+    pub fn already_compiled(&self, inst: &Instruction) -> bool {
+        self.compiled_insts.get(inst).is_some()
     }
 
     pub fn compile(&mut self) -> String {
@@ -161,21 +258,53 @@ impl ModuleAsm<'a> {
             asm.push_str(&format!("\t.type {},@function\n", f.name));
         }
         for (fn_idx, f) in module.functions.iter().enumerate() {
+            self.compiled_params.clear();
+            let mut ret = None;
+            let mut ret_bb = "".to_string();
             self.stack_size = 0;
             asm.push_str(&format!("{}:\n", f.name));
             asm.push_str("\tpush %rbp\n");
             asm.push_str("\tmov %rsp, %rbp\n");
+            for param in &f.params {
+                asm.push_str(&self.compile_value(*param).0);
+            }
             for (bb_idx, bb) in f.basic_blocks.iter().enumerate() {
-                asm.push_str(&format!("\t{}:\n", bb.label));
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
+                    // Make sure the ret is emitted at the end
+                    if let Instruction::Ret(_) = inst {
+                        if inst_idx == 0 {
+                            ret_bb.push_str(&format!("\t{}:\n", bb.label));
+                        }
+                        ret = Some(Value::Instruction(fn_idx, bb_idx, inst_idx));
+                        continue;
+                    }
+                    if inst_idx == 0 {
+                        asm.push_str(&format!("\t{}:\n", bb.label));
+                    }
                     let inst = &self.module.functions[fn_idx].
                         basic_blocks[bb_idx].instrs[inst_idx];
-                    if !self.compiled_insts.get(inst).is_some() {
+
+                    if self.already_compiled(inst) {
+                        // always compile branching instructions
+                        if inst.is_branch() {
+                            let (new_asm, _) = self.compile_instruction(
+                                Value::Instruction(fn_idx, bb_idx, inst_idx));
+                            asm.push_str(&new_asm);
+                        }
+                    } else {
                         let (new_asm, _) = self.compile_instruction(
                             Value::Instruction(fn_idx, bb_idx, inst_idx));
                         asm.push_str(&new_asm);
                     }
                 }
+            }
+            // emit the ret:
+            if let Some(inst) = ret {
+                asm.push_str(&ret_bb);
+                let (new_asm, _) = self.compile_instruction(inst);
+                asm.push_str(&new_asm);
+            } else {
+                bug!("No return instruction for {}", f.name);
             }
         }
         asm

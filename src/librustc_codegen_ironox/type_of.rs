@@ -56,7 +56,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             return llty;
         }
 
-        assert!(!self.ty.has_escaping_bound_vars(), "{:?} has escaping bound vars", self.ty);
+        assert!(!self.ty.has_escaping_bound_vars(),
+                "{:?} has escaping bound vars", self.ty);
 
         // FIXME? extracted from llvm's type_of:
         //
@@ -107,9 +108,12 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
 
             match self.fields {
                 layout::FieldPlacement::Union(_) => {
-                    unimplemented!("Union");
+                    // XXX
+                    cx.type_struct(&[], packed)
+                    //unimplemented!("Union");
                 }
                 layout::FieldPlacement::Array { count, .. } => {
+                    //unimplemented!("Array");
                     cx.type_array(self.field(cx, 0).ironox_type(cx), count)
                 }
                 layout::FieldPlacement::Arbitrary { .. } => {

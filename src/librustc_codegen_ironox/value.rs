@@ -48,8 +48,19 @@ pub enum Instruction {
     Ret(Option<Value>),
     /// Call (function, args)
     Call(usize, Vec<Value>),
-    Alloca(String, Type, Align),
+    Alloca(String, Type, u64, Align),
     Cast(Value, Type),
     Add(Value, Value),
+    Sub(Value, Value),
     Eq(Value, Value),
+    Lt(Value, Value),
+}
+
+impl Instruction {
+    pub fn is_branch(&self) -> bool {
+        match *self {
+            Instruction::Br(..) | Instruction::CondBr(..) => true,
+            _ => false,
+        }
+    }
 }

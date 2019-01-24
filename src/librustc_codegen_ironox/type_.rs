@@ -262,11 +262,19 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     &self.module.borrow()
                         .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
                 match inst {
-                    Instruction::Alloca(_, ty, _) => {
+                    Instruction::Alloca(_, ty, _, _) => {
                         *ty
                     },
                     Instruction::Cast(_, ty) => {
                         *ty
+                    },
+                    Instruction::Add(v1, v2) => {
+                        // FIXME: find the actual type of the result
+                        self.val_ty(*v1)
+                    },
+                    Instruction::Call(fn_idx, _) => {
+                        // FIXME: find the actual type of the result
+                        self.val_ty(Value::Function(*fn_idx))
                     },
                     x => {
                         unimplemented!("instruction {:?}", x);

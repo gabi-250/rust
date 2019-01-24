@@ -293,7 +293,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        unimplemented!("sub");
+        self.emit_instr(Instruction::Sub(lhs, rhs))
     }
 
     fn fsub(
@@ -490,7 +490,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ty: Type,
         name: &str, align: Align
     )-> Value {
-        self.emit_instr(Instruction::Alloca(name.to_string(), ty, align))
+        let ty_size = self.ty_size(ty);
+        self.emit_instr(
+            Instruction::Alloca(name.to_string(), ty, ty_size, align))
     }
 
     fn dynamic_alloca(
@@ -718,6 +720,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         match op {
             IntPredicate::IntEQ => {
                 self.emit_instr(Instruction::Eq(lhs, rhs))
+            },
+            IntPredicate::IntULT | IntPredicate::IntSLT => {
+                self.emit_instr(Instruction::Lt(lhs, rhs))
             },
             _ => {
                 unimplemented!("icmp");
