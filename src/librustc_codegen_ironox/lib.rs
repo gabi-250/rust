@@ -76,6 +76,7 @@ mod abi;
 mod asm;
 mod base;
 mod builder;
+mod compiler;
 mod consts;
 mod constant;
 mod context;
@@ -186,125 +187,6 @@ impl ModuleIronOx {
                                                 name,
                                                 fn_type));
         Value::Function(idx)
-    }
-
-    pub fn get_func_arg_str(&self, idx: usize) -> (String, String) {
-        let regs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
-        if idx < 6 {
-            return ("".to_string(), regs[idx].to_string())
-        } else {
-            unimplemented!("function arg no {}", idx);
-        }
-    }
-
-    pub fn compile_add(&self, lhs: Value, rhs: Value) -> (String, String) {
-        let mut asm = "".to_string();
-        match (lhs, rhs) {
-            (Value::Param(idx1, _), Value::Param(idx2, _)) => {
-                let (new_asm, arg1) = self.get_func_arg_str(idx1);
-                asm.push_str(&new_asm);
-                let (new_asm, arg2) = self.get_func_arg_str(idx2);
-                asm.push_str(&new_asm);
-                asm.push_str("\txor %rax, %rax\n");
-                asm.push_str(&format!("\tadd {}, %rax\n", arg1));
-                asm.push_str(&format!("\tadd {}, %rax\n", arg2));
-                (asm, "%rax".to_string())
-            },
-            _ => {
-                unimplemented!("compile_add");
-            }
-        }
-    }
-
-    pub fn compile_value(&self, value: Value) -> (String, String) {
-        match value {
-            Value::ConstUint(idx) => {
-                let value = self.u_consts[idx].value;
-                ("".to_string(), format!("${}", value))
-            },
-            Value::Param(idx, _) => {
-                self.get_func_arg_str(idx)
-            },
-            Value::Instruction(fn_idx, bb_idx, idx) => {
-                let inst = &self.functions[fn_idx].
-                    basic_blocks[bb_idx].instrs[idx];
-                self.compile_instruction(&inst)
-            }
-            _ => {
-                unimplemented!("compile_value({:?})", value);
-            }
-        }
-    }
-
-    pub fn compile_instruction(&self, inst: &Instruction) -> (String, String) {
-        let mut asm = "".to_string();
-        match inst {
-            Instruction::Br(target) => {
-                asm.push_str(&format!("\tjmp {}\n", target));
-                (asm, "".to_string())
-            },
-            Instruction::Ret(Some(val)) => {
-                let (new_asm, res) = self.compile_value(*val);
-                asm.push_str(&new_asm);
-                asm.push_str(&format!("\tmov {}, %rax\n", res));
-                asm.push_str("\tret\n");
-                (asm, "".to_string())
-            },
-            Instruction::Ret(None) => {
-                asm.push_str("\tret\n");
-                (asm, "".to_string())
-            },
-            Instruction::Store(v1, v2) => {
-                let (new_asm, dest) = self.compile_value(*v1);
-                asm.push_str(&new_asm);
-                let (new_asm, source) = self.compile_value(*v2);
-                asm.push_str(&new_asm);
-                asm.push_str(&format!("\tmovq {}, ({})\n", source, dest));
-                (asm, dest)
-            },
-            Instruction::Add(v1, v2) => {
-                let (new_asm, res) = self.compile_add(*v1, *v2);
-                asm.push_str(&new_asm);
-                (asm, res)
-            },
-            Instruction::Call(ref fn_idx, ref args) => {
-                for (idx, arg) in args.iter().enumerate() {
-                    let (new_asm, value) = self.compile_value(*arg);
-                    asm.push_str(&new_asm);
-                    let (new_asm, param) = self.get_func_arg_str(idx);
-                    asm.push_str(&new_asm);
-                    eprintln!("push arg {:?}: {:?}", value, param);
-                    asm.push_str(&format!("\tmov {}, {}\n", value, param));
-                }
-                asm.push_str(
-                    &format!("call {}\n", self.functions[*fn_idx].name));
-                (asm, "%rax".to_string())
-            },
-            _ => {
-                unimplemented!("instruction");
-            },
-        }
-    }
-
-    pub fn asm(&self) -> String {
-        let mut asm = ".text\n".to_string();
-        for f in &self.functions {
-            asm.push_str(&format!("\t.globl {}\n", f.name));
-            asm.push_str(&format!("\t.type {},@function\n", f.name));
-        }
-        for f in &self.functions {
-            asm.push_str(&format!("{}:\n", f.name));
-            for bb in &f.basic_blocks {
-                eprintln!("codegnning: {:?}", bb.instrs);
-                asm.push_str(&format!("\t{}:\n", bb.label));
-                for inst in &bb.instrs {
-                    eprintln!("compiling {:?}", inst);
-                    let (new_asm, _) = self.compile_instruction(&inst);
-                    asm.push_str(&new_asm);
-                }
-            }
-        }
-        asm
     }
 }
 

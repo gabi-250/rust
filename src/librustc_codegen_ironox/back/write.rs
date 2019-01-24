@@ -19,13 +19,15 @@ use std::path::PathBuf;
 
 use IronOxCodegenBackend;
 use ModuleIronOx;
+use compiler::ModuleAsm;
 
 /// Write the assembler instructions from a `module` to the specified `path`.
 fn write_module(
     module: &ModuleIronOx,
     path: &PathBuf,
     diag_handler: &Handler) {
-    if let Err(e) = fs::write(path, module.asm()) {
+    let mut asm_module = ModuleAsm::new(module);
+    if let Err(e) = fs::write(path, asm_module.compile()) {
         diag_handler.err(&format!("failed to write asm file {}", e));
     }
 }

@@ -37,7 +37,7 @@ pub enum Value {
     None,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Eq, Hash)]
 pub enum Instruction {
     /// Store (ptr, value).
     Store(Value, Value),
