@@ -3,6 +3,29 @@ use value::{Value, Instruction};
 
 use rustc::util::nodemap::FxHashMap;
 
+macro_rules! asm {
+    (
+        $m:ident,
+        $(
+            $fmt:expr; [ $($args:expr),* ]
+        ),*
+    ) => {
+        let mut asm_lines = vec![$(format!($fmt, $($args),*)),*];
+        asm_lines = asm_lines.iter().map(|x| format!("\t{}\n", x)).collect();
+        let asm_lines = asm_lines.join("");
+        $m.push_str(&asm_lines);
+    };
+    ($m:ident, $new_asm:expr) => {
+        $m.push_str($new_asm);
+    }
+}
+
+macro_rules! label {
+    ($m:ident, $lbl:expr) => {
+        $m.push_str(&format!("{}:\n", $lbl));
+    }
+}
+
 #[derive(Debug)]
 pub struct InstrAsm {
     asm: String,
@@ -39,19 +62,18 @@ impl ModuleAsm<'a> {
         if let Instruction::Add(lhs, rhs) = inst {
             let mut asm = "".to_string();
             let (new_asm, arg1) = self.compile_value(*lhs);
-            asm.push_str(&new_asm);
+            asm!(asm, &new_asm);
             let (new_asm, arg2) = self.compile_value(*rhs);
-            asm.push_str(&new_asm);
-            asm.push_str("\txor %rax, %rax\n");
-            asm.push_str(&format!("\tadd {}, %rax\n", arg1));
-            asm.push_str(&format!("\tadd {}, %rax\n", arg2));
+            asm!(asm, &new_asm);
+            asm!(asm, "xor %rax, %rax"; [],
+                      "add {}, %rax"; [arg1],
+                      "add {}, %rax"; [arg2]);
             // FIXME:
             let param_size = 8;
-            asm.push_str(&format!("\tsub ${}, %rsp\n", param_size));
             self.stack_size += param_size;
-            //
             let result = format!("-{}(%rbp)", self.stack_size);
-            asm.push_str(&format!("\tmov %rax, {}\n", result));
+            asm!(asm, "sub ${}, %rsp"; [param_size],
+                      "mov %rax, {}"; [result]);
             InstrAsm { asm, result }
         } else {
             bug!("expected Instruction::Add");
@@ -62,19 +84,18 @@ impl ModuleAsm<'a> {
         if let Instruction::Sub(lhs, rhs) = inst {
             let mut asm = "".to_string();
             let (new_asm, arg1) = self.compile_value(*lhs);
-            asm.push_str(&new_asm);
+            asm!(asm, &new_asm);
             let (new_asm, arg2) = self.compile_value(*rhs);
-            asm.push_str(&new_asm);
-            asm.push_str("\txor %rax, %rax\n");
-            asm.push_str(&format!("\tadd {}, %rax\n", arg1));
-            asm.push_str(&format!("\tsub {}, %rax\n", arg2));
+            asm!(asm, &new_asm);
+            asm!(asm, "xor %rax, %rax"; [],
+                      "add {}, %rax"; [arg1],
+                      "sub {}, %rax"; [arg2]);
             // FIXME:
             let param_size = 8;
-            asm.push_str(&format!("\tsub ${}, %rsp\n", param_size));
             self.stack_size += param_size;
-            //
             let result = format!("-{}(%rbp)", self.stack_size);
-            asm.push_str(&format!("\tmov %rax, {}\n", result));
+            asm!(asm, "sub ${}, %rsp"; [param_size],
+                      "mov %rax, {}"; [result]);
             InstrAsm { asm, result }
         } else {
             bug!("expected Instruction::Add");
@@ -95,12 +116,13 @@ impl ModuleAsm<'a> {
                 }
                 // FIXME:
                 let param_size = 8;
-                let reg = ModuleAsm::get_func_arg_str(idx);
-                let mut asm = format!("\tsub ${}, %rsp\n", param_size);
                 self.stack_size += param_size;
                 let result = format!("-{}(%rbp)", self.stack_size);
-                asm.push_str(&format!("\tmov {}, {}\n", reg, result));
-                let instr_asm = InstrAsm{ asm: asm.clone(), result: result.clone() };
+                let reg = ModuleAsm::get_func_arg_str(idx);
+                let mut asm = "".to_string();
+                asm!(asm, "sub ${}, %rsp"; [param_size],
+                          "mov {}, {}"; [reg, result]);
+                let instr_asm = InstrAsm { asm: asm.clone(), result: result.clone() };
                 self.compiled_params.insert(value, instr_asm);
                 (asm, result)
             },
@@ -123,47 +145,43 @@ impl ModuleAsm<'a> {
     }
 
     pub fn compile_instruction(&mut self, inst_v: Value) -> (String, String) {
-        let mut inst;
-        if let Value::Instruction(fn_idx, bb_idx, idx) = inst_v {
-            inst = &self.module.functions[fn_idx].basic_blocks[bb_idx].instrs[idx];
+        let inst = if let Value::Instruction(fn_idx, bb_idx, idx) = inst_v {
+            &self.module.functions[fn_idx].basic_blocks[bb_idx].instrs[idx]
         } else {
             bug!("can only compile a Value::Instruction");
-        }
-
+        };
         if let Some(instr_asm) = self.compiled_insts.get(inst) {
-            let ret = (instr_asm.asm.clone(), instr_asm.result.clone());
-            return ret;
+            return (instr_asm.asm.clone(), instr_asm.result.clone());
         }
-
         let mut asm = "".to_string();
         let instr_asm = match inst {
             Instruction::Br(target) => {
-                asm.push_str(&format!("\tjmp {}\n", target));
+                asm!(asm, "jmp {}"; [target]);
                 (asm, "".to_string())
             },
             Instruction::Ret(Some(val)) => {
                 let (new_asm, res) = self.compile_value(*val);
-                asm.push_str(&new_asm);
-                asm.push_str(&format!("\tmov {}, %rax\n", res));
-                asm.push_str("\tleave\n");
-                asm.push_str("\tret\n");
+                asm!(asm, &new_asm);
+                asm!(asm, "mov {}, %rax"; [res],
+                          "leave"; [],
+                          "ret"; []);
                 (asm, "".to_string())
             },
             Instruction::Ret(None) => {
-                asm.push_str("\tleave\n");
-                asm.push_str("\tret\n");
+                asm!(asm, "leave"; [],
+                          "ret"; []);
                 (asm, "".to_string())
             },
             Instruction::Store(v1, v2) => {
                 let (new_asm, dest) = self.compile_value(*v1);
-                asm.push_str(&new_asm);
+                asm!(asm, &new_asm);
                 let (new_asm, source) = self.compile_value(*v2);
-                asm.push_str(&new_asm);
-                asm.push_str(&format!("\tlea {}, %rax\n", dest));
+                asm!(asm, &new_asm);
                 // if dest is a pointer:
                 //asm.push_str(&format!("\tmov {}, %rax\n", dest));
-                asm.push_str(&format!("\tmovq {}, %rbx\n", source));
-                asm.push_str("\tmovq %rbx, (%rax)\n");
+                asm!(asm, "lea {}, %rax"; [dest],
+                          "movq {}, %rbx"; [source],
+                          "movq %rbx, (%rax)"; []);
                 (asm, dest)
             },
             Instruction::Add(v1, v2) => {
@@ -177,34 +195,32 @@ impl ModuleAsm<'a> {
             Instruction::Call(ref fn_idx, ref args) => {
                 for (idx, arg) in args.iter().enumerate() {
                     let (new_asm, value) = self.compile_value(*arg);
-                    asm.push_str(&new_asm);
+                    asm!(asm, &new_asm);
                     let param = ModuleAsm::get_func_arg_str(idx);
-                    asm.push_str(&format!("\tmov {}, {}\n", value, param));
+                    asm!(asm, "mov {}, {}"; [value, param]);
                 }
-                asm.push_str(
-                    &format!("\tcall {}\n", self.module.functions[*fn_idx].name));
-
                 // move the result to the stack, and assume its size is 8
                 let param_size = 8;
-                asm.push_str(&format!("\tsub ${}, %rsp\n", param_size));
                 self.stack_size += param_size;
                 let result = format!("-{}(%rbp)", self.stack_size);
-                asm.push_str(&format!("\tmov %rax, {}\n", result));
+                asm!(asm, "call {}"; [self.module.functions[*fn_idx].name],
+                          "sub ${}, %rsp"; [param_size],
+                          "mov %rax, {}"; [result]);
                 (asm, result)
             },
 
             Instruction::Alloca(_, ty, ty_size, align) => {
-                asm.push_str(&format!("\tsub ${}, %rsp\n", ty_size));
+                asm!(asm, "sub ${}, %rsp"; [ty_size]);
                 self.stack_size += *ty_size as usize;
                 let result = format!("-{}(%rbp)", self.stack_size);
                 (asm, result)
             },
             Instruction::Eq(v1, v2) | Instruction::Lt(v1, v2) => {
                 let (new_asm, dest) = self.compile_value(*v1);
-                asm.push_str(&new_asm);
+                asm!(asm, &new_asm);
                 let (new_asm, source) = self.compile_value(*v2);
-                asm.push_str(&new_asm);
-                asm.push_str(&format!("\tcmpq {}, {}\n", source, dest));
+                asm!(asm, &new_asm);
+                asm!(asm, "cmpq {}, {}"; [source, dest]);
                 (asm, "".to_string())
             },
             Instruction::CondBr(cond, bb1, bb2) => {
@@ -216,14 +232,14 @@ impl ModuleAsm<'a> {
                         match cond_inst {
                             Instruction::Eq(_, _) => {
                                 let _ = self.compile_instruction(*cond);
-                                asm.push_str(&format!("\tje {}\n", bb1));
-                                asm.push_str(&format!("\tjmp {}\n", bb2));
+                                asm!(asm, "je {}"; [bb1],
+                                          "jmp {}"; [bb2]);
                                 (asm, "".to_string())
                             },
                             Instruction::Lt(_, _) => {
                                 let _ = self.compile_instruction(*cond);
-                                asm.push_str(&format!("\tjl {}\n", bb1));
-                                asm.push_str(&format!("\tjmp {}\n", bb2));
+                                asm!(asm, "jl {}"; [bb1],
+                                          "jmp {}"; [bb2]);
                                 (asm, "".to_string())
                             },
                             x => {
@@ -254,17 +270,17 @@ impl ModuleAsm<'a> {
         let mut asm = ".text\n".to_string();
         let module = self.module;
         for f in &module.functions {
-            asm.push_str(&format!("\t.globl {}\n", f.name));
-            asm.push_str(&format!("\t.type {},@function\n", f.name));
+            asm!(asm, ".globl {}"; [f.name],
+                      ".type {},@function"; [f.name]);
         }
         for (fn_idx, f) in module.functions.iter().enumerate() {
             self.compiled_params.clear();
             let mut ret = None;
             let mut ret_bb = "".to_string();
             self.stack_size = 0;
-            asm.push_str(&format!("{}:\n", f.name));
-            asm.push_str("\tpush %rbp\n");
-            asm.push_str("\tmov %rsp, %rbp\n");
+            label!(asm, f.name);
+            asm!(asm, "push %rbp"; [],
+                      "mov %rsp, %rbp"; []);
             for param in &f.params {
                 asm.push_str(&self.compile_value(*param).0);
             }
@@ -279,7 +295,7 @@ impl ModuleAsm<'a> {
                         continue;
                     }
                     if inst_idx == 0 {
-                        asm.push_str(&format!("\t{}:\n", bb.label));
+                        label!(asm, bb.label);
                     }
                     let inst = &self.module.functions[fn_idx].
                         basic_blocks[bb_idx].instrs[inst_idx];
@@ -289,20 +305,20 @@ impl ModuleAsm<'a> {
                         if inst.is_branch() {
                             let (new_asm, _) = self.compile_instruction(
                                 Value::Instruction(fn_idx, bb_idx, inst_idx));
-                            asm.push_str(&new_asm);
+                            asm!(asm, &new_asm);
                         }
                     } else {
                         let (new_asm, _) = self.compile_instruction(
                             Value::Instruction(fn_idx, bb_idx, inst_idx));
-                        asm.push_str(&new_asm);
+                        asm!(asm, &new_asm);
                     }
                 }
             }
             // emit the ret:
             if let Some(inst) = ret {
-                asm.push_str(&ret_bb);
+                asm!(asm, &ret_bb);
                 let (new_asm, _) = self.compile_instruction(inst);
-                asm.push_str(&new_asm);
+                asm!(asm, &new_asm);
             } else {
                 bug!("No return instruction for {}", f.name);
             }
