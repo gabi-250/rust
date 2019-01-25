@@ -41,6 +41,21 @@ pub enum ScalarType {
     Ix(u64),
 }
 
+impl ScalarType {
+    /// The size in bits.
+    pub fn size(&self) -> u64 {
+        match *self {
+            ScalarType::I1 => 1,
+            ScalarType::I8 => 8,
+            ScalarType::I16 => 16,
+            ScalarType::I32 => 32,
+            ScalarType::I64 => 64,
+            ScalarType::ISize => 64, // FIXME
+            ScalarType::Ix(bits) => bits,
+        }
+    }
+}
+
 impl ToString for ScalarType {
     fn to_string(&self) -> String {
         format!("{:?}", *self).to_string()
@@ -72,6 +87,32 @@ pub enum LLType {
     Void,
 }
 
+pub trait TypeSize {
+    fn size(&self, cx: &Vec<LLType>) -> u64;
+    fn is_ptr(&self, types: &Vec<LLType>) -> bool;
+}
+
+impl TypeSize for Type {
+    /// The size in bits
+    fn size(&self, types: &Vec<LLType>) -> u64 {
+        match types[*self] {
+            LLType::Scalar(sty) => sty.size(),
+            LLType::PtrTo {..} => 64,
+            LLType::FnType {..} => 64,
+            ref ty => unimplemented!("size of {:?}", ty),
+        }
+    }
+
+    fn is_ptr(&self, types: &Vec<LLType>) -> bool {
+        match types[*self] {
+            LLType::FnType {..} => true,
+            LLType::PtrTo {..} => true,
+            ref ty => false,
+        }
+    }
+}
+
+
 impl CodegenCx<'ll, 'tcx> {
     /// Add the specified `LLType` to the vector of `Type`s for this context.
     ///
@@ -79,16 +120,34 @@ impl CodegenCx<'ll, 'tcx> {
     /// vector is returned. Otherwise, it is added to the type vector, and to
     /// the type cache.
     pub fn add_type(&self, ll_type: LLType) -> Type {
-        let mut types = self.types.borrow_mut();
-        let mut type_cache = self.type_cache.borrow_mut();
         // If ll_type is not in types, it will be inserted at the end of the
         // types vector.
-        let ty_idx = types.len();
-        *type_cache.entry(ll_type.clone()).or_insert_with(|| {
-            // FIXME: don't always clone ll_type.
-            types.push(ll_type);
-            ty_idx
-        })
+        let mut last_idx;
+        {
+            let mut module = &mut self.module.borrow_mut();
+            let mut types = &mut module.icx.types;
+            last_idx = types.len();
+        }
+        let mut ty_idx;
+        let mut new_ty = None;
+        {
+            let mut module = &mut self.module.borrow_mut();
+            let mut type_cache = &mut module.icx.type_cache;
+
+            ty_idx = *type_cache.entry(ll_type.clone()).or_insert_with(|| {
+                // FIXME: don't always clone ll_type.
+                new_ty = Some(ll_type);
+                last_idx
+            });
+        }
+        {
+            let mut module = &mut self.module.borrow_mut();
+            let mut types = &mut module.icx.types;
+            if let Some(ty) = new_ty {
+                types.push(ty);
+            }
+        }
+        ty_idx
     }
 
     crate fn type_named_struct(&self, name: &str) -> Type {
@@ -100,7 +159,7 @@ impl CodegenCx<'ll, 'tcx> {
     }
 
     crate fn set_struct_body(&self, ty: Type, els: &[Type], packed: bool) {
-        let mut types = self.types.borrow_mut();
+        let mut types = &mut self.module.borrow_mut().icx.types;
         if let LLType::StructType{ ref name, ref mut members } = types[ty] {
             *members = els.to_vec();
             return;
@@ -249,10 +308,10 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn val_ty(&self, v: Value) -> Type {
         match v {
             Value::ConstUint(const_idx) => {
-                self.u_consts.borrow()[const_idx].ty
+                self.module.borrow().icx.u_consts[const_idx].ty
             },
             Value::ConstInt(const_idx) => {
-                self.i_consts.borrow()[const_idx].ty
+                self.module.borrow().icx.i_consts[const_idx].ty
             },
             Value::Param(_, ty) => {
                 ty
@@ -282,7 +341,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 }
             },
             Value::StructPtr(idx) => {
-                let unnamed_struct = &self.unnamed_structs.borrow()[idx];
+                let unnamed_struct = &self.module.borrow().icx.unnamed_structs[idx];
                 let mut comp_tys =
                     Vec::with_capacity(unnamed_struct.components.len());
                 for elt in &unnamed_struct.components {
@@ -296,7 +355,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             }
             x => {
                 // XXX
-                let mut types = self.types.borrow_mut();
+                let mut types = &self.module.borrow().icx.types;
                 unimplemented!("type of {:?} {:?}", x, types);
             }
         }

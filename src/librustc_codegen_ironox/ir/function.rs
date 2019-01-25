@@ -42,17 +42,13 @@ impl IronOxFunction {
         idx: usize,
         name: &str,
         fn_type: Type) -> IronOxFunction {
-        match cx.types.borrow()[fn_type] {
+        match cx.module.borrow().icx.types[fn_type] {
             LLType::FnType { ref args, ref ret } => {
                 // XXX ret should not have an index...
                 let ret = Value::Param(0, *ret);
                 let mut params = Vec::with_capacity(args.len());
                 for (index, arg_ty) in args.iter().enumerate() {
                     params.push(Value::Param(index, *arg_ty));
-                    eprintln!("pushing Param({}): {:?}",
-                              params.len(),
-                              cx.pretty_ty(*arg_ty));
-                    eprintln!("\n\n{:?}\n\n", cx.types);
                 }
                 IronOxFunction {
                     idx,

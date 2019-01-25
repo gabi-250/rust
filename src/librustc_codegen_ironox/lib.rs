@@ -90,8 +90,8 @@ mod mono_item;
 mod value;
 
 use constant::{UnsignedConst, SignedConst};
-use context::CodegenCx;
-use type_::Type;
+use context::{CodegenCx, IronOxCx};
+use type_::{LLType, Type};
 use value::{Instruction, Value};
 use ir::function::IronOxFunction;
 use ir::struct_::IronOxStruct;
@@ -146,23 +146,31 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 
 #[derive(Debug)]
 pub struct ModuleIronOx {
+    pub icx: IronOxCx,
     /// The functions defined in this module
     pub functions: Vec<IronOxFunction>,
     /// All the structs in the module
     pub structs: Vec<IronOxStruct>,
-    pub u_consts: Vec<UnsignedConst>,
-    pub i_consts: Vec<SignedConst>,
 }
+
+unsafe impl<'a> Send for ModuleIronOx {}
+unsafe impl<'a> Sync for ModuleIronOx {}
 
 impl ModuleIronOx {
     /// Create an empty module.
     pub fn new() -> ModuleIronOx {
         ModuleIronOx {
+            icx: IronOxCx::new(),
             functions: Default::default(),
             structs: Default::default(),
-            u_consts: Default::default(),
-            i_consts: Default::default(),
         }
+    }
+
+    pub fn add_private_global(&mut self, ty: Type) -> Value {
+        let mut borrowed_globals =
+            &mut self.module.borrow_mut().icx.private_globals;
+        borrowed_globals.push(ty);
+        Value::Global(borrowed_globals.len() -1)
     }
 
     /// Get the function at index `fn_idx`.

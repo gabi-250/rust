@@ -1,5 +1,6 @@
 use super::ModuleIronOx;
 use value::{Value, Instruction};
+use type_::TypeSize;
 
 use rustc::util::nodemap::FxHashMap;
 
@@ -102,18 +103,41 @@ impl ModuleAsm<'a> {
         }
     }
 
+    pub fn compile_store(&mut self, inst: &'a Instruction) -> InstrAsm {
+        if let Instruction::Store(lhs, rhs) = inst {
+            //eprintln!("Store {:?} {} in {:?} {}",
+                      //lhs, lhs.is_ptr(&self.module.types),
+                      //rhs, rhs.is_ptr(&self.module.types));
+
+            let mut asm = "".to_string();
+            let (new_asm, dest) = self.compile_value(*lhs);
+            asm!(asm, &new_asm);
+            let (new_asm, source) = self.compile_value(*rhs);
+            asm!(asm, &new_asm);
+            // if dest is a pointer:
+            //asm.push_str(&format!("\tmov {}, %rax\n", dest));
+            asm!(asm, "lea {}, %rax"; [dest],
+                      "movq {}, %rbx"; [source],
+                      "movq %rbx, (%rax)"; []);
+            InstrAsm { asm, result:dest }
+        } else {
+            bug!("expected Instruction::Store");
+        }
+    }
+
     pub fn compile_value(&mut self, value: Value) -> (String, String) {
         match value {
             Value::ConstUint(idx) => {
-                let value = self.module.u_consts[idx].value;
+                let value = self.module.icx.u_consts[idx].value;
                 ("".to_string(), format!("${}", value))
             },
-            Value::Param(idx, _) => {
+            Value::Param(idx, ty) => {
 
                 if let Some(instr_asm) = self.compiled_params.get(&value) {
                     let ret = ("".to_string(), instr_asm.result.clone());
                     return ret;
                 }
+                eprintln!("type of param is {:?}", self.module.icx.types[ty]);
                 // FIXME:
                 let param_size = 8;
                 self.stack_size += param_size;
@@ -173,16 +197,8 @@ impl ModuleAsm<'a> {
                 (asm, "".to_string())
             },
             Instruction::Store(v1, v2) => {
-                let (new_asm, dest) = self.compile_value(*v1);
-                asm!(asm, &new_asm);
-                let (new_asm, source) = self.compile_value(*v2);
-                asm!(asm, &new_asm);
-                // if dest is a pointer:
-                //asm.push_str(&format!("\tmov {}, %rax\n", dest));
-                asm!(asm, "lea {}, %rax"; [dest],
-                          "movq {}, %rbx"; [source],
-                          "movq %rbx, (%rax)"; []);
-                (asm, dest)
+                let instr_asm = self.compile_store(inst);
+                (instr_asm.asm, instr_asm.result.clone())
             },
             Instruction::Add(v1, v2) => {
                 let instr_asm = self.compile_add(inst);

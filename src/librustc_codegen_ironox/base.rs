@@ -59,8 +59,6 @@ fn codegen_ironox_module<'ll, 'tcx>(
 
         // FIXME fill out the rest
 
-        cx.module.borrow_mut().u_consts = cx.u_consts.replace(vec![]);
-        cx.module.borrow_mut().i_consts = cx.i_consts.replace(vec![]);
         cx.consume_stats().into_inner()
     };
     (stats, ModuleCodegen {

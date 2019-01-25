@@ -26,7 +26,7 @@ use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
 use rustc_target::abi::HasDataLayout;
 use rustc::mir::interpret::{Scalar, Allocation};
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
 
@@ -48,45 +48,24 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
     type DIScope = &'ll DIScope;
 }
 
-pub struct IronOxContext<'ll> {
-    pub module: &'ll mut ::ModuleIronOx
-}
-
-pub struct CodegenCx<'ll, 'tcx: 'll> {
-    pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-    pub stats: RefCell<Stats>,
-    pub codegen_unit: Arc<CodegenUnit<'tcx>>,
-    pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
-    pub module: RefCell<&'ll mut ModuleIronOx>,
-    pub vtables: RefCell<
-        FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>,
-    eh_personality: Cell<Option<Value>>,
+#[derive(Debug)]
+pub struct IronOxCx {
     /// All the types defined in this context.
-    pub types: RefCell<Vec<LLType>>,
+    pub types: Vec<LLType>,
     /// The index of an `LLType` in `types`.
-    pub type_cache: RefCell<FxHashMap<LLType, Type>>,
+    pub type_cache: FxHashMap<LLType, Type>,
     /// Maps symbols to Values (indices in either `functions` or `structs`).
-    pub named_globals: RefCell<FxHashMap<String, Value>>,
-    pub private_globals: RefCell<Vec<Type>>,
-    pub global_cache: RefCell<FxHashMap<Value, Value>>,
-    pub u_consts: RefCell<Vec<UnsignedConst>>,
-    pub i_consts: RefCell<Vec<SignedConst>>,
-    pub unnamed_structs: RefCell<Vec<IronOxStruct>>,
+    pub named_globals: FxHashMap<String, Value>,
+    pub private_globals: Vec<Type>,
+    pub global_cache: FxHashMap<Value, Value>,
+    pub u_consts: Vec<UnsignedConst>,
+    pub i_consts: Vec<SignedConst>,
+    pub unnamed_structs: Vec<IronOxStruct>,
 }
 
-impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
-    pub fn new(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-               codegen_unit: Arc<CodegenUnit<'tcx>>,
-               module: &'ll mut ModuleIronOx)
-                 -> CodegenCx<'ll, 'tcx> {
-        CodegenCx {
-            tcx,
-            codegen_unit,
-            stats: RefCell::new(Stats::default()),
-            instances: Default::default(),
-            module: RefCell::new(module),
-            vtables: Default::default(),
-            eh_personality: Default::default(),
+impl IronOxCx {
+    pub fn new() -> IronOxCx {
+        IronOxCx {
             types: Default::default(),
             type_cache: Default::default(),
             named_globals: Default::default(),
@@ -97,41 +76,34 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             unnamed_structs: Default::default(),
         }
     }
+}
 
-    pub fn ty_size(&self, ty: Type) -> u64 {
-        // FIXME: implement
-        8
+pub struct CodegenCx<'ll, 'tcx: 'll> {
+    pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
+    pub codegen_unit: Arc<CodegenUnit<'tcx>>,
+    pub module: RefCell<&'ll mut ModuleIronOx>,
+    pub stats: RefCell<Stats>,
+    pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
+    pub vtables: RefCell<
+        FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>,
+    eh_personality: Cell<Option<Value>>,
+}
+
+impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
+    pub fn new(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
+               codegen_unit: Arc<CodegenUnit<'tcx>>,
+               module: &'ll mut ModuleIronOx)
+                 -> CodegenCx<'ll, 'tcx> {
+        CodegenCx {
+            tcx,
+            codegen_unit,
+            module: RefCell::new(module),
+            stats: RefCell::new(Stats::default()),
+            instances: Default::default(),
+            vtables: Default::default(),
+            eh_personality: Default::default(),
+        }
     }
-
-    pub fn pretty_ty(&self, ty: Type) -> String {
-        "".to_string()
-/*        eprintln!("ty is {} {:?}", ty, self.types.borrow()[ty]);*/
-        //match self.types.borrow()[ty] {
-            //LLType::Void => "Void".to_string(),
-            //LLType::PtrTo { pointee } => {
-                //format!("PtrTo {}", self.pretty_ty(pointee)).to_string()
-            //},
-            //LLType::Array { .. } => "Array".to_string(),
-            //LLType::Scalar(scalar_ty) => scalar_ty.to_string(),
-            //LLType::FnType { ref args, ref ret } => {
-                //let mut str_args = Vec::with_capacity(args.len());
-                //for arg in args {
-                    //str_args.push(self.pretty_ty(*arg));
-                //}
-                //let ret_ty = self.pretty_ty(*ret);
-                //format!("FnType {{ args:{} ret:{} }}",
-                        //str_args.join(","), ret_ty).to_string()
-            //},
-            //LLType::StructType { ref name, ref members } => {
-                //let mut str_members = Vec::with_capacity(members.len());
-                //for mem in members {
-                    //str_members.push(self.pretty_ty(*mem));
-                //}
-                //format!("Struct {:?} {{ {} }}", name, str_members.join(","))
-            //}
-        /*}*/
-    }
-
 }
 
 impl ty::layout::HasTyCtxt<'tcx> for CodegenCx<'ll, 'tcx> {
@@ -200,7 +172,8 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::Function(i) => i,
             _ => bug!("llfn must be a function! Found: {:?}", llfn),
         };
-        let p = self.module.borrow().functions[llfn_index].get_param(index as usize);
+        let p = self.module.borrow()
+            .functions[llfn_index].get_param(index as usize);
 
         eprintln!("returning {:?}", p);
         p
@@ -284,7 +257,7 @@ impl CodegenCx<'ll, 'tcx> {
             value,
             allowed_range,
         };
-        let mut borrowed_consts = self.i_consts.borrow_mut();
+        let mut borrowed_consts = &mut self.module.borrow_mut().icx.i_consts;
         borrowed_consts.push(iconst);
         Value::ConstInt(borrowed_consts.len() - 1)
     }
@@ -299,7 +272,7 @@ impl CodegenCx<'ll, 'tcx> {
             value,
             allowed_range,
         };
-        let mut borrowed_consts = self.u_consts.borrow_mut();
+        let mut borrowed_consts = &mut self.module.borrow_mut().icx.u_consts;
         borrowed_consts.push(uconst);
         Value::ConstUint(borrowed_consts.len() - 1)
     }
@@ -387,7 +360,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
-        let mut structs = self.unnamed_structs.borrow_mut();
+        let mut structs = &mut self.module.borrow_mut().icx.unnamed_structs;
         structs.push(IronOxStruct::new(elts));
         Value::ConstStruct(structs.len() - 1)
     }
@@ -427,11 +400,11 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn const_to_opt_u128(&self, v: Value, sign_ext: bool) -> Option<u128> {
         match v {
             Value::ConstUint(i) => {
-                Some(self.u_consts.borrow()[i].value)
+                Some(self.module.borrow().icx.u_consts[i].value)
             },
             Value::ConstInt(i) => {
                 unimplemented!("signed integers");
-                //Some(self.i_consts.borrow()[i].value)
+                //Some(self.module.borrow().icx.i_consts.borrow()[i].value)
             }
             _ => {
                 None
@@ -440,7 +413,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_ptrcast(&self, val: Value, ty: Type) -> Value {
-        eprintln!("ptrcast {:?} to {:?}", val, self.types.borrow()[ty]);
+        eprintln!("ptrcast {:?} to {:?}", val, self.module.borrow().icx.types[ty]);
         val
         //unimplemented!("const_ptrcast");
     }

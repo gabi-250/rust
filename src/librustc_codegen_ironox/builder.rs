@@ -28,7 +28,7 @@ use std::ops::{Deref, Range};
 use syntax;
 
 use ir::basic_block::{BasicBlock, BasicBlockData};
-use type_::Type;
+use type_::{Type, TypeSize};
 use value::{Instruction, Value};
 
 impl BackendTypes for Builder<'_, 'll, 'tcx> {
@@ -179,7 +179,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         match value {
             Value::Param(idx, ty) => {
                 eprintln!("rename {} {:?} to {}", idx,
-                          self.types.borrow()[ty], name);
+                          self.module.borrow().icx.types[ty], name);
                 module.functions[idx].rename_local(value, name.to_string());
             }
             _ => {
@@ -490,7 +490,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ty: Type,
         name: &str, align: Align
     )-> Value {
-        let ty_size = self.ty_size(ty);
+        let ty_size = ty.size(&self.module.borrow().icx.types);
         self.emit_instr(
             Instruction::Alloca(name.to_string(), ty, ty_size, align))
     }
@@ -689,7 +689,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         dest_ty: Type
     )-> Value {
         // XXX cast
-        //unimplemented!("bitcast {:?} to {:?}", val, self.types.borrow()[dest_ty]);
+        //unimplemented!("bitcast {:?} to {:?}", val, self.module.borrow().icx.types[dest_ty]);
         val
     }
 
@@ -938,7 +938,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     )-> Value {
         // FIXME: insert elt into agg_val at idx
         eprintln!("insert {:?} into {:?} at index {}", elt, agg_val, idx);
-        let types = self.types.borrow();
+        let types = &self.module.borrow().icx.types;
         for i in 0..types.len() {
             eprintln!("{}: {:?}", i, types[i]);
         }
@@ -1118,12 +1118,12 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
                 self.emit_instr(Instruction::Call(idx, args.to_vec()))
             },
             Value::Param(idx, ty) => {
-                eprintln!("expected Value::Function, found  {:?}", self.pretty_ty(ty));
+                eprintln!("expected Value::Function, found  {:?}", ty);
                 self.emit_instr(Instruction::Call(0, args.to_vec()))
             },
             _ => {
                 eprintln!("expected Value::Function, found  {:?} {:?}",
-                          llfn, self.types.borrow());
+                          llfn, self.module.borrow().icx.types);
 
                 self.emit_instr(Instruction::Call(0, args.to_vec()))
             }
