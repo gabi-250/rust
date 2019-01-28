@@ -11,6 +11,7 @@ use rustc_target::abi::{FloatTy, LayoutOf};
 use std::fmt::Write;
 
 pub trait LayoutIronOxExt<'tcx> {
+    fn is_ironox_immediate(&self) -> bool;
     fn ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type;
     fn immediate_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type;
     fn scalar_ironox_type_at(&self, cx: &CodegenCx<'_, 'tcx>,
@@ -31,6 +32,16 @@ fn struct_field_types(
 }
 
 impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
+    fn is_ironox_immediate(&self) -> bool {
+        match self.abi {
+            layout::Abi::Scalar(_) |
+            layout::Abi::Vector { .. } => true,
+            layout::Abi::ScalarPair(..) => false,
+            layout::Abi::Uninhabited |
+            layout::Abi::Aggregate { .. } => self.is_zst()
+        }
+    }
+
     fn ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type {
         if let layout::Abi::Scalar(ref scalar) = self.abi {
             let llty = match self.ty.sty {
@@ -55,7 +66,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             return llty;
         }
 
-        assert!(!self.ty.has_escaping_bound_vars(), "{:?} has escaping bound vars", self.ty);
+        assert!(!self.ty.has_escaping_bound_vars(),
+                "{:?} has escaping bound vars", self.ty);
 
         // FIXME? extracted from llvm's type_of:
         //
