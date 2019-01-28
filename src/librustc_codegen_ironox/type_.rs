@@ -247,26 +247,16 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn val_ty(&self, v: Value) -> Type {
         let module = &self.module.borrow();
         match v {
-            Value::ConstUint(const_idx) => {
-                self.u_consts.borrow()[const_idx].ty
-            },
-            Value::ConstInt(const_idx) => {
-                self.i_consts.borrow()[const_idx].ty
-            },
-            Value::Param(_, ty) => {
-                ty
-            },
+            Value::ConstUint(const_idx) => self.u_consts.borrow()[const_idx].ty,
+            Value::ConstInt(const_idx) => self.i_consts.borrow()[const_idx].ty,
+            Value::Param(_, ty) => ty,
+            Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
             Value::Instruction(fn_idx, bb_idx, inst_idx) => {
-                let inst =
-                    &module.functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
+                let inst = &module
+                    .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
                 inst.val_ty(self, module)
             },
-            Value::Function(fn_idx) => {
-                module.functions[fn_idx].ironox_type
-            }
-            _ => {
-                unimplemented!("Type of {:?}", v);
-            }
+            _ => unimplemented!("Type of {:?}", v),
         }
     }
 

@@ -68,10 +68,9 @@ impl Instruction {
             Instruction::Alloca(_, ty, _) => ty,
             Instruction::Cast(_, ty) => ty,
             Instruction::Add(v1, v2) => {
-                let ty1 = cx.val_ty(v1);
-                let ty2 = cx.val_ty(v2);
-                assert_eq!(ty1, ty2);
-                ty1
+                let ty = cx.val_ty(v1);
+                assert_eq!(ty, cx.val_ty(v2));
+                ty
             },
             Instruction::Call(fn_idx, _) => cx.module.borrow().functions[fn_idx].ret,
             Instruction::None => bug!("None does not have a type"),

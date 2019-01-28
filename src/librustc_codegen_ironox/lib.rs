@@ -87,6 +87,7 @@ mod type_of;
 mod metadata;
 mod mono_item;
 mod value;
+mod x86_asm_printer;
 
 use context::CodegenCx;
 use type_::Type;

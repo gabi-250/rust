@@ -21,6 +21,7 @@ use rustc_mir::monomorphize::partitioning::CodegenUnitExt;
 use syntax_pos::symbol::InternedString;
 
 use builder::Builder;
+use x86_asm_printer::{compile, ModuleAsm};
 use context::CodegenCx;
 
 pub fn compile_codegen_unit<'ll, 'tcx>(
@@ -44,7 +45,7 @@ fn codegen_ironox_module<'ll, 'tcx>(
     let backend = IronOxCodegenBackend(());
     let cgu = tcx.codegen_unit(cgu_name);
     let mut ironox_module = backend.new_metadata(tcx.sess, &cgu_name.as_str());
-    let stats = {
+    let (stats, asm) = {
         let cx = CodegenCx::new(tcx, cgu, &mut ironox_module);
         let mono_items = cx.codegen_unit
                            .items_in_deterministic_order(cx.tcx);
@@ -54,13 +55,10 @@ fn codegen_ironox_module<'ll, 'tcx>(
         for &(mono_item, _) in &mono_items {
             mono_item.define::<Builder>(&cx);
         }
-
         maybe_create_entry_wrapper::<Builder>(&cx);
-
-        // FIXME fill out the rest
-
-        cx.consume_stats().into_inner()
+        compile(ModuleAsm::new(cx))
     };
+    ironox_module.asm = Some(asm);
     (stats, ModuleCodegen {
         name: cgu_name.to_string(),
         module_llvm: ironox_module,
