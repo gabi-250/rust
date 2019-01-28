@@ -1,4 +1,5 @@
 #![feature(box_syntax)]
+#![feature(cell_update)]
 #![feature(crate_visibility_modifier)]
 #![feature(libc)]
 #![feature(in_band_lifetimes)]
@@ -81,6 +82,7 @@ mod mono_item;
 mod x86_asm_printer;
 
 use context::CodegenCx;
+use ir::constant::{UnsignedConst, SignedConst};
 use ir::type_::Type;
 use ir::value::Value;
 use ir::function::OxFunction;
