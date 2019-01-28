@@ -146,6 +146,9 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 pub struct ModuleIronOx {
     /// The functions defined in this module
     pub functions: Vec<IronOxFunction>,
+    /// The x86-64 program which corresponds to the module. This field is only
+    /// initialised after the code emitter processes the module.
+    pub asm: Option<String>,
 }
 
 impl ModuleIronOx {
@@ -153,6 +156,7 @@ impl ModuleIronOx {
     pub fn new() -> ModuleIronOx {
         ModuleIronOx {
             functions: Default::default(),
+            asm: None,
         }
     }
 
@@ -169,10 +173,6 @@ impl ModuleIronOx {
         fn_type: Type) -> Value {
         self.functions.push(IronOxFunction::new(cx, name, fn_type));
         Value::Function(self.functions.len() - 1)
-    }
-
-    pub fn asm(&self) -> String {
-        "nop".to_string()
     }
 }
 
