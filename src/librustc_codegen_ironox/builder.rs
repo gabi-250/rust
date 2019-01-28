@@ -183,7 +183,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // the basic block.
         let instr =
             self.cx.module.borrow().functions[llfn].basic_blocks[llbb].instrs.len();
-        self.builder = BuilderPosition::new(llfn, llbb, instr);
+        self.builder = {
+            BuilderPosition::new(llfn, llbb, instr)
+        };
     }
 
     fn position_at_start(&mut self, llbb: BasicBlock) {
@@ -476,8 +478,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ty: Type,
         name: &str, align: Align
     )-> Value {
-        self.emit_instr(
-            Instruction::Alloca(name.to_string(), ty, align))
+        self.emit_instr(Instruction::Alloca(name.to_string(), ty, align))
     }
 
     fn dynamic_alloca(

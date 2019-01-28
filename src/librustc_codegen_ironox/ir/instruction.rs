@@ -11,6 +11,8 @@ use rustc_codegen_ssa::traits::BaseTypeMethods;
 pub enum Instruction {
     /// Store (ptr, value).
     Store(Value, Value),
+    /// Load the value of a pointer.
+    Load(Value, Align),
     /// An unconditional branch to a label.
     Br(String),
     CondBr(Value, String, String),
@@ -27,7 +29,6 @@ pub enum Instruction {
     /// Add two values and return the result.
     Add(Value, Value),
     Sub(Value, Value),
-    Load(Value, Align),
     Eq(Value, Value),
     Lt(Value, Value),
 }
@@ -71,7 +72,28 @@ impl Instruction {
                 ty
             },
             Instruction::Call(fn_idx, _) => cx.module.borrow().functions[fn_idx].ret,
-            _ => bug!("val_ty: {:?}", &self),
+            Instruction::Load(ptr, _) => {
+                match ptr {
+                    Value::Instruction(fn_idx, bb_idx, idx) => {
+                        let inst =
+                            &module.functions[fn_idx].basic_blocks[bb_idx]
+                                .instrs[idx];
+                        match inst {
+                            Instruction::Alloca(_, ty, _) => *ty,
+                            _ => unimplemented!("{:?}", inst),
+                        }
+                    },
+                    Value::Param(_, ty) => {
+                        if let OxType::PtrTo{ pointee } = cx.types.borrow()[*ty] {
+                            pointee
+                        } else {
+                            bug!("Cannot load from non-pointer parameter {:?}", ty);
+                        }
+                    },
+                    _ => bug!("Cannot load from value {:?}", ptr),
+                }
+            },
+            _ => unimplemented!("instruction {:?}", *self),
         }
     }
 

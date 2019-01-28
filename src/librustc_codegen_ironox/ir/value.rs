@@ -6,7 +6,7 @@ use ir::type_::Type;
 /// value from the context.
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Value {
-    /// The index of an `OxFunction` in the module.
+    /// The index of an `IronOxFunction` function in the module.
     Function(usize),
     /// A `(function index, local index)` pair that can be used to retrieve a
     /// local value.
@@ -17,14 +17,15 @@ pub enum Value {
     ConstUint(usize),
     /// The index of a `SignedConst` in `i_consts`.
     ConstInt(usize),
-    /// The index of an `OxStruct` in the `structs` vec from `ModuleIronOx`.
+    /// The index of an `IronOxStruct` in the `structs` vec from `ModuleIronOx`.
     ConstStruct(usize),
-    /// The parameter of an `OxFunction`. This is just a wrapper around a
+    /// The parameter of an `IronOxFunction`. This is just a wrapper around a
     /// `Type`. A parameter is an (index, type) pair, where 'index' is the
     /// index of the parameter in the list of parameters of the function.
     Param(usize, Type),
     /// An instruction: (functiton index, basic block index, instruction index).
     Instruction(usize, usize, usize),
+    StructPtr(usize),
     /// A placeholder for unimplemented Values. This variant will be removed.
     None,
 }
