@@ -34,6 +34,21 @@ pub enum ScalarType {
     Ix(u64),
 }
 
+impl ScalarType {
+    /// The size in bits.
+    pub fn size(&self) -> u64 {
+        match *self {
+            ScalarType::I1 => 1,
+            ScalarType::I8 => 8,
+            ScalarType::I16 => 16,
+            ScalarType::I32 => 32,
+            ScalarType::I64 => 64,
+            ScalarType::ISize => 64, // FIXME
+            ScalarType::Ix(bits) => bits,
+        }
+    }
+}
+
 /// A `Type` is an index into the vector of types in the codegen context.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Type(usize);
@@ -68,6 +83,31 @@ pub enum OxType {
         members: Vec<Type>
     },
     Void,
+}
+
+pub trait TypeSize {
+    fn size(&self, cx: &Vec<OxType>) -> u64;
+    fn is_ptr(&self, types: &Vec<OxType>) -> bool;
+}
+
+impl TypeSize for Type {
+    /// The size in bits
+    fn size(&self, types: &Vec<OxType>) -> u64 {
+        match types[**self] {
+            OxType::Scalar(sty) => sty.size(),
+            OxType::PtrTo {..} => 64,
+            OxType::FnType {..} => 64,
+            ref ty => unimplemented!("size of {:?}", ty),
+        }
+    }
+
+    fn is_ptr(&self, types: &Vec<OxType>) -> bool {
+        match types[**self] {
+            OxType::FnType {..} => true,
+            OxType::PtrTo {..} => true,
+            ref ty => false,
+        }
+    }
 }
 
 impl CodegenCx<'ll, 'tcx> {
