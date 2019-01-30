@@ -76,6 +76,7 @@ mod abi;
 mod asm;
 mod base;
 mod builder;
+mod constant;
 mod consts;
 mod context;
 mod debuginfo;
@@ -143,6 +144,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 
 #[derive(Debug)]
 pub struct ModuleIronOx {
+    /// The functions defined in this module
     pub functions: Vec<IronOxFunction>,
 }
 
@@ -150,7 +152,7 @@ impl ModuleIronOx {
     /// Create an empty module.
     pub fn new() -> ModuleIronOx {
         ModuleIronOx {
-            functions: vec![],
+            functions: Default::default(),
         }
     }
 
@@ -160,7 +162,7 @@ impl ModuleIronOx {
     }
 
     /// Add a new function of a particular `Type`.
-    pub fn add_function_with_type(
+    pub fn add_function(
         &mut self,
         cx: &CodegenCx,
         name: &str,
