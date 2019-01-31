@@ -28,11 +28,10 @@ pub enum Value {
     StructPtr(usize),
     StaticAddrOf,
     Global(usize),
+    PrivGlobal(usize),
     ConstCstr(usize),
     Bool(bool),
     Cast(usize),
     ConstFatPtr(usize),
     Intrinsic,
-    IntrinsicExpect,
-    None,
 }

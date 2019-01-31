@@ -82,6 +82,7 @@ pub enum OxType {
         name: Option<String>,
         members: Vec<Type>
     },
+    ConstStruct,
     Void,
 }
 
@@ -107,6 +108,16 @@ impl TypeSize for Type {
             OxType::PtrTo {..} => true,
             ref ty => false,
         }
+    }
+}
+
+pub trait IxLlcx {
+    fn ix_llcx(cx: &CodegenCx, num_bits: u64) -> Type;
+}
+
+impl IxLlcx for Type {
+    fn ix_llcx(cx: &CodegenCx, num_bits: u64) -> Type {
+        cx.add_type(OxType::Scalar(ScalarType::Ix(num_bits)))
     }
 }
 
@@ -300,7 +311,14 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
                 inst.val_ty(self, module)
             },
-            _ => unimplemented!("Type of {:?}", v),
+            Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
+            Value::ConstStruct(idx) => self.struct_consts.borrow()[idx].ty,
+            Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
+            _ => {
+                // FIXME
+                Type(0)
+                //unimplemented!("Type of {:?}", v);
+            }
         }
     }
 

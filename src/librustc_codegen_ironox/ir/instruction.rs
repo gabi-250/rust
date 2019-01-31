@@ -31,6 +31,7 @@ pub enum Instruction {
     Sub(Value, Value),
     Eq(Value, Value),
     Lt(Value, Value),
+    Unreachable,
 }
 
 impl Instruction {
@@ -38,14 +39,21 @@ impl Instruction {
     /// instruction.
     pub fn val_ty(&self, cx: &CodegenCx, module: &ModuleIronOx) -> Type {
         match *self {
-            Instruction::Alloca(_, ty, _) => ty,
-            Instruction::Cast(_, ty) => ty,
-            Instruction::Add(v1, v2) => {
-                let ty = cx.val_ty(v1);
-                assert_eq!(ty, cx.val_ty(v2));
+            Instruction::Alloca(_, ty, _) => {
                 ty
             },
-            Instruction::Call(fn_idx, _) => cx.module.borrow().functions[fn_idx].ret,
+            Instruction::Cast(_, ty) => {
+                ty
+            },
+            Instruction::Add(v1, v2) => {
+                let ty1 = cx.val_ty(v1);
+                let ty2 = cx.val_ty(v2);
+                assert_eq!(ty1, ty2);
+                ty1
+            },
+            Instruction::Call(fn_idx, _) => {
+                cx.module.borrow().functions[fn_idx].ret
+            },
             Instruction::Load(ptr, _) => {
                 match ptr {
                     Value::Instruction(fn_idx, bb_idx, idx) => {
@@ -53,8 +61,12 @@ impl Instruction {
                             &module.functions[fn_idx].basic_blocks[bb_idx]
                                 .instrs[idx];
                         match inst {
-                            Instruction::Alloca(_, ty, _) => *ty,
-                            _ => unimplemented!("{:?}", inst),
+                            Instruction::Alloca(_, ty, _) => {
+                                *ty
+                            },
+                            _ => {
+                                unimplemented!("{:?}", inst);
+                            }
                         }
                     },
                     Value::Param(_, ty) => {
@@ -64,10 +76,14 @@ impl Instruction {
                             bug!("Cannot load from non-pointer parameter {:?}", ty);
                         }
                     },
-                    _ => bug!("Cannot load from value {:?}", ptr),
+                    _ => {
+                        bug!("Cannot load from value {:?}", ptr);
+                    }
                 }
             },
-            _ => unimplemented!("instruction {:?}", *self),
+            _ => {
+                unimplemented!("instruction {:?}", *self);
+            }
         }
     }
 

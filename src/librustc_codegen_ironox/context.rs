@@ -8,6 +8,7 @@ use rustc::session::Session;
 
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{LayoutOf, LayoutError, self, TyLayout, Size};
+use type_of::LayoutIronOxExt;
 use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::base::wants_msvc_seh;
 use rustc_codegen_ssa::callee::resolve_and_get_fn;
@@ -23,9 +24,11 @@ use syntax::symbol::LocalInternedString;
 use debuginfo::DIScope;
 use ir::basic_block::BasicBlock;
 use ir::constant::{UnsignedConst, SignedConst};
+use ir::instruction::Instruction;
 use ir::value::Value;
-use ir::type_::{OxType, Type};
+use ir::type_::{OxType, Type, IxLlcx};
 use ir::struct_::OxStruct;
+use consts::{self};
 use const_cstr::ConstCstr;
 use global::Global;
 
@@ -59,9 +62,14 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub struct_consts: RefCell<Vec<OxStruct>>,
     pub const_globals: RefCell<Vec<Global>>,
     pub globals: RefCell<Vec<Global>>,
-    pub globals_cache: RefCell<FxHashMap<Global, Value>>,
+    pub globals_cache: RefCell<FxHashMap<String, usize>>,
+    pub const_globals_cache: RefCell<FxHashMap<Value, Value>>,
     pub const_cstr_cache: RefCell<FxHashMap<LocalInternedString, Value>>,
     pub const_cstrs: RefCell<Vec<ConstCstr>>,
+    pub const_casts: RefCell<Vec<Instruction>>,
+    pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
+    pub sym_count: Cell<usize>,
+    pub private_globals: RefCell<Vec<Type>>
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -83,10 +91,15 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             i_consts: Default::default(),
             struct_consts: Default::default(),
             const_globals: Default::default(),
-            globals_cache: Default::default(),
+            const_globals_cache: Default::default(),
             globals: Default::default(),
+            globals_cache: Default::default(),
             const_cstr_cache: Default::default(),
             const_cstrs: Default::default(),
+            const_casts: Default::default(),
+            const_fat_ptrs: Default::default(),
+            sym_count: Cell::new(0),
+            private_globals: Default::default(),
         }
     }
 
@@ -95,14 +108,18 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
         8
     }
 
-    pub fn get_or_insert_global(&self, gv: Global) -> Value {
+    pub fn get_or_insert_global(&self, name: String, gv: Global) -> Value {
         let mut globals = self.globals.borrow_mut();
         let mut globals_cache = self.globals_cache.borrow_mut();
+        if let Some(idx) = globals_cache.get(&name) {
+            return Value::Global(*idx);
+        }
         let gv_idx = globals.len();
-        *globals_cache.entry(gv.clone()).or_insert_with(|| {
+        let gv_idx = *globals_cache.entry(name).or_insert_with(|| {
             globals.push(gv);
-            Value::Global(gv_idx)
-        })
+            gv_idx
+        });
+        Value::Global(gv_idx)
     }
 
     pub fn insert_cstr(&self,
@@ -111,8 +128,15 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
                        null_terminated: bool) -> Value {
         let mut const_cstrs = self.const_cstrs.borrow_mut();
         let val = Value::ConstCstr(const_cstrs.len());
-        const_cstrs.push(ConstCstr::new(c_str, len, null_terminated));
+        let ty = self.type_ptr_to(self.type_i8());
+        const_cstrs.push(ConstCstr::new(ty, c_str, len, null_terminated));
         val
+    }
+
+    pub fn get_sym_name(&self, prefix: &str) -> String {
+        let count = self.sym_count.get();
+        self.sym_count.set(count + 1);
+        format!("{}.{}", prefix, count)
     }
 }
 
@@ -291,7 +315,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_uint(&self, t: Type, i: u64) -> Value {
-        unimplemented!("const_uint");
+        self.const_unsigned(t, i as u128)
     }
 
     fn const_uint_big(&self, t: Type, u: u128) -> Value {
@@ -315,7 +339,15 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_usize(&self, i: u64) -> Value {
-        unimplemented!("const_usize");
+        let bit_size = self.data_layout().pointer_size.bits();
+        let isize_ty = Type::ix_llcx(self,
+                                     self.tcx.data_layout.pointer_size.bits());
+        if bit_size < 64 {
+            // make sure it doesn't overflow
+            assert!(i < (1<<bit_size));
+        }
+
+        self.const_uint(isize_ty, i)
     }
 
     fn const_u8(&self, i: u8) -> Value {
@@ -331,7 +363,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             return *val;
         }
         // FIXME
-        let symbol_name = "test".to_string();
+        let symbol_name = self.get_sym_name("str");
         let str_val = self.insert_cstr(s.as_ptr() as *const u8,
                                        s.len(),
                                        null_terminated);
@@ -345,8 +377,10 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_str_slice(&self, s: LocalInternedString) -> Value {
-        Value::None
-        //unimplemented!("const_str_slice");
+        let len = s.len();
+        let cs = consts::ptrcast(self, self.const_cstr(s, false),
+            self.type_ptr_to(self.layout_of(self.tcx.mk_str()).ironox_type(self)));
+        self.const_fat_ptr(cs, self.const_usize(len as u64))
     }
 
     fn const_fat_ptr(
@@ -354,7 +388,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         ptr: Value,
         meta: Value
     ) -> Value {
-        unimplemented!("const_fat_ptr");
+        let mut const_fat_ptrs = self.const_fat_ptrs.borrow_mut();
+        const_fat_ptrs.push((ptr, meta));
+        Value::ConstFatPtr(const_fat_ptrs.len())
     }
 
     fn const_struct(
@@ -363,7 +399,12 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         packed: bool
     ) -> Value {
         let mut structs = self.struct_consts.borrow_mut();
-        structs.push(OxStruct::new(elts));
+        let mut elt_tys = Vec::with_capacity(elts.len());
+        for v in elts {
+            elt_tys.push(self.val_ty(*v))
+        }
+        let ty = self.type_struct(&elt_tys[..], packed);
+        structs.push(OxStruct::new(elts, ty));
         Value::ConstStruct(structs.len() - 1)
     }
 

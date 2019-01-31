@@ -14,7 +14,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str, ty: Type
     ) -> Value {
         let global = Global::new(ty, Some(name.to_string()));
-        self.get_or_insert_global(global)
+        self.get_or_insert_global(name.to_string(), global)
     }
 
     fn declare_cfn(

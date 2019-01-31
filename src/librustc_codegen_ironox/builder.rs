@@ -142,7 +142,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             }
             _ => unimplemented!("overflow op"),
         };
-        (self.emit_instr(Instruction::Add(lhs, rhs)), Value::None)
+        (self.emit_instr(Instruction::Add(lhs, rhs)), Value::Bool(false))
     }
 
     fn new_block<'b>(
@@ -272,7 +272,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn unreachable(&mut self) {
-        unimplemented!("unreachable");
+        self.emit_instr(Instruction::Unreachable);
     }
 
     fn add(

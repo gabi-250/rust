@@ -85,7 +85,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                     unimplemented!("Vector");
                 }
                 layout::Abi::ScalarPair(..) => {
-                    unimplemented!("ScalarPair");
+                    //unimplemented!("ScalarPair");
                 }
                 layout::Abi::Uninhabited |
                 layout::Abi::Aggregate { .. } => {}
@@ -120,7 +120,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                     unimplemented!("Union");
                 }
                 layout::FieldPlacement::Array { count, .. } => {
-                    unimplemented!("Array");
+                    cx.type_array(self.field(cx, 0).ironox_type(cx), count)
                 }
                 layout::FieldPlacement::Arbitrary { .. } => {
                     match name {
