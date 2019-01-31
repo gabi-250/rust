@@ -8,9 +8,6 @@ use ir::type_::Type;
 pub enum Value {
     /// The index of an `IronOxFunction` function in the module.
     Function(usize),
-    /// A `(function index, local index)` pair that can be used to retrieve a
-    /// local value.
-    Local(usize, usize),
     /// An uninitialized constant. This is just a wrapper around a `Type`.
     ConstUndef(Type),
     /// The index of an `UnsignedConst` in `u_consts`.
@@ -26,6 +23,20 @@ pub enum Value {
     /// An instruction: (functiton index, basic block index, instruction index).
     Instruction(usize, usize, usize),
     StructPtr(usize),
-    /// A placeholder for unimplemented Values. This variant will be removed.
-    None,
+    StaticAddrOf,
+    Global(usize),
+    ConstCstr(usize),
+    Bool(bool),
+    Cast(usize),
+    ConstFatPtr(usize),
+    Intrinsic,
+}
+
+impl Value {
+    pub fn is_global(&self) -> bool {
+        match *self {
+            Value::Global(_) | Value::ConstCstr(_) => true,
+            _ => false,
+        }
+    }
 }
