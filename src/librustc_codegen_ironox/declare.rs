@@ -13,8 +13,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str, ty: Type
     ) -> Value {
-        let name = Some(name.to_string());
-        let global = Global::new(ty, name);
+        let global = Global::new(ty, Some(name.to_string()));
         self.get_or_insert_global(global)
     }
 
@@ -47,11 +46,17 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         ty: Type
     ) -> Option<Value> {
-        unimplemented!("define_global");
+        if self.get_defined_value(name).is_some() {
+            None
+        } else {
+            Some(self.declare_global(name, ty))
+        }
     }
 
     fn define_private_global(&self, ty: Type) -> Value {
-        unimplemented!("define_private_global");
+        let mut borrowed_globals = self.private_globals.borrow_mut();
+        borrowed_globals.push(ty);
+        Value::PrivGlobal(borrowed_globals.len() -1)
     }
 
     fn define_fn(
@@ -71,7 +76,11 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_declared_value(&self, name: &str) -> Option<Value> {
-        None
+        if let Some(idx) = self.globals_cache.borrow().get(name) {
+            Some(Value::Global(*idx))
+        } else {
+            None
+        }
     }
 
     fn get_defined_value(&self, name: &str) -> Option<Value> {
