@@ -120,7 +120,29 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value,
     ) -> (Value, Value) {
-        unimplemented!("checked_binop");
+        use syntax::ast::IntTy::*;
+        use syntax::ast::UintTy::*;
+        use rustc::ty::{Int, Uint};
+
+        let new_sty = match ty.sty {
+            Int(Isize) => unimplemented!("check_binop: signed int"),
+            Uint(Usize) => Uint(self.tcx.sess.target.usize_ty),
+            ref t @ Uint(_) | ref t @ Int(_) => t.clone(),
+            _ => panic!("tried to get overflow intrinsic for op applied to non-int type")
+        };
+
+        let ty = match oop {
+            OverflowOp::Add => match new_sty {
+                Uint(U8) => unimplemented!("u8"),
+                Uint(U16) => self.type_i16(),
+                Uint(U32) => unimplemented!("u32"),
+                Uint(U64) => unimplemented!("u64"),
+                Uint(U128) => unimplemented!("u128"),
+                _ => unreachable!(),
+            }
+            _ => unimplemented!("overflow op"),
+        };
+        (self.emit_instr(Instruction::Add(lhs, rhs)), Value::None)
     }
 
     fn new_block<'b>(

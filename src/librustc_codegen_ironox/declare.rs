@@ -2,6 +2,7 @@ use abi::FnTypeExt;
 use context::CodegenCx;
 use ir::type_::Type;
 use ir::value::Value;
+use global::Global;
 
 use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
@@ -12,7 +13,9 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str, ty: Type
     ) -> Value {
-        unimplemented!("declare_global");
+        let name = Some(name.to_string());
+        let global = Global::new(ty, name);
+        self.get_or_insert_global(global)
     }
 
     fn declare_cfn(

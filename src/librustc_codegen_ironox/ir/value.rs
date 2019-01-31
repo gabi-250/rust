@@ -26,6 +26,13 @@ pub enum Value {
     /// An instruction: (functiton index, basic block index, instruction index).
     Instruction(usize, usize, usize),
     StructPtr(usize),
-    /// A placeholder for unimplemented Values. This variant will be removed.
+    StaticAddrOf,
+    Global(usize),
+    ConstCstr(usize),
+    Bool(bool),
+    Cast(usize),
+    ConstFatPtr(usize),
+    Intrinsic,
+    IntrinsicExpect,
     None,
 }

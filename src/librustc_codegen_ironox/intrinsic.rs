@@ -29,6 +29,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn expect(&mut self, cond: Value, expected: bool) -> Value {
-        unimplemented!("expect");
+        Value::None
+        //unimplemented!("expect");
     }
 }

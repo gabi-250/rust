@@ -25,6 +25,9 @@ use ir::basic_block::BasicBlock;
 use ir::constant::{UnsignedConst, SignedConst};
 use ir::value::Value;
 use ir::type_::{OxType, Type};
+use ir::struct_::OxStruct;
+use const_cstr::ConstCstr;
+use global::Global;
 
 use super::ModuleIronOx;
 
@@ -53,6 +56,12 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub u_consts: RefCell<Vec<UnsignedConst>>,
     /// The signed constants defined in this context.
     pub i_consts: RefCell<Vec<SignedConst>>,
+    pub struct_consts: RefCell<Vec<OxStruct>>,
+    pub const_globals: RefCell<Vec<Global>>,
+    pub globals: RefCell<Vec<Global>>,
+    pub globals_cache: RefCell<FxHashMap<Global, Value>>,
+    pub const_cstr_cache: RefCell<FxHashMap<LocalInternedString, Value>>,
+    pub const_cstrs: RefCell<Vec<ConstCstr>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -72,12 +81,38 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             type_cache: Default::default(),
             u_consts: Default::default(),
             i_consts: Default::default(),
+            struct_consts: Default::default(),
+            const_globals: Default::default(),
+            globals_cache: Default::default(),
+            globals: Default::default(),
+            const_cstr_cache: Default::default(),
+            const_cstrs: Default::default(),
         }
     }
 
     pub fn ty_size(&self, ty: Type) -> u64 {
         // FIXME: implement
         8
+    }
+
+    pub fn get_or_insert_global(&self, gv: Global) -> Value {
+        let mut globals = self.globals.borrow_mut();
+        let mut globals_cache = self.globals_cache.borrow_mut();
+        let gv_idx = globals.len();
+        *globals_cache.entry(gv.clone()).or_insert_with(|| {
+            globals.push(gv);
+            Value::Global(gv_idx)
+        })
+    }
+
+    pub fn insert_cstr(&self,
+                       c_str: *const u8,
+                       len: usize,
+                       null_terminated: bool) -> Value {
+        let mut const_cstrs = self.const_cstrs.borrow_mut();
+        let val = Value::ConstCstr(const_cstrs.len());
+        const_cstrs.push(ConstCstr::new(c_str, len, null_terminated));
+        val
     }
 }
 
@@ -183,7 +218,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn check_overflow(&self) -> bool {
         // Don't check for overflow (for now).
-        false
+        true
     }
 
     fn stats(&self) -> &RefCell<Stats> {
@@ -272,7 +307,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_u32(&self, i: u32) -> Value {
-        unimplemented!("const_u32");
+        self.const_unsigned(self.type_i32(), i as u128)
     }
 
     fn const_u64(&self, i: u64) -> Value {
@@ -292,11 +327,26 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         s: LocalInternedString,
         null_terminated: bool,
     ) -> Value {
-        unimplemented!("const_cstr");
+        if let Some(val) = self.const_cstr_cache.borrow().get(&s) {
+            return *val;
+        }
+        // FIXME
+        let symbol_name = "test".to_string();
+        let str_val = self.insert_cstr(s.as_ptr() as *const u8,
+                                       s.len(),
+                                       null_terminated);
+        let gv = self.define_global(&symbol_name[..],
+                                    self.val_ty(str_val))
+            .unwrap_or_else(|| {
+                bug!("symbol `{}' is already defined", symbol_name);
+            });
+        self.const_cstr_cache.borrow_mut().insert(s, gv);
+        gv
     }
 
     fn const_str_slice(&self, s: LocalInternedString) -> Value {
-        unimplemented!("const_str_slice");
+        Value::None
+        //unimplemented!("const_str_slice");
     }
 
     fn const_fat_ptr(
@@ -312,7 +362,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
-        unimplemented!("const struct {:?}", elts);
+        let mut structs = self.struct_consts.borrow_mut();
+        structs.push(OxStruct::new(elts));
+        Value::ConstStruct(structs.len() - 1)
     }
 
     fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
