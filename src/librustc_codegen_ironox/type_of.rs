@@ -86,8 +86,15 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                 layout::Abi::Vector { ref element, count } => {
                     unimplemented!("Vector");
                 }
-                layout::Abi::ScalarPair(..) => {
-                    unimplemented!("ScalarPair");
+                layout::Abi::ScalarPair(ref a, ref b) => {
+                    // This may or may not be a fat pointer. It could be
+                    // another type that must be represented as a pair of scalars.
+                    // Create a struct that contains the types of the two elements
+                    // of the pair.
+                    return cx.type_struct(&[
+                        self.scalar_pair_element_ironox_type(cx, 0, false),
+                        self.scalar_pair_element_ironox_type(cx, 1, false),
+                    ], false);
                 }
                 layout::Abi::Uninhabited |
                 layout::Abi::Aggregate { .. } => {}
@@ -119,10 +126,21 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             let packed = false;
             match self.fields {
                 layout::FieldPlacement::Union(_) => {
-                    unimplemented!("Union");
+                    //let fill = cx.type_padding_filler(layout.size, layout.align.abi);
+                    let packed = false;
+                    match name {
+                        None => {
+                            cx.type_struct(&[], packed)
+                        }
+                        Some(ref name) => {
+                            let llty = cx.type_named_struct(name);
+                            cx.set_struct_body(llty, &[], packed);
+                            llty
+                        }
+                    }
                 }
                 layout::FieldPlacement::Array { count, .. } => {
-                    unimplemented!("Array");
+                    cx.type_array(self.field(cx, 0).ironox_type(cx), count)
                 }
                 layout::FieldPlacement::Arbitrary { .. } => {
                     match name {

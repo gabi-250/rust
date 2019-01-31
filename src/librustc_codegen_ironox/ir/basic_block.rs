@@ -29,7 +29,7 @@ impl OxBasicBlock {
                parent: &OxFunction,
                idx: usize) -> OxBasicBlock {
         OxBasicBlock {
-            label: format!("{}_{}", parent.name, label),
+            label: format!("{}_{}_{}", parent.name, label, idx),
             idx,
             instrs: vec![],
             parent: parent.idx,

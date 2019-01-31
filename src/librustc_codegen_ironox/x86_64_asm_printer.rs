@@ -160,6 +160,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 self.compile_value(self.cx.const_casts.borrow()[idx].value)
             }
             Value::Function(idx) => {
+                // Move the result to the stack, and assume its size is 8.
                 let function_name = if module.functions[idx].is_declaration() {
                     format!("{}@PLT", &module.functions[idx].name)
                 } else {
@@ -374,10 +375,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             ]);
                             CompiledInst::new(asm)
                         }
-                        _ => unimplemented!("cond br: {:?}", cond),
+                        x => {
+                            unimplemented!("cond br: {:?}", cond);
+                        }
                     }
                 }
-                _ => bug!("cond must be a Value::Instruction, not {:?}", cond),
+                _ => {
+                    bug!("cond must be a Value::Instruction, not {:?}", cond);
+                }
             },
             Instruction::Load(ptr, _) => {
                 let mut instr_asm = self.compile_value(*ptr);
