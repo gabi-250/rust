@@ -120,7 +120,38 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value,
     ) -> (Value, Value) {
-        unimplemented!("checked_binop");
+        use syntax::ast::IntTy::*;
+        use syntax::ast::UintTy::*;
+        use rustc::ty::{Int, Uint};
+
+        let new_sty = match ty.sty {
+            Int(Isize) => Int(self.tcx.sess.target.isize_ty),
+            Uint(Usize) => Uint(self.tcx.sess.target.usize_ty),
+            ref t @ Uint(_) | ref t @ Int(_) => t.clone(),
+            _ => panic!("tried to get overflow intrinsic for op applied to non-int type")
+        };
+        let (ty, signed) = match new_sty {
+            Uint(U8) => (self.type_i8(), false),
+            Uint(U16) => (self.type_i16(), false),
+            Uint(U32) => (self.type_i32(), false),
+            Uint(U64) => (self.type_i64(), false),
+            Uint(U128) => unimplemented!("u128"),
+
+            Int(I8) => (self.type_i8(), true),
+            Int(I16) => (self.type_i16(), true),
+            Int(I32) => (self.type_i32(), true),
+            Int(I64) => (self.type_i64(), true),
+            Int(I128) => unimplemented!("I128"),
+
+            _ => unreachable!()
+        };
+        let inst = match oop {
+            OverflowOp::Add => Instruction::Add(lhs, rhs),
+            OverflowOp::Sub => Instruction::Sub(lhs, rhs),
+            _ => unimplemented!("overflow op"),
+        };
+        let inst = self.emit_instr(inst);
+        (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty, signed)))
     }
 
     fn new_block<'b>(
@@ -204,7 +235,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let mut label;
         {
             let module = self.cx.module.borrow();
-            label = module.functions[dest.0].basic_blocks[dest.1].label.to_string();
+            label = module.functions[dest.0].basic_blocks[dest.1].label.clone();
         }
         let _ = self.emit_instr(Instruction::Br(label));
     }
@@ -215,17 +246,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         then_llbb: BasicBlock,
         else_llbb: BasicBlock,
     ) {
-        let mut true_label;
-        let mut false_label;
-        {
+        let (true_label, false_label) = {
             let module = self.cx.module.borrow();
-            true_label =
-                module.functions[then_llbb.0].basic_blocks[then_llbb.1
-                ].label.to_string();
-            false_label =
-                module.functions[else_llbb.0].basic_blocks[else_llbb.1]
-                .label.to_string();
-        }
+            (module.functions[then_llbb.0].basic_blocks[then_llbb.1].label.clone(),
+             module.functions[else_llbb.0].basic_blocks[else_llbb.1].label.clone())
+        };
         self.emit_instr(Instruction::CondBr(cond, true_label, false_label));
     }
 
@@ -250,7 +275,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn unreachable(&mut self) {
-        unimplemented!("unreachable");
+        self.emit_instr(Instruction::Unreachable);
     }
 
     fn add(
@@ -587,7 +612,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         idx: u64
     )-> Value {
-        unimplemented!("struct_gep");
+        self.emit_instr(Instruction::StructGep(ptr, idx))
     }
 
     fn trunc(
@@ -676,8 +701,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        // FIXME: implement bitcast
-        val
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn intcast(
@@ -686,7 +710,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         dest_ty: Type,
         is_signed: bool
     )-> Value {
-        unimplemented!("intcast");
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn pointercast(
@@ -694,7 +718,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        unimplemented!("pointercast");
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn icmp(
@@ -1093,17 +1117,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         if funclet.is_some() {
             unimplemented!("call funclet: {:?}", funclet);
         }
-        match llfn {
-            Value::Function(idx) => {
-                self.emit_instr(Instruction::Call(idx, args.to_vec()))
-            },
-            Value::Param(idx, ty) => {
-                self.emit_instr(Instruction::Call(0, args.to_vec()))
-            },
-            _ => {
-                unimplemented!("expected Value::Function, found  {:?}", llfn);
-            }
-        }
+        self.emit_instr(Instruction::Call(llfn, args.to_vec()))
     }
 
     fn zext(
@@ -1164,13 +1178,29 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             OperandValue::Ref(place.llval, Some(llextra), place.align)
         } else if place.layout.is_ironox_immediate() {
             let mut const_llval = None;
-            // FIXME: also handle globals
+            // FIXME: If this is a constant global, get its initializer.
             let llval = const_llval.unwrap_or_else(|| {
                 self.load(place.llval, place.align)
             });
             OperandValue::Immediate(to_immediate(self, llval, place.layout))
         } else if let layout::Abi::ScalarPair(ref a, ref b) = place.layout.abi {
-            unimplemented!("layout::Abi::ScalarPair");
+            // FIXME
+            let b_offset = a.value.size(self).align_to(b.value.align(self).abi);
+
+            let mut load = |i, scalar: &layout::Scalar, align| {
+                let llptr = self.struct_gep(place.llval, i as u64);
+                let load = self.load(llptr, align);
+                if scalar.is_bool() {
+                    let ty = {
+                        self.type_i1()
+                    };
+                    self.trunc(load, ty)
+                } else {
+                    load
+                }
+            };
+            OperandValue::Pair(load(0, a, place.align),
+                               load(1, b, place.align.restrict_for_offset(b_offset)))
         } else {
             OperandValue::Ref(place.llval, None, place.align)
         };

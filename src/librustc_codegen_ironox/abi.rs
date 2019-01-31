@@ -74,6 +74,7 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 }
 
 pub trait FnTypeExt<'tcx> {
+    fn of_instance(cx: &CodegenCx<'ll, 'tcx>, instance: &ty::Instance<'tcx>) -> Self;
     fn new(cx: &CodegenCx<'_, 'tcx>, sig: ty::FnSig<'tcx>,
            extra_args: &[Ty<'tcx>]) -> Self;
     /// Return the IronOx `Type` that is equivalent to this type.
@@ -83,6 +84,11 @@ pub trait FnTypeExt<'tcx> {
 }
 
 impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
+    fn of_instance(cx: &CodegenCx<'ll, 'tcx>, instance: &ty::Instance<'tcx>) -> Self {
+        let sig = instance.fn_sig(cx.tcx);
+        let sig = cx.tcx.normalize_erasing_late_bound_regions(ty::ParamEnv::reveal_all(), &sig);
+        FnType::new(cx, sig, &[])
+    }
     fn new(
         cx: &CodegenCx<'_, 'tcx>,
         sig: ty::FnSig<'tcx>,
@@ -182,7 +188,7 @@ impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn fn_type_of_instance(&self, instance: &Instance<'tcx>) -> FnType<'tcx, Ty<'tcx>> {
-        unimplemented!("fn_type_of_instance");
+        FnType::of_instance(&self, instance)
     }
 }
 
