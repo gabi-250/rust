@@ -11,7 +11,7 @@
 use builder::Builder;
 use context::CodegenCx;
 use value::Value;
-use type_::Type;
+use type_::{LLType, Type};
 use type_of::LayoutIronOxExt;
 
 use libc::c_uint;
@@ -86,7 +86,10 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 pub trait FnTypeExt<'tcx> {
     fn new(cx: &CodegenCx<'_, 'tcx>, sig: ty::FnSig<'tcx>,
            extra_args: &[Ty<'tcx>]) -> Self;
+    /// Return the IronOx `Type` that is equivalent to this type.
     fn ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type;
+    /// Return the IronOx `Type` that is equivalent to this pointer type.
+    fn ptr_to_ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type;
 }
 
 impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
@@ -166,6 +169,11 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
         } else {
             cx.type_func(&arg_tys, ret_ty)
         }
+    }
+
+    fn ptr_to_ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type {
+        let fn_ty = self.ironox_type(cx);
+        cx.add_type(LLType::PtrTo { pointee: fn_ty })
     }
 }
 

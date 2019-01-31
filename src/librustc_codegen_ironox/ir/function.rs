@@ -26,7 +26,7 @@ pub struct IronOxFunction {
     /// The parameters of the function.
     pub params: Vec<Value>,
     /// The return type of the function.
-    pub ret: Value,
+    pub ret: Type,
 }
 
 impl IronOxFunction {
@@ -36,11 +36,11 @@ impl IronOxFunction {
         fn_type: Type) -> IronOxFunction {
         match cx.types.borrow()[fn_type] {
             LLType::FnType { ref args, ref ret } => {
-                let ret = Value::Param(*ret);
                 let mut params = Vec::with_capacity(args.len());
                 for (index, arg_ty) in args.iter().enumerate() {
-                    params.push(Value::Param(*arg_ty));
+                    params.push(Value::Param(index, *arg_ty));
                 }
+                let ret = *ret;
                 IronOxFunction {
                     name: name.to_string(),
                     ironox_type: fn_type,

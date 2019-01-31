@@ -8,9 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use abi::FnTypeExt;
 use context::CodegenCx;
 use type_of::LayoutIronOxExt;
-use value::Value;
+use value::{Instruction, Value};
 
 use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods};
 use rustc_codegen_ssa::common::TypeKind;
@@ -28,8 +29,12 @@ pub enum ScalarType {
     I1,
     /// An 8-bit integer value.
     I8,
+    /// A 16-bit integer value.
+    I16,
     /// A 32-bit integer value.
     I32,
+    /// A 64-bit integer value.
+    I64,
     /// An integer value which has a target-dependent size.
     ISize,
     /// An integer value of a custom size.
@@ -67,7 +72,7 @@ impl CodegenCx<'ll, 'tcx> {
     /// If the type already exists in the type cache, its index in the type
     /// vector is returned. Otherwise, it is added to the type vector, and to
     /// the type cache.
-    fn add_type(&self, ll_type: LLType) -> Type {
+    pub fn add_type(&self, ll_type: LLType) -> Type {
         let mut types = self.types.borrow_mut();
         let mut type_cache = self.type_cache.borrow_mut();
         // If ll_type is not in types, it will be inserted at the end of the
@@ -116,7 +121,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_i16(&self) -> Type {
-        unimplemented!("type_i16");
+        self.add_type(LLType::Scalar(ScalarType::I16))
     }
 
     fn type_i32(&self) -> Type {
@@ -124,7 +129,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_i64(&self) -> Type {
-        unimplemented!("type_i64");
+        self.add_type(LLType::Scalar(ScalarType::I64))
     }
 
     fn type_i128(&self) -> Type {
@@ -132,7 +137,21 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_ix(&self, num_bits: u64) -> Type {
-        self.add_type(LLType::Scalar(ScalarType::Ix(num_bits)))
+        // This could just as well return
+        // `self.add_type(LLType::Scalar(ScalarType::Ix(num_bits)))`. However,
+        // that would make it harder to determine if two types are equal. For
+        // instance, a LLType::Scalar(ScalarType::I64) is equal to a
+        // LLType::Scalar(ScalarType::Ix(64)), but their `Types` are different
+        // (because they are two distinct `LLType::Scalar`s).
+        match num_bits {
+            1 => self.type_i1(),
+            8 => self.type_i8(),
+            16 => self.type_i16(),
+            32 => self.type_i32(),
+            64 => self.type_i64(),
+            128 => self.type_i128(),
+            _ => self.add_type(LLType::Scalar(ScalarType::Ix(num_bits))),
+        }
     }
 
     fn type_isize(&self) -> Type {
@@ -226,7 +245,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn val_ty(&self, v: Value) -> Type {
-        let mut borrowed_types = self.types.borrow_mut();
+        let module = &self.module.borrow();
         match v {
             Value::ConstUint(const_idx) => {
                 self.u_consts.borrow()[const_idx].ty
@@ -234,8 +253,19 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::ConstInt(const_idx) => {
                 self.i_consts.borrow()[const_idx].ty
             },
+            Value::Param(_, ty) => {
+                ty
+            },
+            Value::Instruction(fn_idx, bb_idx, inst_idx) => {
+                let inst =
+                    &module.functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
+                inst.val_ty(self, module)
+            },
+            Value::Function(fn_idx) => {
+                module.functions[fn_idx].ironox_type
+            }
             _ => {
-                unimplemented!("type of {:?}", v);
+                unimplemented!("Type of {:?}", v);
             }
         }
     }
@@ -300,6 +330,6 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn fn_ptr_backend_type(&self, ty: &FnType<'tcx, Ty<'tcx>>) -> Type {
-        unimplemented!("fn_ptr_backend_type");
+        ty.ptr_to_ironox_type(self)
     }
 }
