@@ -123,13 +123,18 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
     }
 
     pub fn insert_cstr(&self,
+                       name: &str,
                        c_str: *const u8,
                        len: usize,
                        null_terminated: bool) -> Value {
         let mut const_cstrs = self.const_cstrs.borrow_mut();
         let val = Value::ConstCstr(const_cstrs.len());
         let ty = self.type_ptr_to(self.type_i8());
-        const_cstrs.push(ConstCstr::new(ty, c_str, len, null_terminated));
+        const_cstrs.push(ConstCstr::new(name.to_string(),
+                                        ty,
+                                        c_str,
+                                        len,
+                                        null_terminated));
         val
     }
 
@@ -364,7 +369,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         }
         // FIXME
         let symbol_name = self.get_sym_name("str");
-        let str_val = self.insert_cstr(s.as_ptr() as *const u8,
+        let str_val = self.insert_cstr(&symbol_name,
+                                       s.as_ptr() as *const u8,
                                        s.len(),
                                        null_terminated);
         let gv = self.define_global(&symbol_name[..],

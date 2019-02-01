@@ -342,10 +342,31 @@ impl ModuleAsm<'ll, 'tcx> {
         self.compiled_insts.borrow().get(&value).is_some()
     }
 
+    fn get_str(&self, ptr: *const u8, len: usize) -> String {
+        let mut c_str = String::with_capacity(len);
+        for i in 0..len {
+            unsafe {
+                c_str.push(*ptr.offset(i as isize) as char);
+            }
+        }
+        c_str
+    }
+
+    fn declare_const_strs(&self) -> String {
+        let mut asm = ".rodata\n".to_string();
+        for c_str in self.cx.const_cstrs.borrow().iter() {
+            let const_str = self.get_str(c_str.ptr, c_str.len);
+            asm!(asm, ".type {},@object"; [c_str.name],
+                      ".size {},{}"; [c_str.name, c_str.len]);
+            label!(asm, c_str.name);
+            asm!(asm, ".ascii \"{}\""; [const_str]);
+        }
+        asm
+    }
+
     fn declare_functions(&self) -> String {
         let mut asm = ".text".to_string();
         let module = self.cx.module.borrow();
-        let mut asm = ".text\n".to_string();
         for f in &module.functions {
             asm!(asm, ".globl {}"; [f.name],
                       ".type {},@function"; [f.name]);
@@ -395,6 +416,8 @@ impl ModuleAsm<'ll, 'tcx> {
     pub fn compile(&self) -> String {
         let module = self.cx.module.borrow();
         let mut asm = String::new();
+        // Define the constant strings.
+        asm!(asm, &self.declare_const_strs());
         // Declare the functions
         asm!(asm, &self.declare_functions());
         for f in &module.functions {
