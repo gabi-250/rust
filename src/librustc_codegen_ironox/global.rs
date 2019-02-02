@@ -1,7 +1,7 @@
 use ir::type_::Type;
 use ir::value::Value;
 
-#[derive(Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Global {
     ty: Type,
     name: Option<String>,
@@ -16,6 +16,10 @@ impl Global {
 
     pub fn set_initializer(&mut self, value: Value) {
         self.initializer = Some(value)
+    }
+
+    pub fn get_initializer(&mut self) -> Option<Value> {
+        self.initializer
     }
 
     pub fn set_global_constant(&mut self, constant: bool) {

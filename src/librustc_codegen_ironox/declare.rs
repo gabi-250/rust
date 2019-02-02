@@ -13,8 +13,19 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str, ty: Type
     ) -> Value {
-        let global = Global::new(ty, Some(name.to_string()));
-        self.get_or_insert_global(name.to_string(), global)
+        let gv = Global::new(ty, Some(name.to_string()));
+        let mut globals = self.globals.borrow_mut();
+        let mut globals_cache = self.globals_cache.borrow_mut();
+
+        if let Some(idx) = globals_cache.get(name) {
+            return Value::Global(*idx);
+        }
+        let gv_idx = globals.len();
+        let gv_idx = *globals_cache.entry(name.to_string()).or_insert_with(|| {
+            globals.push(gv);
+            gv_idx
+        });
+        Value::Global(gv_idx)
     }
 
     fn declare_cfn(
@@ -54,9 +65,9 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn define_private_global(&self, ty: Type) -> Value {
-        let mut borrowed_globals = self.private_globals.borrow_mut();
-        borrowed_globals.push(ty);
-        Value::PrivGlobal(borrowed_globals.len() -1)
+        // FIXME: this global should have private linkage.
+        let name = self.get_sym_name("priv_glbl");
+        self.declare_global(&name, ty)
     }
 
     fn define_fn(

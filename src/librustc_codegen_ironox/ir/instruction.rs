@@ -31,6 +31,8 @@ pub enum Instruction {
     Sub(Value, Value),
     Eq(Value, Value),
     Lt(Value, Value),
+    CheckOverflow(Value, Type),
+    StructGep(Value, u64),
     Unreachable,
 }
 
@@ -64,9 +66,7 @@ impl Instruction {
                             Instruction::Alloca(_, ty, _) => {
                                 *ty
                             },
-                            _ => {
-                                unimplemented!("{:?}", inst);
-                            }
+                            _ => inst.val_ty(cx, module)
                         }
                     },
                     Value::Param(_, ty) => {
@@ -79,6 +79,15 @@ impl Instruction {
                     _ => {
                         bug!("Cannot load from value {:?}", ptr);
                     }
+                }
+            },
+            Instruction::StructGep(val, idx) => {
+                let struct_ty = cx.val_ty(val);
+                if let OxType::StructType { ref members, .. } =
+                    cx.types.borrow()[*struct_ty] {
+                    members[idx as usize]
+                } else {
+                    bug!("expected OxType::StructType, found {:?}", struct_ty);
                 }
             },
             _ => {

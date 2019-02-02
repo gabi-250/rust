@@ -60,16 +60,15 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     /// The signed constants defined in this context.
     pub i_consts: RefCell<Vec<SignedConst>>,
     pub struct_consts: RefCell<Vec<OxStruct>>,
-    pub const_globals: RefCell<Vec<Global>>,
     pub globals: RefCell<Vec<Global>>,
     pub globals_cache: RefCell<FxHashMap<String, usize>>,
-    pub const_globals_cache: RefCell<FxHashMap<Value, Value>>,
+    /// The constant globals (which have a static address).
+    pub const_globals_cache: RefCell<FxHashMap<Value, usize>>,
     pub const_cstr_cache: RefCell<FxHashMap<LocalInternedString, Value>>,
     pub const_cstrs: RefCell<Vec<ConstCstr>>,
     pub const_casts: RefCell<Vec<Instruction>>,
     pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
     pub sym_count: Cell<usize>,
-    pub private_globals: RefCell<Vec<Type>>
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -90,36 +89,20 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             u_consts: Default::default(),
             i_consts: Default::default(),
             struct_consts: Default::default(),
-            const_globals: Default::default(),
-            const_globals_cache: Default::default(),
             globals: Default::default(),
             globals_cache: Default::default(),
+            const_globals_cache: Default::default(),
             const_cstr_cache: Default::default(),
             const_cstrs: Default::default(),
             const_casts: Default::default(),
             const_fat_ptrs: Default::default(),
             sym_count: Cell::new(0),
-            private_globals: Default::default(),
         }
     }
 
     pub fn ty_size(&self, ty: Type) -> u64 {
         // FIXME: implement
         8
-    }
-
-    pub fn get_or_insert_global(&self, name: String, gv: Global) -> Value {
-        let mut globals = self.globals.borrow_mut();
-        let mut globals_cache = self.globals_cache.borrow_mut();
-        if let Some(idx) = globals_cache.get(&name) {
-            return Value::Global(*idx);
-        }
-        let gv_idx = globals.len();
-        let gv_idx = *globals_cache.entry(name).or_insert_with(|| {
-            globals.push(gv);
-            gv_idx
-        });
-        Value::Global(gv_idx)
     }
 
     pub fn insert_cstr(&self,

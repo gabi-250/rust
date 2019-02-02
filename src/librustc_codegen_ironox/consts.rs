@@ -22,34 +22,29 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
         align: Align,
         kind: Option<&str>,
     ) -> Value {
-        if let Some(&gv) = self.const_globals_cache.borrow().get(&cv) {
+        let mut const_globals_cache = self.const_globals_cache.borrow_mut();
+        if let Some(&gv) = const_globals_cache.get(&cv) {
             // FIXME: update the alignment
-            return gv;
+            return Value::Global(gv);
         }
-        let gv = match kind {
+        let mut gv = match kind {
             Some(kind) if !self.tcx.sess.fewer_names() => {
                 // FIXME: generate name
                 let name = "my_global".to_string();
                 let gv = self.define_global(&name[..],
-                    self.val_ty(cv)).unwrap_or_else(||{
+                    self.val_ty(cv)).unwrap_or_else(|| {
                         bug!("symbol `{}` is already defined", name);
                 });
                 gv
             },
             _ => self.define_private_global(self.val_ty(cv)),
         };
-        let mut const_globals = self.const_globals.borrow_mut();
-        match gv {
-            Value::Global(idx) => {
-                const_globals[idx].set_initializer(cv);
-                self.const_globals_cache.borrow_mut().insert(cv, gv);
-            },
-            Value::PrivGlobal(idx) => {
-                // FIXME
-            },
-            _ => bug!("expected global, found {:?}", gv),
+        if let Value::Global(gv) = gv {
+            self.globals.borrow_mut()[gv].set_initializer(cv);
+            const_globals_cache.insert(cv, gv);
+        } else {
+            bug!("expected global, found {:?}", gv);
         }
-
         gv
     }
 

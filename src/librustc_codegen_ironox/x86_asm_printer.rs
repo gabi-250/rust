@@ -328,7 +328,8 @@ impl ModuleAsm<'ll, 'tcx> {
                 (asm, result)
             }
             _ => {
-                unimplemented!("instruction {:?}", inst);
+                ("".to_string(), "".to_string())
+                //unimplemented!("instruction {:?}", inst);
             },
         };
         let ret = instr_asm.clone();
