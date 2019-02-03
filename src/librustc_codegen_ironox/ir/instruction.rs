@@ -19,8 +19,6 @@ pub enum Instruction {
     Cast(Value, Type),
     /// Add two values and return the result.
     Add(Value, Value),
-    /// Currently serves as a no-op. This variant will be removed.
-    None,
 }
 
 impl Instruction {
@@ -36,7 +34,6 @@ impl Instruction {
                 ty
             },
             Instruction::Call(fn_idx, _) => cx.module.borrow().functions[fn_idx].ret,
-            Instruction::None => bug!("None does not have a type"),
         }
     }
 }

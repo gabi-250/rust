@@ -190,7 +190,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn ret_void(&mut self) {
-        self.emit_instr(Instruction::None);
+        unimplemented!("ret_void");
     }
 
     fn ret(&mut self, v: Value) {
@@ -198,8 +198,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        // FIXME: emit the real instruction
-        self.emit_instr(Instruction::None);
+        unimplemented!("br");
     }
 
     fn cond_br(
