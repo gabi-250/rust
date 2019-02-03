@@ -1,6 +1,6 @@
 use abi::{FnType, FnTypeExt};
 use context::CodegenCx;
-use type_::Type;
+use ir::type_::Type;
 
 use rustc::ty::{self, TypeFoldable};
 use rustc::ty::layout::{self, TyLayout};

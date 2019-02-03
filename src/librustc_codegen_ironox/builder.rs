@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use rustc_codegen_ssa::common::{IntPredicate, RealPredicate, AtomicOrdering,
     SynchronizationScope, AtomicRmwBinOp};
 use rustc_codegen_ssa::MemFlags;
@@ -17,7 +7,7 @@ use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::mir::operand::{OperandValue, OperandRef};
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use context::CodegenCx;
-use value::Value;
+use ir::value::Value;
 use rustc::hir::def_id::DefId;
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{Align, Size, TyLayout};
@@ -28,9 +18,9 @@ use std::ffi::CStr;
 use std::ops::{Deref, Range};
 use syntax;
 
-use ir::basic_block::{BasicBlock, BasicBlockData};
-use type_::Type;
-use value::Instruction;
+use ir::basic_block::BasicBlock;
+use ir::type_::Type;
+use ir::instruction::Instruction;
 
 impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type Value = <CodegenCx<'ll, 'tcx> as BackendTypes>::Value;
@@ -108,12 +98,16 @@ impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 
 impl Builder<'a, 'll, 'tcx> {
     /// Add the instruction at the current `BuilderPosition`.
-    fn emit_instr(&mut self, inst: Instruction) {
+    fn emit_instr(&mut self, inst: Instruction) -> Value {
         let mut module = self.cx.module.borrow_mut();
         module.get_function(self.builder.fn_idx)
             .insert_inst(self.builder.bb_idx, self.builder.inst_idx, inst);
+        let inst = Value::Instruction(self.builder.fn_idx,
+                                     self.builder.bb_idx,
+                                     self.builder.inst_idx);
         // move to the next instruction
         self.builder.inst_idx += 1;
+        inst
     }
 }
 
@@ -134,7 +128,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         name: &'b str
     )-> Self {
         let mut bx = Builder::with_cx(cx);
-        let bb = BasicBlockData::new(cx, name, llfn);
+        let fn_idx = match llfn {
+            Value::Function(f) => f,
+            _ => bug!("The parent of a basic block has to be a function")
+        };
+        let bb = {
+            let mut f = &mut cx.module.borrow_mut().functions[fn_idx];
+            f.add_bb(cx, name)
+        };
         bx.position_at_end(bb);
         bx
     }
@@ -189,7 +190,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn ret_void(&mut self) {
-        self.emit_instr(Instruction::None);
+        unimplemented!("ret_void");
     }
 
     fn ret(&mut self, v: Value) {
@@ -197,8 +198,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        // FIXME: emit the real instruction
-        self.emit_instr(Instruction::None);
+        unimplemented!("br");
     }
 
     fn cond_br(

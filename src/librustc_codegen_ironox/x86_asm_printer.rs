@@ -1,7 +1,8 @@
 use super::ModuleIronOx;
 
 use context::CodegenCx;
-use value::{Value, Instruction};
+use ir::value::Value;
+use ir::instruction::Instruction;
 
 use rustc::mir::mono::Stats;
 use rustc::util::nodemap::FxHashMap;
@@ -38,7 +39,6 @@ impl ModuleAsm<'ll, 'tcx> {
             cx,
             compiled_insts: Default::default(),
             compiled_params: Default::default(),
-            stack_size: Default::default(),
         }
     }
 

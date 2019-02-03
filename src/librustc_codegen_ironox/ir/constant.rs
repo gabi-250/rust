@@ -1,4 +1,4 @@
-use type_::Type;
+use ir::type_::Type;
 
 /// An unsigned constant. Its value must fit in a `u128`.
 #[derive(Clone, Copy, Debug)]
