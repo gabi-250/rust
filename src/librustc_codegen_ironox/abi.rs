@@ -1,17 +1,7 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use builder::Builder;
 use context::CodegenCx;
-use value::Value;
-use type_::{LLType, Type};
+use ir::value::Value;
+use ir::type_::{OxType, Type};
 use type_of::LayoutIronOxExt;
 
 use libc::c_uint;
@@ -173,7 +163,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
 
     fn ptr_to_ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type {
         let fn_ty = self.ironox_type(cx);
-        cx.add_type(LLType::PtrTo { pointee: fn_ty })
+        cx.add_type(OxType::PtrTo { pointee: fn_ty })
     }
 }
 
