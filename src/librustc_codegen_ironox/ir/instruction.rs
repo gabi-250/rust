@@ -9,6 +9,13 @@ use rustc_codegen_ssa::traits::BaseTypeMethods;
 /// An IronOx instruction.
 #[derive(PartialEq, Debug, Eq, Hash)]
 pub enum Instruction {
+    /// Store (ptr, value).
+    Store(Value, Value),
+    /// An unconditional branch to a label.
+    Br(String),
+    CondBr(Value, String, String),
+    /// Return instruction.
+    Ret(Option<Value>),
     /// Call(fn_idx, args). Emit a call to the function found at index `fn_idx`
     /// in the `functions` vector of the module.
     Call(usize, Vec<Value>),
@@ -19,6 +26,10 @@ pub enum Instruction {
     Cast(Value, Type),
     /// Add two values and return the result.
     Add(Value, Value),
+    Sub(Value, Value),
+    Load(Value, Align),
+    Eq(Value, Value),
+    Lt(Value, Value),
 }
 
 impl Instruction {
@@ -34,6 +45,14 @@ impl Instruction {
                 ty
             },
             Instruction::Call(fn_idx, _) => cx.module.borrow().functions[fn_idx].ret,
+            _ => bug!("val_ty: {:?}", &self),
+        }
+    }
+
+    pub fn is_branch(&self) -> bool {
+        match *self {
+            Instruction::Br(..) | Instruction::CondBr(..) => true,
+            _ => false,
         }
     }
 }
