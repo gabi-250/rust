@@ -68,7 +68,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_declared_value(&self, name: &str) -> Option<Value> {
-        unimplemented!("get_declared_value");
+        None
     }
 
     fn get_defined_value(&self, name: &str) -> Option<Value> {

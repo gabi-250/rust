@@ -6,6 +6,7 @@ use context::CodegenCx;
 
 use rustc::ty::FnSig;
 use rustc::ty::layout::Align;
+use rustc::util::nodemap::FxHashMap;
 
 /// An IronOx function.
 #[derive(PartialEq, Debug)]

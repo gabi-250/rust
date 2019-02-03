@@ -11,10 +11,13 @@ use rustc_target::abi::{FloatTy, LayoutOf};
 use std::fmt::Write;
 
 pub trait LayoutIronOxExt<'tcx> {
+    fn is_ironox_immediate(&self) -> bool;
     fn ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type;
     fn immediate_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type;
     fn scalar_ironox_type_at(&self, cx: &CodegenCx<'_, 'tcx>,
                              scalar: &layout::Scalar) -> Type;
+    fn scalar_pair_element_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>,
+                                       index: usize, immediate: bool) -> Type;
 }
 
 /// Return the IronOx `Type`s of the fields of the specified `layout`.
@@ -31,6 +34,16 @@ fn struct_field_types(
 }
 
 impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
+    fn is_ironox_immediate(&self) -> bool {
+        match self.abi {
+            layout::Abi::Scalar(_) |
+            layout::Abi::Vector { .. } => true,
+            layout::Abi::ScalarPair(..) => false,
+            layout::Abi::Uninhabited |
+            layout::Abi::Aggregate { .. } => self.is_zst()
+        }
+    }
+
     fn ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type {
         if let layout::Abi::Scalar(ref scalar) = self.abi {
             let llty = match self.ty.sty {
@@ -55,7 +68,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             return llty;
         }
 
-        assert!(!self.ty.has_escaping_bound_vars(), "{:?} has escaping bound vars", self.ty);
+        assert!(!self.ty.has_escaping_bound_vars(),
+                "{:?} has escaping bound vars", self.ty);
 
         // FIXME? extracted from llvm's type_of:
         //
@@ -153,5 +167,38 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                 cx.type_ptr_to(pointee)
             }
         }
+    }
+
+    fn scalar_pair_element_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>,
+                                       index: usize, immediate: bool) -> Type {
+        // HACK(eddyb) special-case fat pointers until LLVM removes
+        // pointee types, to avoid bitcasting every `OperandRef::deref`.
+        match self.ty.sty {
+            ty::Ref(..) |
+            ty::RawPtr(_) => {
+                return self.field(cx, index).ironox_type(cx);
+            }
+            ty::Adt(def, _) if def.is_box() => {
+                let ptr_ty = cx.tcx.mk_mut_ptr(self.ty.boxed_ty());
+                return cx.layout_of(ptr_ty).scalar_pair_element_ironox_type(cx, index, immediate);
+            }
+            _ => {}
+        }
+
+        let (a, b) = match self.abi {
+            layout::Abi::ScalarPair(ref a, ref b) => (a, b),
+            _ => bug!("TyLayout::scalar_pair_element_llty({:?}): not applicable", self)
+        };
+        let scalar = [a, b][index];
+        // Make sure to return the same type `immediate_llvm_type` would when
+        // dealing with an immediate pair.  This means that `(bool, bool)` is
+        // effectively represented as `{i8, i8}` in memory and two `i1`s as an
+        // immediate, just like `bool` is typically `i8` in memory and only `i1`
+        // when immediate.  We need to load/store `bool` as `i8` to avoid
+        // crippling LLVM optimizations or triggering other LLVM bugs with `i1`.
+        if immediate && scalar.is_bool() {
+            return cx.type_i1();
+        }
+        self.scalar_ironox_type_at(cx, scalar)
     }
 }

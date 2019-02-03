@@ -313,8 +313,6 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         packed: bool
     ) -> Value {
         unimplemented!("const struct {:?}", elts);
-        // FIXME calculate the size of the struct
-        Value::None
     }
 
     fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
@@ -376,8 +374,12 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Scalar::Bits { bits, size } => {
                 assert_eq!(size as u64, layout.value.size(self).bytes());
                 let llval = self.const_uint_big(self.type_ix(bitsize), bits);
-                // FIXME
-                llval
+                if layout.value == layout::Pointer {
+                    unimplemented!("scalar_to_backend: layout::Pointer");
+                } else {
+                    // FIXME? bitcast llval to llty
+                    llval
+                }
             },
             Scalar::Ptr(ptr) => {
                 unimplemented!("Scalar::Ptr");
