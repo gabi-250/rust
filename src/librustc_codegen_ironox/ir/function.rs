@@ -78,4 +78,8 @@ impl OxFunction {
         self.basic_blocks.push(bb);
         BasicBlock(self.idx, idx)
     }
+
+    pub fn is_declaration(&self) -> bool {
+        self.basic_blocks.len() == 0
+    }
 }

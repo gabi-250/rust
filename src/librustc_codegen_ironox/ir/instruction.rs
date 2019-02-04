@@ -36,6 +36,17 @@ pub enum Instruction {
     Unreachable,
 }
 
+pub struct ConstCast {
+    pub value: Value,
+    pub ty: Type,
+}
+
+impl ConstCast {
+    pub fn new(value: Value, ty: Type) -> ConstCast {
+        ConstCast { value, ty }
+    }
+}
+
 impl Instruction {
     /// Return the `Type` of the value that would result from evaluating this
     /// instruction.

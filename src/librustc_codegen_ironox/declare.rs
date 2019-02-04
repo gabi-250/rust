@@ -13,7 +13,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self,
         name: &str, ty: Type
     ) -> Value {
-        let gv = Global::new(ty, Some(name.to_string()));
+        let gv = Global::new(ty, name.to_string());
         let mut globals = self.globals.borrow_mut();
         let mut globals_cache = self.globals_cache.borrow_mut();
 

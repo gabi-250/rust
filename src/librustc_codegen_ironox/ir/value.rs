@@ -28,10 +28,18 @@ pub enum Value {
     StructPtr(usize),
     StaticAddrOf,
     Global(usize),
-    PrivGlobal(usize),
     ConstCstr(usize),
     Bool(bool),
     Cast(usize),
     ConstFatPtr(usize),
     Intrinsic,
+}
+
+impl Value {
+    pub fn is_global(&self) -> bool {
+        match *self {
+            Value::Global(_) | Value::ConstCstr(_) => true,
+            _ => false,
+        }
+    }
 }

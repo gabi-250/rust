@@ -1,5 +1,5 @@
 use context::CodegenCx;
-use ir::instruction::Instruction;
+use ir::instruction::{ConstCast, Instruction};
 use ir::value::Value;
 use ir::type_::Type;
 
@@ -10,10 +10,9 @@ use rustc::ty::layout::Align;
 pub fn ptrcast(cx: &CodegenCx, value: Value, ty: Type) -> Value {
     let mut const_casts = cx.const_casts.borrow_mut();
     let cast_idx = const_casts.len();
-    const_casts.push(Instruction::Cast(value, ty));
+    const_casts.push(ConstCast::new(value, ty));
     Value::Cast(cast_idx)
 }
-
 
 impl StaticMethods for CodegenCx<'ll, 'tcx> {
     fn static_addr_of(

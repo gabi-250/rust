@@ -117,7 +117,7 @@ pub trait IxLlcx {
 
 impl IxLlcx for Type {
     fn ix_llcx(cx: &CodegenCx, num_bits: u64) -> Type {
-        cx.add_type(OxType::Scalar(ScalarType::Ix(num_bits)))
+        cx.type_ix(num_bits)
     }
 }
 
@@ -312,8 +312,9 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 inst.val_ty(self, module)
             },
             Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
-            Value::ConstStruct(idx) => self.struct_consts.borrow()[idx].ty,
+            Value::ConstStruct(idx) => self.const_structs.borrow()[idx].ty,
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
+            Value::Cast(idx) => self.const_casts.borrow()[idx].ty,
             _ => {
                 // FIXME
                 Type(0)

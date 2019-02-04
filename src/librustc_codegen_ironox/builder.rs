@@ -699,8 +699,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        // FIXME: implement bitcast
-        val
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn intcast(

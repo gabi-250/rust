@@ -9,7 +9,7 @@ use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::traits::MiscMethods;
 use rustc_codegen_ssa::traits::BaseTypeMethods;
 use std::cell::{Cell, RefCell};
-use ir::type_::{TypeSize, OxType};
+use ir::type_::{Type, TypeSize, OxType, ScalarType};
 use ir::basic_block::OxBasicBlock;
 use ir::function::OxFunction;
 
@@ -189,6 +189,11 @@ impl ModuleAsm<'ll, 'tcx> {
                 }
                 self.compile_instruction(value)
             },
+            Value::Global(idx) => {
+                let global = format!("{}(%rip)",
+                                     self.cx.globals.borrow()[idx].name.clone());
+                ("".to_string(), global)
+            }
             _ => {
                 unimplemented!("compile_value({:?})", value);
             }
@@ -259,7 +264,12 @@ impl ModuleAsm<'ll, 'tcx> {
                 let param_size = 8;
                 let stack_size = self.stack_size.update(|x| x + param_size);
                 let result = format!("-{}(%rbp)", stack_size);
-                asm!(asm, "call {}"; [module.functions[*fn_idx].name],
+                let function_name = if module.functions[*fn_idx].is_declaration() {
+                    format!("{}@PLT", &module.functions[*fn_idx].name)
+                } else {
+                    module.functions[*fn_idx].name.clone()
+                };
+                asm!(asm, "call {}"; [function_name],
                           "sub ${}, %rsp"; [param_size],
                           "mov %rax, {}"; [result]);
                 (asm, result)
@@ -278,7 +288,7 @@ impl ModuleAsm<'ll, 'tcx> {
                 asm!(asm, &new_asm);
                 let (new_asm, source) = self.compile_value(*v2);
                 asm!(asm, &new_asm);
-                asm!(asm, "cmpq {}, {}"; [source, dest]);
+                asm!(asm, "cmp {}, {}"; [source, dest]);
                 (asm, "".to_string())
             },
             Instruction::CondBr(cond, bb1, bb2) => {
@@ -327,9 +337,20 @@ impl ModuleAsm<'ll, 'tcx> {
                          "mov %rax, {}"; [result]);
                 (asm, result)
             }
+            Instruction::CheckOverflow(inst, ty) => {
+                let (new_asm, result) = self.compile_instruction(*inst);
+                asm!(asm, "setb %dl"; []);
+                (asm, "%dl".to_string())
+            }
+            Instruction::Cast(inst, ty) => {
+                // FIXME: Disregard the type for now.
+                self.compile_instruction(*inst)
+            }
+            Instruction::Unreachable => {
+                ("\tud2\n".to_string(), "".to_string())
+            }
             _ => {
-                ("".to_string(), "".to_string())
-                //unimplemented!("instruction {:?}", inst);
+                unimplemented!("instruction {:?}", inst);
             },
         };
         let ret = instr_asm.clone();
@@ -353,20 +374,79 @@ impl ModuleAsm<'ll, 'tcx> {
         c_str
     }
 
-    fn declare_const_strs(&self) -> String {
-        let mut asm = ".rodata\n".to_string();
-        for c_str in self.cx.const_cstrs.borrow().iter() {
-            let const_str = self.get_str(c_str.ptr, c_str.len);
-            asm!(asm, ".type {},@object"; [c_str.name],
-                      ".size {},{}"; [c_str.name, c_str.len]);
-            label!(asm, c_str.name);
-            asm!(asm, ".ascii \"{}\""; [const_str]);
+    fn get_decl_directive(&self, ty: Type) -> String {
+        match self.cx.types.borrow()[*ty] {
+            OxType::Scalar(ScalarType::I32) => ".long",
+            OxType::Scalar(ScalarType::I64) => ".quad",
+            OxType::PtrTo{ .. } => ".quad",
+            _ => unimplemented!("type of {:?}", ty),
+        }.to_string()
+    }
+
+    fn constant_value(&self, v: Value) -> String {
+        match v {
+            Value::ConstCstr(idx) => {
+                self.cx.const_cstrs.borrow()[idx].name.clone()
+            },
+            Value::Global(idx) => {
+                self.constant_value(self.cx.globals.borrow()[idx].initializer.unwrap())
+            },
+            _ => unimplemented!("value of {:?}", v),
+        }
+    }
+
+    fn compile_const_global(&self, c: Value) -> String {
+        let mut asm = String::new();
+        match c {
+            Value::ConstFatPtr(idx) => {
+                let (v1, v2) = self.cx.const_fat_ptrs.borrow()[idx];
+                asm!(asm, &self.compile_const_global(v1));
+                asm!(asm, &self.compile_const_global(v2));
+            },
+            Value::ConstUint(idx) => {
+                let u_const = self.cx.u_consts.borrow()[idx];
+                let directive = self.get_decl_directive(u_const.ty);
+                asm!(asm, "{}\t{}"; [directive, u_const.value]);
+            },
+            Value::Cast(idx) => {
+                let cast_inst = &self.cx.const_casts.borrow()[idx];
+                let directive = self.get_decl_directive(cast_inst.ty);
+                let v = self.constant_value(cast_inst.value);
+                asm!(asm, "{}\t{}"; [directive, v]);
+            }
+            _ => unimplemented!("compile_const_global({:?})", c),
+        };
+        asm.to_string()
+    }
+
+    fn declare_globals(&self) -> String {
+        let mut asm = ".section .rodata\n".to_string();
+        for global in self.cx.globals.borrow().iter() {
+            match global.initializer {
+               Some(Value::ConstCstr(idx)) => {
+                    let c_str = &self.cx.const_cstrs.borrow()[idx];
+                    let const_str = self.get_str(c_str.ptr, c_str.len);
+                    asm!(asm, ".type {},@object"; [c_str.name],
+                              ".size {},{}"; [c_str.name, c_str.len]);
+                    label!(asm, c_str.name);
+                    asm!(asm, ".ascii \"{}\""; [const_str]);
+                },
+                Some(Value::ConstStruct(idx)) => {
+                    let const_struct = &self.cx.const_structs.borrow()[idx];
+                    label!(asm, global.name);
+                    for c in &const_struct.components {
+                        asm!(asm, &self.compile_const_global(*c));
+                    }
+                },
+                None => bug!("no initializer found for {:?}", global),
+                _ => unimplemented!("declare_globals({:?})", global),
+            }
         }
         asm
     }
 
     fn declare_functions(&self) -> String {
-        let mut asm = ".text".to_string();
+        let mut asm = ".text\n".to_string();
         let module = self.cx.module.borrow();
         for f in &module.functions {
             asm!(asm, ".globl {}"; [f.name],
@@ -418,11 +498,13 @@ impl ModuleAsm<'ll, 'tcx> {
         let module = self.cx.module.borrow();
         let mut asm = String::new();
         // Define the constant strings.
-        asm!(asm, &self.declare_const_strs());
+        asm!(asm, &self.declare_globals());
         // Declare the functions
         asm!(asm, &self.declare_functions());
         for f in &module.functions {
-            asm!(asm, &self.compile_function(&f));
+            if !f.is_declaration() {
+                asm!(asm, &self.compile_function(&f));
+            }
         }
         asm
     }

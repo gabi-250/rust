@@ -3,14 +3,14 @@ use ir::value::Value;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Global {
-    ty: Type,
-    name: Option<String>,
-    constant: bool,
-    initializer: Option<Value>,
+    pub ty: Type,
+    pub name: String,
+    pub constant: bool,
+    pub initializer: Option<Value>,
 }
 
 impl Global {
-    pub fn new(ty: Type, name: Option<String>) -> Global {
+    pub fn new(ty: Type, name: String) -> Global {
         Global { ty, name, constant: false, initializer: None }
     }
 

@@ -24,7 +24,7 @@ use syntax::symbol::LocalInternedString;
 use debuginfo::DIScope;
 use ir::basic_block::BasicBlock;
 use ir::constant::{UnsignedConst, SignedConst};
-use ir::instruction::Instruction;
+use ir::instruction::{ConstCast, Instruction};
 use ir::value::Value;
 use ir::type_::{OxType, Type, IxLlcx};
 use ir::struct_::OxStruct;
@@ -59,14 +59,14 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub u_consts: RefCell<Vec<UnsignedConst>>,
     /// The signed constants defined in this context.
     pub i_consts: RefCell<Vec<SignedConst>>,
-    pub struct_consts: RefCell<Vec<OxStruct>>,
     pub globals: RefCell<Vec<Global>>,
     pub globals_cache: RefCell<FxHashMap<String, usize>>,
     /// The constant globals (which have a static address).
+    pub const_structs: RefCell<Vec<OxStruct>>,
     pub const_globals_cache: RefCell<FxHashMap<Value, usize>>,
     pub const_cstr_cache: RefCell<FxHashMap<LocalInternedString, Value>>,
     pub const_cstrs: RefCell<Vec<ConstCstr>>,
-    pub const_casts: RefCell<Vec<Instruction>>,
+    pub const_casts: RefCell<Vec<ConstCast>>,
     pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
     pub sym_count: Cell<usize>,
 }
@@ -88,9 +88,9 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             type_cache: Default::default(),
             u_consts: Default::default(),
             i_consts: Default::default(),
-            struct_consts: Default::default(),
             globals: Default::default(),
             globals_cache: Default::default(),
+            const_structs: Default::default(),
             const_globals_cache: Default::default(),
             const_cstr_cache: Default::default(),
             const_cstrs: Default::default(),
@@ -111,16 +111,18 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
                        len: usize,
                        null_terminated: bool) -> Value {
         let mut const_cstrs = self.const_cstrs.borrow_mut();
-        let val = Value::ConstCstr(const_cstrs.len());
+        let idx = const_cstrs.len();
+        // A C string is a char*.
         let ty = self.type_ptr_to(self.type_i8());
         const_cstrs.push(ConstCstr::new(name.to_string(),
                                         ty,
                                         c_str,
                                         len,
                                         null_terminated));
-        val
+        Value::ConstCstr(idx)
     }
 
+    /// Generate a unique symbol name that starts with the specified prefix.
     pub fn get_sym_name(&self, prefix: &str) -> String {
         let count = self.sym_count.get();
         self.sym_count.set(count + 1);
@@ -229,7 +231,6 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn check_overflow(&self) -> bool {
-        // Don't check for overflow (for now).
         true
     }
 
@@ -347,10 +348,11 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         s: LocalInternedString,
         null_terminated: bool,
     ) -> Value {
+        // If the cstr has already been defined, return its value from the cache.
         if let Some(val) = self.const_cstr_cache.borrow().get(&s) {
             return *val;
         }
-        // FIXME
+        // Create a unique name for this symbol.
         let symbol_name = self.get_sym_name("str");
         let str_val = self.insert_cstr(&symbol_name,
                                        s.as_ptr() as *const u8,
@@ -361,6 +363,12 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             .unwrap_or_else(|| {
                 bug!("symbol `{}' is already defined", symbol_name);
             });
+        match gv {
+            Value::Global(idx) => {
+                self.globals.borrow_mut()[idx].set_initializer(str_val);
+            },
+            _ => bug!("expected global, found {:?}", gv),
+        };
         self.const_cstr_cache.borrow_mut().insert(s, gv);
         gv
     }
@@ -379,7 +387,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     ) -> Value {
         let mut const_fat_ptrs = self.const_fat_ptrs.borrow_mut();
         const_fat_ptrs.push((ptr, meta));
-        Value::ConstFatPtr(const_fat_ptrs.len())
+        Value::ConstFatPtr(const_fat_ptrs.len() - 1)
     }
 
     fn const_struct(
@@ -387,13 +395,14 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
-        let mut structs = self.struct_consts.borrow_mut();
+        let name = self.get_sym_name("struct");
+        let mut structs = self.const_structs.borrow_mut();
         let mut elt_tys = Vec::with_capacity(elts.len());
         for v in elts {
             elt_tys.push(self.val_ty(*v))
         }
         let ty = self.type_struct(&elt_tys[..], packed);
-        structs.push(OxStruct::new(elts, ty));
+        structs.push(OxStruct::new(name, elts, ty));
         Value::ConstStruct(structs.len() - 1)
     }
 
