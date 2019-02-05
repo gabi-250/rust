@@ -7,7 +7,7 @@ use rustc::ty::layout::Align;
 use rustc_codegen_ssa::traits::BaseTypeMethods;
 
 /// An IronOx instruction.
-#[derive(PartialEq, Debug, Eq, Hash)]
+#[derive(PartialEq, Clone, Debug, Eq, Hash)]
 pub enum Instruction {
     /// Store (ptr, value).
     Store(Value, Value),

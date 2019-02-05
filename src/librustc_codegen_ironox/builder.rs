@@ -131,19 +131,33 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             _ => panic!("tried to get overflow intrinsic for op applied to non-int type")
         };
 
-        let ty = match oop {
+        match oop {
             OverflowOp::Add => match new_sty {
                 Uint(U8) => unimplemented!("u8"),
-                Uint(U16) => self.type_i16(),
+                Uint(U16) => {
+                    let ty = self.type_i16();
+                    let inst = self.emit_instr(Instruction::Add(lhs, rhs));
+                    (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty)))
+                },
+                Uint(U32) => unimplemented!("u32"),
+                Uint(U64) => unimplemented!("u64"),
+                Uint(U128) => unimplemented!("u128"),
+                _ => unreachable!(),
+            }
+            OverflowOp::Sub => match new_sty {
+                Uint(U8) => unimplemented!("u8"),
+                Uint(U16) => {
+                    let ty = self.type_i16();
+                    let inst = self.emit_instr(Instruction::Sub(lhs, rhs));
+                    (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty)))
+                }
                 Uint(U32) => unimplemented!("u32"),
                 Uint(U64) => unimplemented!("u64"),
                 Uint(U128) => unimplemented!("u128"),
                 _ => unreachable!(),
             }
             _ => unimplemented!("overflow op"),
-        };
-        let inst = self.emit_instr(Instruction::Add(lhs, rhs));
-        (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty)))
+        }
     }
 
     fn new_block<'b>(

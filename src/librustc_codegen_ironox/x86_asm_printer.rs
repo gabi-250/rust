@@ -81,7 +81,8 @@ pub struct ModuleAsm<'ll, 'tcx> {
     /// A mapping from function parameters to their location on the stack.
     /// Currently, parameters are always pushed to and retrieved from the stack.
     compiled_params: RefCell<FxHashMap<Value, InstrAsm>>,
-    stack_size: Cell<usize>,
+    stack_size: RefCell<Vec<usize>>,
+    inst_stack_loc: RefCell<FxHashMap<Instruction, InstrAsm>>,
 }
 
 impl ModuleAsm<'ll, 'tcx> {
@@ -90,7 +91,8 @@ impl ModuleAsm<'ll, 'tcx> {
             cx,
             compiled_insts: Default::default(),
             compiled_params: Default::default(),
-            stack_size: Cell::new(0),
+            stack_size: Default::default(),
+            inst_stack_loc: Default::default(),
         }
     }
 
@@ -119,11 +121,9 @@ impl ModuleAsm<'ll, 'tcx> {
                           "add {}, %rax"; [arg2]);
             }
             // FIXME:
-            let param_size = 8;
-            let stack_size = self.stack_size.update(|x| x + param_size);
-            let result = format!("-{}(%rbp)", stack_size);
-            asm!(asm, "sub ${}, %rsp"; [param_size],
-                      "mov %rax, {}"; [result]);
+            let result =
+                self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
+            asm!(asm, "mov %rax, {}"; [result]);
             InstrAsm { asm, result }
         } else {
             bug!("expected Instruction::Add");
@@ -141,11 +141,9 @@ impl ModuleAsm<'ll, 'tcx> {
                       "add {}, %rax"; [arg1],
                       "sub {}, %rax"; [arg2]);
             // FIXME:
-            let param_size = 8;
-            let stack_size = self.stack_size.update(|x| x + param_size);
-            let result = format!("-{}(%rbp)", stack_size);
-            asm!(asm, "sub ${}, %rsp"; [param_size],
-                      "mov %rax, {}"; [result]);
+            let result =
+                self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
+            asm!(asm, "mov %rax, {}"; [result]);
             InstrAsm { asm, result }
         } else {
             bug!("expected Instruction::Add");
@@ -159,23 +157,12 @@ impl ModuleAsm<'ll, 'tcx> {
                 let value = self.cx.u_consts.borrow()[idx].value;
                 ("".to_string(), format!("${}", value))
             },
-            Value::Param(idx, _) => {
-
+            Value::Param(_, _) => {
                 if let Some(instr_asm) = self.compiled_params.borrow().get(&value) {
-                    let ret = ("".to_string(), instr_asm.result.clone());
-                    return ret;
+                    return ("".to_string(), instr_asm.result.clone());
+                } else {
+                    bug!("param should've already been compiled!");
                 }
-                // FIXME:
-                let param_size = 8;
-                let stack_size = self.stack_size.update(|x| x + param_size);
-                let result = format!("-{}(%rbp)", stack_size);
-                let reg = ModuleAsm::get_func_arg_str(idx);
-                let mut asm = "".to_string();
-                asm!(asm, "sub ${}, %rsp"; [param_size],
-                          "mov {}, {}"; [reg, result]);
-                let instr_asm = InstrAsm { asm: asm.clone(), result: result.clone() };
-                self.compiled_params.borrow_mut().insert(value, instr_asm);
-                (asm, result)
             },
             Value::Instruction(fn_idx, bb_idx, idx) => {
                 let inst = &module.functions[fn_idx].
@@ -258,19 +245,22 @@ impl ModuleAsm<'ll, 'tcx> {
                     let (new_asm, value) = self.compile_value(*arg);
                     asm!(asm, &new_asm);
                     let param = ModuleAsm::get_func_arg_str(idx);
-                    asm!(asm, "mov {}, {}"; [value, param]);
+                    if arg.is_global() {
+                        // globals are always treated as addresses
+                        asm!(asm, "lea {}, {}"; [value, param]);
+                    } else {
+                        asm!(asm, "mov {}, {}"; [value, param]);
+                    }
                 }
                 // Move the result to the stack, and assume its size is 8.
-                let param_size = 8;
-                let stack_size = self.stack_size.update(|x| x + param_size);
-                let result = format!("-{}(%rbp)", stack_size);
                 let function_name = if module.functions[*fn_idx].is_declaration() {
                     format!("{}@PLT", &module.functions[*fn_idx].name)
                 } else {
                     module.functions[*fn_idx].name.clone()
                 };
+                let result =
+                    self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
                 asm!(asm, "call {}"; [function_name],
-                          "sub ${}, %rsp"; [param_size],
                           "mov %rax, {}"; [result]);
                 (asm, result)
             },
@@ -278,9 +268,8 @@ impl ModuleAsm<'ll, 'tcx> {
             Instruction::Alloca(_, ty, align) => {
                 // This should be ty.size(&self.cx.types.borrow()), not 8.
                 let ty_size = 8;
-                asm!(asm, "sub ${}, %rsp"; [ty_size]);
-                let stack_size = self.stack_size.update(|x| x + ty_size as usize);
-                let result = format!("-{}(%rbp)", stack_size);
+
+                let result = self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
                 (asm, result)
             },
             Instruction::Eq(v1, v2) | Instruction::Lt(v1, v2) => {
@@ -323,9 +312,6 @@ impl ModuleAsm<'ll, 'tcx> {
             Instruction::Load(ptr, _) => {
                 let (new_asm, dest) = self.compile_value(*ptr);
                 // FIXME:
-                let param_size = 8;
-                let stack_size = self.stack_size.update(|x| x + param_size);
-                let result = format!("-{}(%rbp)", stack_size);
                 asm.push_str(&new_asm);
                 asm!(asm, "mov {}, %rax"; [dest]);
                 // Allocas are an exception. They don't need to be dereferenced.
@@ -333,8 +319,10 @@ impl ModuleAsm<'ll, 'tcx> {
                     // Dereference the pointer.
                     asm!(asm,"mov (%rax), %rax"; []);
                 }
-                asm!(asm,"sub ${}, %rsp"; [param_size],
-                         "mov %rax, {}"; [result]);
+
+                let result =
+                    self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
+                asm!(asm, "mov %rax, {}"; [result]);
                 (asm, result)
             }
             Instruction::CheckOverflow(inst, ty) => {
@@ -375,6 +363,7 @@ impl ModuleAsm<'ll, 'tcx> {
     }
 
     fn get_decl_directive(&self, ty: Type) -> String {
+        eprintln!("types {:?}", self.cx.types.borrow());
         match self.cx.types.borrow()[*ty] {
             OxType::Scalar(ScalarType::I32) => ".long",
             OxType::Scalar(ScalarType::I64) => ".quad",
@@ -457,7 +446,7 @@ impl ModuleAsm<'ll, 'tcx> {
 
     pub fn compile_block(&self, bb: &OxBasicBlock) -> String {
         let mut asm = String::new();
-        label!(asm, bb.label);
+        label!(asm, format!("{}", bb.label));
         for (inst_idx, inst) in bb.instrs.iter().enumerate() {
             let inst = &bb.instrs[inst_idx];
             if self.already_compiled(
@@ -480,10 +469,13 @@ impl ModuleAsm<'ll, 'tcx> {
     pub fn compile_function(&self, f: &OxFunction) -> String {
         let mut asm = String::new();
         self.compiled_params.borrow_mut().clear();
-        self.stack_size.set(0);
+        self.inst_stack_loc.borrow_mut().clear();
         label!(asm, f.name);
+        let (param_movs, stack_size) = self.compute_stack_size(&f);
         asm!(asm, "push %rbp"; [],
-                  "mov %rsp, %rbp"; []);
+                  "mov %rsp, %rbp"; [],
+                  "sub ${}, %rsp"; [stack_size]);
+        asm!(asm, &param_movs);
         for param in &f.params {
             asm.push_str(&self.compile_value(*param).0);
         }
@@ -491,6 +483,67 @@ impl ModuleAsm<'ll, 'tcx> {
             asm!(asm, &self.compile_block(&bb));
         }
         asm
+    }
+
+    fn compute_stack_size(&self, f: &OxFunction) -> (String, usize) {
+        let mut size = 0;
+        let mut param_movs = String::new();
+
+        for (idx, param) in f.params.iter().enumerate() {
+            // FIXME:
+            let param_size = 8;
+            size += param_size;
+            let result = format!("-{}(%rbp)", size);
+            let reg = ModuleAsm::get_func_arg_str(idx);
+            asm!(param_movs, "mov {}, {}"; [reg, result]);
+            let instr_asm = InstrAsm { asm: param_movs.clone(),
+                                       result: result.clone() };
+            self.compiled_params.borrow_mut().insert(*param, instr_asm);
+        }
+        for bb in &f.basic_blocks {
+            for inst in &bb.instrs {
+                match inst {
+                    Instruction::Add(_, _) | Instruction::Sub(_, _) => {
+                        size += 8;
+                        let result = format!("-{}(%rbp)", size);
+                        let instr_asm = InstrAsm { asm: String::new(),
+                                                   result: result.clone() };
+                        self.inst_stack_loc.borrow_mut().insert((*inst).clone(),
+                                                                instr_asm);
+                    },
+                    Instruction::Call(ref fn_idx, ref args) => {
+                        // FIXME: check non void ret
+                        size += 8;
+                        let result = format!("-{}(%rbp)", size);
+                        let instr_asm = InstrAsm { asm: String::new(),
+                                                   result: result.clone() };
+                        self.inst_stack_loc.borrow_mut().insert((*inst).clone(),
+                                                                instr_asm);
+                    },
+                    Instruction::Alloca(_, ty, align) => {
+                        size += 8;
+                        let result = format!("-{}(%rbp)", size);
+                        let instr_asm = InstrAsm { asm: String::new(),
+                                                   result: result.clone() };
+                        self.inst_stack_loc.borrow_mut().insert((*inst).clone(),
+                                                                instr_asm);
+                    },
+                    Instruction::Load(ptr, _) => {
+                        size += 8;
+                        let result = format!("-{}(%rbp)", size);
+                        let instr_asm = InstrAsm { asm: String::new(),
+                                                   result: result.clone() };
+                        self.inst_stack_loc.borrow_mut().insert((*inst).clone(),
+                                                                instr_asm);
+                    },
+                    _ => {
+
+                    },
+                };
+
+            }
+        }
+        (param_movs, size)
     }
 
     /// Return the x86-64 instructions that correspond to this module.
