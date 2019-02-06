@@ -82,6 +82,10 @@ pub enum OxType {
         name: Option<String>,
         members: Vec<Type>
     },
+    FatPtr {
+        ptr: Type,
+        meta: Type,
+    },
     ConstStruct,
     Void,
 }

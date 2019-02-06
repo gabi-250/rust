@@ -12,6 +12,7 @@ use std::cell::{Cell, RefCell};
 use ir::type_::{Type, TypeSize, OxType, ScalarType};
 use ir::basic_block::OxBasicBlock;
 use ir::function::OxFunction;
+use x86_register::Register;
 
 macro_rules! asm {
     (
@@ -96,10 +97,11 @@ impl ModuleAsm<'ll, 'tcx> {
         }
     }
 
-    pub fn get_func_arg_str(idx: usize) -> String {
-        let regs = vec!["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+    pub fn get_func_arg_str(idx: usize) -> Register {
+        let regs = vec![Register::RDI, Register::RSI, Register::RDX,
+                        Register::RCX, Register::R8, Register::R9];
         if idx < 6 {
-            return regs[idx].to_string()
+            return regs[idx]
         } else {
             unimplemented!("function arg no {}", idx);
         }
@@ -181,6 +183,21 @@ impl ModuleAsm<'ll, 'tcx> {
                                      self.cx.globals.borrow()[idx].name.clone());
                 ("".to_string(), global)
             }
+            Value::Cast(idx) => {
+                self.compile_value(self.cx.const_casts.borrow()[idx].value)
+            }
+            Value::Function(idx) => {
+                let mut asm = String::new();
+                // Move the result to the stack, and assume its size is 8.
+                let function_name = if module.functions[idx].is_declaration() {
+                    format!("{}@PLT", &module.functions[idx].name)
+                } else {
+                    module.functions[idx].name.clone()
+                };
+                let result = "%rax".to_string();
+                asm!(asm, "lea {}, %rax"; [function_name]);
+                (asm, result)
+            }
             _ => {
                 unimplemented!("compile_value({:?})", value);
             }
@@ -192,7 +209,7 @@ impl ModuleAsm<'ll, 'tcx> {
         let inst = if let Value::Instruction(fn_idx, bb_idx, idx) = inst_v {
             &module.functions[fn_idx].basic_blocks[bb_idx].instrs[idx]
         } else {
-            bug!("can only compile a Value::Instruction");
+            bug!("can only compile a Value::Instruction; found {:?}", inst_v);
         };
         if let Some(instr_asm) = self.compiled_insts.borrow().get(&inst_v) {
             return (instr_asm.asm.clone(), instr_asm.result.clone());
@@ -202,7 +219,7 @@ impl ModuleAsm<'ll, 'tcx> {
             Instruction::Br(target) => {
                 asm!(asm, "jmp {}"; [target]);
                 (asm, "".to_string())
-            },
+            }
             Instruction::Ret(Some(val)) => {
                 let (new_asm, res) = self.compile_value(*val);
                 asm!(asm, &new_asm);
@@ -210,12 +227,12 @@ impl ModuleAsm<'ll, 'tcx> {
                           "leave"; [],
                           "ret"; []);
                 (asm, "".to_string())
-            },
+            }
             Instruction::Ret(None) => {
                 asm!(asm, "leave"; [],
                           "ret"; []);
                 (asm, "".to_string())
-            },
+            }
             Instruction::Store(v1, v2) => {
                 let (new_asm, dest) = self.compile_value(*v1);
                 asm!(asm, &new_asm);
@@ -231,16 +248,42 @@ impl ModuleAsm<'ll, 'tcx> {
                               "movq %rbx, (%rax)"; []);
                 }
                 (asm, dest)
-            },
+            }
             Instruction::Add(v1, v2) => {
                 let instr_asm = self.compile_add(inst);
                 (instr_asm.asm, instr_asm.result.clone())
-            },
+            }
             Instruction::Sub(v1, v2) => {
                 let instr_asm = self.compile_sub(inst);
                 (instr_asm.asm, instr_asm.result.clone())
-            },
-            Instruction::Call(ref fn_idx, ref args) => {
+            }
+            Instruction::Call(value, ref args) => {
+                let result = match value {
+                    Value::Function(idx) => {
+                        // Move the result to the stack, and assume its size is 8.
+                        let function_name = if module.functions[*idx].is_declaration() {
+                            format!("{}@PLT", &module.functions[*idx].name)
+                        } else {
+                            module.functions[*idx].name.clone()
+                        };
+                        let result =
+                            self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
+                        asm!(asm, "call {}"; [function_name],
+                                  "mov %rax, {}"; [result]);
+                        function_name
+                    }
+                    Value::Instruction(_, _, _) => {
+                        eprintln!("value is {:?}", *value);
+                        let ptr = self.compile_value(*value);
+
+                        let result =
+                            self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
+                        asm!(asm, "call *{}"; [ptr.1],
+                                  "mov %rax, {}"; [result]);
+                        result
+                    }
+                    _ => unimplemented!("call to {:?}", value)
+                };
                 for (idx, arg) in args.iter().enumerate() {
                     let (new_asm, value) = self.compile_value(*arg);
                     asm!(asm, &new_asm);
@@ -252,34 +295,24 @@ impl ModuleAsm<'ll, 'tcx> {
                         asm!(asm, "mov {}, {}"; [value, param]);
                     }
                 }
-                // Move the result to the stack, and assume its size is 8.
-                let function_name = if module.functions[*fn_idx].is_declaration() {
-                    format!("{}@PLT", &module.functions[*fn_idx].name)
-                } else {
-                    module.functions[*fn_idx].name.clone()
-                };
-                let result =
-                    self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
-                asm!(asm, "call {}"; [function_name],
-                          "mov %rax, {}"; [result]);
                 (asm, result)
-            },
-
+            }
             Instruction::Alloca(_, ty, align) => {
                 // This should be ty.size(&self.cx.types.borrow()), not 8.
                 let ty_size = 8;
 
                 let result = self.inst_stack_loc.borrow().get(inst).unwrap().result.clone();
                 (asm, result)
-            },
+            }
             Instruction::Eq(v1, v2) | Instruction::Lt(v1, v2) => {
                 let (new_asm, dest) = self.compile_value(*v1);
                 asm!(asm, &new_asm);
                 let (new_asm, source) = self.compile_value(*v2);
                 asm!(asm, &new_asm);
-                asm!(asm, "cmp {}, {}"; [source, dest]);
+                asm!(asm, "mov {}, %rax"; [source],
+                          "cmp %rax, {}"; [dest]);
                 (asm, "".to_string())
-            },
+            }
             Instruction::CondBr(cond, bb1, bb2) => {
                 match cond {
                     Value::Instruction(fn_idx, bb_idx, idx) => {
@@ -308,7 +341,7 @@ impl ModuleAsm<'ll, 'tcx> {
                         bug!("cond must be a Value::Instruction, not {:?}", cond);
                     }
                 }
-            },
+            }
             Instruction::Load(ptr, _) => {
                 let (new_asm, dest) = self.compile_value(*ptr);
                 // FIXME:
@@ -332,14 +365,14 @@ impl ModuleAsm<'ll, 'tcx> {
             }
             Instruction::Cast(inst, ty) => {
                 // FIXME: Disregard the type for now.
-                self.compile_instruction(*inst)
+                self.compile_value(*inst)
             }
             Instruction::Unreachable => {
                 ("\tud2\n".to_string(), "".to_string())
             }
             _ => {
                 unimplemented!("instruction {:?}", inst);
-            },
+            }
         };
         let ret = instr_asm.clone();
         self.compiled_insts.borrow_mut().insert(
@@ -391,17 +424,23 @@ impl ModuleAsm<'ll, 'tcx> {
                 let (v1, v2) = self.cx.const_fat_ptrs.borrow()[idx];
                 asm!(asm, &self.compile_const_global(v1));
                 asm!(asm, &self.compile_const_global(v2));
-            },
+            }
             Value::ConstUint(idx) => {
                 let u_const = self.cx.u_consts.borrow()[idx];
                 let directive = self.get_decl_directive(u_const.ty);
                 asm!(asm, "{}\t{}"; [directive, u_const.value]);
-            },
+            }
             Value::Cast(idx) => {
                 let cast_inst = &self.cx.const_casts.borrow()[idx];
                 let directive = self.get_decl_directive(cast_inst.ty);
                 let v = self.constant_value(cast_inst.value);
                 asm!(asm, "{}\t{}"; [directive, v]);
+            }
+            Value::Function(idx) => {
+
+            }
+            Value::Cast(idx) => {
+
             }
             _ => unimplemented!("compile_const_global({:?})", c),
         };
@@ -447,6 +486,7 @@ impl ModuleAsm<'ll, 'tcx> {
     pub fn compile_block(&self, bb: &OxBasicBlock) -> String {
         let mut asm = String::new();
         label!(asm, format!("{}", bb.label));
+        eprintln!("{}, {}: {:?}", bb.parent, bb.idx, bb.instrs);
         for (inst_idx, inst) in bb.instrs.iter().enumerate() {
             let inst = &bb.instrs[inst_idx];
             if self.already_compiled(
@@ -467,6 +507,7 @@ impl ModuleAsm<'ll, 'tcx> {
     }
 
     pub fn compile_function(&self, f: &OxFunction) -> String {
+        eprintln!("compiling function {} {}", f.idx, f.name);
         let mut asm = String::new();
         self.compiled_params.borrow_mut().clear();
         self.inst_stack_loc.borrow_mut().clear();
@@ -511,7 +552,7 @@ impl ModuleAsm<'ll, 'tcx> {
                         self.inst_stack_loc.borrow_mut().insert((*inst).clone(),
                                                                 instr_asm);
                     },
-                    Instruction::Call(ref fn_idx, ref args) => {
+                    Instruction::Call(_, _) => {
                         // FIXME: check non void ret
                         size += 8;
                         let result = format!("-{}(%rbp)", size);
@@ -540,7 +581,6 @@ impl ModuleAsm<'ll, 'tcx> {
 
                     },
                 };
-
             }
         }
         (param_movs, size)
@@ -554,6 +594,9 @@ impl ModuleAsm<'ll, 'tcx> {
         asm!(asm, &self.declare_globals());
         // Declare the functions
         asm!(asm, &self.declare_functions());
+        eprintln!("{}", asm);
+        eprintln!("globals {:?}", self.cx.globals.borrow());
+
         for f in &module.functions {
             if !f.is_declaration() {
                 asm!(asm, &self.compile_function(&f));

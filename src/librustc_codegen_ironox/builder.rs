@@ -722,7 +722,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         dest_ty: Type,
         is_signed: bool
     )-> Value {
-        unimplemented!("intcast");
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn pointercast(
@@ -958,6 +958,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         idx: u64
     )-> Value {
         // FIXME: insert elt into agg_val at idx
+        eprintln!("insert {:?} into {:?} at {:?}", elt, agg_val, idx);
         elt
     }
 
@@ -1129,17 +1130,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         if funclet.is_some() {
             unimplemented!("call funclet: {:?}", funclet);
         }
-        match llfn {
-            Value::Function(idx) => {
-                self.emit_instr(Instruction::Call(idx, args.to_vec()))
-            },
-            Value::Param(idx, ty) => {
-                self.emit_instr(Instruction::Call(0, args.to_vec()))
-            },
-            _ => {
-                unimplemented!("expected Value::Function, found  {:?}", llfn);
-            }
-        }
+        eprintln!("emit call to {:?} with args {:?}", llfn, args);
+        self.emit_instr(Instruction::Call(llfn, args.to_vec()))
     }
 
     fn zext(
@@ -1196,16 +1188,19 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn load_operand(&mut self, place: PlaceRef<'tcx, Value>)
         -> OperandRef<'tcx, Value> {
         // FIXME?
+        eprintln!("place.llval is {:?}", place.llval);
         let val = if let Some(llextra) = place.llextra {
             OperandValue::Ref(place.llval, Some(llextra), place.align)
         } else if place.layout.is_ironox_immediate() {
             let mut const_llval = None;
-            // FIXME: also handle globals
+            // FIXME: If this is a constant global, get its initializer.
+            eprintln!("place.llval is an ironox immediate");
             let llval = const_llval.unwrap_or_else(|| {
                 self.load(place.llval, place.align)
             });
             OperandValue::Immediate(to_immediate(self, llval, place.layout))
         } else if let layout::Abi::ScalarPair(ref a, ref b) = place.layout.abi {
+            eprintln!("scalar pair {:?} {:?}", a, b);
             // FIXME
             let b_offset = a.value.size(self).align_to(b.value.align(self).abi);
 

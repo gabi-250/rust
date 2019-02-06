@@ -48,6 +48,7 @@ pub unsafe fn codegen(
         obj_path = Some(
             cgcx.output_filenames.temp_path(OutputType::Object, module_name));
         // Run the assembler to produce the object file from the assembly.
+        eprintln!("running the assembler on {:?} => {:?}", asm_path, obj_path);
         run_assembler(cgcx, diag_handler, &asm_path, &obj_path.clone().unwrap());
     }
     Ok(CompiledModule {

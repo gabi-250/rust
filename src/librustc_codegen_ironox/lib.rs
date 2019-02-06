@@ -82,6 +82,8 @@ mod type_of;
 mod metadata;
 mod mono_item;
 mod x86_asm_printer;
+mod x86_instruction;
+mod x86_register;
 
 use context::CodegenCx;
 use ir::constant::{UnsignedConst, SignedConst};

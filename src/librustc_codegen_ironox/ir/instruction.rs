@@ -20,7 +20,7 @@ pub enum Instruction {
     Ret(Option<Value>),
     /// Call(fn_idx, args). Emit a call to the function found at index `fn_idx`
     /// in the `functions` vector of the module.
-    Call(usize, Vec<Value>),
+    Call(Value, Vec<Value>),
     /// Allocate space on the stack for a variable of a particular type and
     /// alignment.
     Alloca(String, Type, Align),
@@ -52,21 +52,15 @@ impl Instruction {
     /// instruction.
     pub fn val_ty(&self, cx: &CodegenCx, module: &ModuleIronOx) -> Type {
         match *self {
-            Instruction::Alloca(_, ty, _) => {
-                ty
-            },
-            Instruction::Cast(_, ty) => {
-                ty
-            },
+            Instruction::Alloca(_, ty, _) => ty,
+            Instruction::Cast(_, ty) => ty,
             Instruction::Add(v1, v2) => {
                 let ty1 = cx.val_ty(v1);
                 let ty2 = cx.val_ty(v2);
                 assert_eq!(ty1, ty2);
                 ty1
             },
-            Instruction::Call(fn_idx, _) => {
-                cx.module.borrow().functions[fn_idx].ret
-            },
+            Instruction::Call(value, _) => cx.val_ty(value),
             Instruction::Load(ptr, _) => {
                 match ptr {
                     Value::Instruction(fn_idx, bb_idx, idx) => {
@@ -101,9 +95,7 @@ impl Instruction {
                     bug!("expected OxType::StructType, found {:?}", struct_ty);
                 }
             },
-            _ => {
-                unimplemented!("instruction {:?}", *self);
-            }
+            _ => unimplemented!("instruction {:?}", *self),
         }
     }
 

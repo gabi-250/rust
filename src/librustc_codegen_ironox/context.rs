@@ -199,27 +199,28 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn eh_personality(&self) -> Value {
-        if let Some(llpersonality) = self.eh_personality.get() {
-            return llpersonality
-        }
-        let tcx = self.tcx;
-        let llfn = match tcx.lang_items().eh_personality() {
-            Some(def_id) if !wants_msvc_seh(self.sess()) => {
-                resolve_and_get_fn(self, def_id, tcx.intern_substs(&[]))
-            }
-            _ => {
-                let name = if wants_msvc_seh(self.sess()) {
-                    unimplemented!("Unsupported platform: MSVC")
-                } else {
-                    "rust_eh_personality"
-                };
-                let fty = self.type_variadic_func(&[], self.type_i32());
-                self.declare_cfn(name, fty)
-            }
-        };
-        //attributes::apply_target_cpu_attr(self, llfn);
-        self.eh_personality.set(Some(llfn));
-        llfn
+        unimplemented!("eh_personality");
+/*        if let Some(llpersonality) = self.eh_personality.get() {*/
+            //return llpersonality
+        //}
+        //let tcx = self.tcx;
+        //let llfn = match tcx.lang_items().eh_personality() {
+            //Some(def_id) if !wants_msvc_seh(self.sess()) => {
+                //resolve_and_get_fn(self, def_id, tcx.intern_substs(&[]))
+            //}
+            //_ => {
+                //let name = if wants_msvc_seh(self.sess()) {
+                    //unimplemented!("Unsupported platform: MSVC")
+                //} else {
+                    //"rust_eh_personality"
+                //};
+                //let fty = self.type_variadic_func(&[], self.type_i32());
+                //self.declare_cfn(name, fty)
+            //}
+        //};
+        ////attributes::apply_target_cpu_attr(self, llfn);
+        //self.eh_personality.set(Some(llfn));
+        /*llfn*/
     }
 
     fn eh_unwind_resume(&self) -> Value {
@@ -447,7 +448,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_ptrcast(&self, val: Value, ty: Type) -> Value {
-        unimplemented!("const_ptrcast");
+        consts::ptrcast(self, val, ty)
     }
 
     fn scalar_to_backend(
