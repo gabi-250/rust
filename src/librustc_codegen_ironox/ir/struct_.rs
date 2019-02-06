@@ -1,15 +1,15 @@
-use value::Value;
+use ir::value::Value;
 
 /// A `struct` type.
 #[derive(Debug)]
-pub struct IronOxStruct {
+pub struct OxStruct {
     /// The fields of the `struct`.
     components: Vec<Value>,
 }
 
-impl IronOxStruct {
-    pub fn new(components: &[Value]) -> IronOxStruct {
-        IronOxStruct {
+impl OxStruct {
+    pub fn new(components: &[Value]) -> OxStruct {
+        OxStruct {
             components: components.to_vec()
         }
     }

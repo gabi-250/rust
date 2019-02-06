@@ -1,26 +1,19 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use abi::FnTypeExt;
 use context::CodegenCx;
+use ir::instruction::Instruction;
 use type_of::LayoutIronOxExt;
-use value::{Instruction, Value};
+use ir::value::Value;
 
 use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods};
 use rustc_codegen_ssa::common::TypeKind;
 use rustc::util::nodemap::FxHashMap;
-use rustc::ty::{self, layout, Ty, TyCtxt};
-use rustc::ty::layout::TyLayout;
-use std::cell::RefCell;
 use rustc_target::abi::LayoutOf;
 use rustc_target::abi::call::{CastTarget, FnType, Reg};
+use rustc::ty::{self, layout, Ty, TyCtxt};
+use rustc::ty::layout::TyLayout;
+
+use std::cell::RefCell;
+use std::ops::Deref;
 
 /// The type of a scalar.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -42,11 +35,22 @@ pub enum ScalarType {
 }
 
 /// A `Type` is an index into the vector of types in the codegen context.
-pub type Type = usize;
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Type(usize);
+
+/// Dereference a `Type` to retrieve its index.
+impl Deref for Type {
+    type Target = usize;
+
+    fn deref(&self) -> &usize {
+        &self.0
+    }
+}
+
 
 /// The actual types.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum LLType {
+pub enum OxType {
     /// A function type.
     FnType {
         args: Vec<Type>,
@@ -67,12 +71,12 @@ pub enum LLType {
 }
 
 impl CodegenCx<'ll, 'tcx> {
-    /// Add the specified `LLType` to the vector of `Type`s for this context.
+    /// Add the specified `OxType` to the vector of `Type`s for this context.
     ///
     /// If the type already exists in the type cache, its index in the type
     /// vector is returned. Otherwise, it is added to the type vector, and to
     /// the type cache.
-    pub fn add_type(&self, ll_type: LLType) -> Type {
+    pub fn add_type(&self, ll_type: OxType) -> Type {
         let mut types = self.types.borrow_mut();
         let mut type_cache = self.type_cache.borrow_mut();
         // If ll_type is not in types, it will be inserted at the end of the
@@ -81,12 +85,12 @@ impl CodegenCx<'ll, 'tcx> {
         *type_cache.entry(ll_type.clone()).or_insert_with(|| {
             // FIXME: don't always clone ll_type.
             types.push(ll_type);
-            ty_idx
+            Type(ty_idx)
         })
     }
 
     crate fn type_named_struct(&self, name: &str) -> Type {
-        let struct_type = LLType::StructType {
+        let struct_type = OxType::StructType {
             name: Some(name.to_string()),
             members: vec![],
         };
@@ -95,17 +99,17 @@ impl CodegenCx<'ll, 'tcx> {
 
     crate fn set_struct_body(&self, ty: Type, els: &[Type], packed: bool) {
         let mut types = self.types.borrow_mut();
-        if let LLType::StructType{ ref name, ref mut members } = types[ty] {
+        if let OxType::StructType{ ref name, ref mut members } = types[*ty] {
             *members = els.to_vec();
             return;
         }
-        bug!("expected LLType::StructType, found {:?}", types[ty]);
+        bug!("expected OxType::StructType, found {:?}", types[*ty]);
     }
 }
 
 impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn type_void(&self) -> Type {
-        self.add_type(LLType::Void)
+        self.add_type(OxType::Void)
     }
 
     fn type_metadata(&self) -> Type {
@@ -113,23 +117,23 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_i1(&self) -> Type {
-        self.add_type(LLType::Scalar(ScalarType::I1))
+        self.add_type(OxType::Scalar(ScalarType::I1))
     }
 
     fn type_i8(&self) -> Type {
-        self.add_type(LLType::Scalar(ScalarType::I8))
+        self.add_type(OxType::Scalar(ScalarType::I8))
     }
 
     fn type_i16(&self) -> Type {
-        self.add_type(LLType::Scalar(ScalarType::I16))
+        self.add_type(OxType::Scalar(ScalarType::I16))
     }
 
     fn type_i32(&self) -> Type {
-        self.add_type(LLType::Scalar(ScalarType::I32))
+        self.add_type(OxType::Scalar(ScalarType::I32))
     }
 
     fn type_i64(&self) -> Type {
-        self.add_type(LLType::Scalar(ScalarType::I64))
+        self.add_type(OxType::Scalar(ScalarType::I64))
     }
 
     fn type_i128(&self) -> Type {
@@ -138,11 +142,11 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn type_ix(&self, num_bits: u64) -> Type {
         // This could just as well return
-        // `self.add_type(LLType::Scalar(ScalarType::Ix(num_bits)))`. However,
+        // `self.add_type(OxType::Scalar(ScalarType::Ix(num_bits)))`. However,
         // that would make it harder to determine if two types are equal. For
-        // instance, a LLType::Scalar(ScalarType::I64) is equal to a
-        // LLType::Scalar(ScalarType::Ix(64)), but their `Types` are different
-        // (because they are two distinct `LLType::Scalar`s).
+        // instance, a OxType::Scalar(ScalarType::I64) is equal to a
+        // OxType::Scalar(ScalarType::Ix(64)), but their `Types` are different
+        // (because they are two distinct `OxType::Scalar`s).
         match num_bits {
             1 => self.type_i1(),
             8 => self.type_i8(),
@@ -150,12 +154,12 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             32 => self.type_i32(),
             64 => self.type_i64(),
             128 => self.type_i128(),
-            _ => self.add_type(LLType::Scalar(ScalarType::Ix(num_bits))),
+            _ => self.add_type(OxType::Scalar(ScalarType::Ix(num_bits))),
         }
     }
 
     fn type_isize(&self) -> Type {
-        self.add_type(LLType::Scalar(ScalarType::ISize))
+        self.add_type(OxType::Scalar(ScalarType::ISize))
     }
 
     fn type_f32(&self) -> Type {
@@ -181,7 +185,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             ll_args.push(arg.clone());
         }
         // return a FnType that can be used to declare a function
-        let fn_type = LLType::FnType {
+        let fn_type = OxType::FnType {
             args: ll_args,
             ret: ret.clone(),
         };
@@ -202,14 +206,14 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         packed: bool
     ) -> Type {
         let mut members = els.to_vec();
-        self.add_type(LLType::StructType {
+        self.add_type(OxType::StructType {
             name: None,
             members,
         })
     }
 
     fn type_array(&self, ty: Type, len: u64) -> Type {
-        self.add_type(LLType::Array { length: len })
+        self.add_type(OxType::Array { length: len })
     }
 
     fn type_vector(&self, ty: Type, len: u64) -> Type {
@@ -221,7 +225,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_ptr_to(&self, ty: Type) -> Type {
-        self.add_type(LLType::PtrTo { pointee: ty })
+        self.add_type(OxType::PtrTo { pointee: ty })
     }
 
     fn element_type(&self, ty: Type) -> Type {

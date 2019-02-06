@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 #![feature(box_syntax)]
 #![feature(crate_visibility_modifier)]
 #![feature(libc)]
@@ -68,32 +58,33 @@ mod back {
 
 mod ir {
     pub mod basic_block;
+    pub mod constant;
     pub mod function;
+    pub mod instruction;
     pub mod struct_;
+    pub mod type_;
+    pub mod value;
 }
 
 mod abi;
 mod asm;
 mod base;
 mod builder;
-mod constant;
 mod consts;
 mod context;
 mod debuginfo;
 mod declare;
 mod intrinsic;
-mod type_;
 mod type_of;
 mod metadata;
 mod mono_item;
-mod value;
 mod x86_asm_printer;
 
 use context::CodegenCx;
-use type_::Type;
-use value::Value;
-use ir::function::IronOxFunction;
-use ir::struct_::IronOxStruct;
+use ir::type_::Type;
+use ir::value::Value;
+use ir::function::OxFunction;
+use ir::struct_::OxStruct;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -146,7 +137,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
 #[derive(Debug)]
 pub struct ModuleIronOx {
     /// The functions defined in this module
-    pub functions: Vec<IronOxFunction>,
+    pub functions: Vec<OxFunction>,
     /// The x86-64 program which corresponds to the module. This field is only
     /// initialised after the code emitter processes the module.
     pub asm: Option<String>,
@@ -162,7 +153,7 @@ impl ModuleIronOx {
     }
 
     /// Get the function at index `fn_idx`.
-    pub fn get_function(&mut self, fn_idx: usize) -> &mut IronOxFunction {
+    pub fn get_function(&mut self, fn_idx: usize) -> &mut OxFunction {
         &mut self.functions[fn_idx]
     }
 
@@ -172,8 +163,9 @@ impl ModuleIronOx {
         cx: &CodegenCx,
         name: &str,
         fn_type: Type) -> Value {
-        self.functions.push(IronOxFunction::new(cx, name, fn_type));
-        Value::Function(self.functions.len() - 1)
+        let idx = self.functions.len();
+        self.functions.push(OxFunction::new(cx, name, idx, fn_type));
+        Value::Function(idx)
     }
 }
 

@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 #![allow(dead_code)]
 use rustc_mir::monomorphize::partitioning::CodegenUnit;
 
@@ -31,11 +21,10 @@ use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
 
 use debuginfo::DIScope;
-use ir::basic_block::{BasicBlock, BasicBlockData};
-use ir::function::IronOxFunction;
-use constant::{UnsignedConst, SignedConst};
-use value::Value;
-use type_::{Type, LLType};
+use ir::basic_block::BasicBlock;
+use ir::constant::{UnsignedConst, SignedConst};
+use ir::value::Value;
+use ir::type_::{OxType, Type};
 
 use super::ModuleIronOx;
 
@@ -45,10 +34,6 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
     type Type = Type;
     type Funclet = ();
     type DIScope = &'ll DIScope;
-}
-
-pub struct IronOxContext<'ll> {
-    pub module: &'ll mut ::ModuleIronOx
 }
 
 pub struct CodegenCx<'ll, 'tcx: 'll> {
@@ -61,9 +46,9 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
         FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>,
     eh_personality: Cell<Option<Value>>,
     /// All the types defined in this context.
-    pub types: RefCell<Vec<LLType>>,
-    /// The index of an `LLType` in `types`.
-    pub type_cache: RefCell<FxHashMap<LLType, Type>>,
+    pub types: RefCell<Vec<OxType>>,
+    /// The index of an `OxType` in `types`.
+    pub type_cache: RefCell<FxHashMap<OxType, Type>>,
     /// The unsigned constants defined in this context.
     pub u_consts: RefCell<Vec<UnsignedConst>>,
     /// The signed constants defined in this context.
