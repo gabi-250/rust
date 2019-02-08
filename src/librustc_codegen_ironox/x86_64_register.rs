@@ -35,6 +35,20 @@ pub fn operand_access_mode(op1: &Operand, op2: &Operand) -> AccessMode {
     }
 }
 
+pub fn access_mode(size: u64) -> AccessMode {
+    if size <= 8 {
+        AccessMode::Low8
+    } else if size <= 16 {
+        AccessMode::Low16
+    } else if size <= 32 {
+        AccessMode::Low32
+    } else if size <= 64 {
+        AccessMode::Full
+    } else {
+        bug!("unsupported register size {}", size)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Location {
     Reg(Register),

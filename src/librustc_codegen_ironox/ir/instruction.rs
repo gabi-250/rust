@@ -50,20 +50,27 @@ impl ConstCast {
 impl Instruction {
     /// Return the `Type` of the value that would result from evaluating this
     /// instruction.
-    pub fn val_ty(&self, cx: &CodegenCx, module: &ModuleIronOx) -> Type {
+    pub fn val_ty(&self, cx: &CodegenCx) -> Type {
         match *self {
             Instruction::Alloca(_, ty, _) => ty,
             Instruction::Cast(_, ty) => ty,
-            Instruction::Add(v1, v2) => {
+            Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) => {
                 let ty1 = cx.val_ty(v1);
                 let ty2 = cx.val_ty(v2);
                 assert_eq!(ty1, ty2);
                 ty1
             },
-            Instruction::Call(value, _) => cx.val_ty(value),
+            Instruction::Call(value, _) => {
+                let fn_ty = cx.val_ty(value);
+                match cx.types.borrow()[*fn_ty] {
+                    OxType::FnType { ref ret, .. } => *ret,
+                    _ => unimplemented!("val_ty({:?})", fn_ty),
+                }
+            }
             Instruction::Load(ptr, _) => {
                 match ptr {
                     Value::Instruction(fn_idx, bb_idx, idx) => {
+                        let module = cx.module.borrow();
                         let inst =
                             &module.functions[fn_idx].basic_blocks[bb_idx]
                                 .instrs[idx];
@@ -71,7 +78,7 @@ impl Instruction {
                             Instruction::Alloca(_, ty, _) => {
                                 *ty
                             },
-                            _ => inst.val_ty(cx, module)
+                            _ => inst.val_ty(cx)
                         }
                     },
                     Value::Param(_, ty) => {

@@ -100,11 +100,6 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
         }
     }
 
-    pub fn ty_size(&self, ty: Type) -> u64 {
-        // FIXME: implement
-        8
-    }
-
     pub fn insert_cstr(&self,
                        name: &str,
                        c_str: *const u8,

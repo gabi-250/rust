@@ -38,7 +38,7 @@ impl ScalarType {
     /// The size in bits.
     pub fn size(&self) -> u64 {
         match *self {
-            ScalarType::I1 => 1,
+            ScalarType::I1 => 8,
             ScalarType::I8 => 8,
             ScalarType::I16 => 16,
             ScalarType::I32 => 32,
@@ -100,8 +100,10 @@ impl TypeSize for Type {
     fn size(&self, types: &Vec<OxType>) -> u64 {
         match types[**self] {
             OxType::Scalar(sty) => sty.size(),
-            OxType::PtrTo {..} => 64,
-            OxType::FnType {..} => 64,
+            OxType::PtrTo { .. } | OxType::FnType { .. } => 64,
+            OxType::FatPtr { ptr, meta } => {
+                ptr.size(types) + meta.size(types)
+            },
             ref ty => unimplemented!("size of {:?}", ty),
         }
     }
@@ -313,7 +315,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::Instruction(fn_idx, bb_idx, inst_idx) => {
                 let inst = &module
                     .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
-                inst.val_ty(self, module)
+                inst.val_ty(self)//, module)
             },
             Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
             Value::ConstStruct(idx) => self.const_structs.borrow()[idx].ty,

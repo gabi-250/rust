@@ -15,7 +15,7 @@ use std::cell::{Cell, RefCell};
 use x86_64_instruction::MachineInst;
 use x86_64_register::GeneralPurposeReg::{self, *};
 use x86_64_register::{Location, Operand, Register, SubRegister, AccessMode,
-                      operand_access_mode};
+                      operand_access_mode, access_mode};
 
 macro_rules! asm {
     (
@@ -34,10 +34,8 @@ macro_rules! asm {
     }
 }
 
-macro_rules! label {
-    ($m:ident, $lbl:expr) => {
-        $m.push_str(&format!("{}:\n", $lbl));
-    };
+fn label(sym: &str) -> String {
+    format!("{}:\n", sym)
 }
 
 /// The result of evaluating an `Instruction`.
@@ -88,10 +86,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn codegen_function(&self, f: &OxFunction) -> Vec<MachineInst> {
+    fn codegen_function(&self, f: &OxFunction) -> (String, Vec<MachineInst>) {
         let mut asm = vec![];
         let (mut param_movs, stack_size) = self.compute_stack_size(&f);
-        asm.push(MachineInst::Label(f.name.clone()));
         asm.append(&mut FunctionPrinter::emit_prologue(stack_size));
         for param in &f.params {
             let mut inst_asm = self.compile_value(*param);
@@ -102,7 +99,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.push(MachineInst::Label(bb.label.clone()));
             asm.append(&mut self.compile_block(&bb));
         }
-        asm
+        (label(&f.name), asm)
     }
 
 
@@ -179,9 +176,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm1.asm);
             let mut instr_asm2 = self.compile_value(*rhs);
             asm.append(&mut instr_asm2.asm);
+            // the size in bytes
+            let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
+            let reg = Register::direct(SubRegister::reg(RAX, access_mode(size)));
             asm.extend(vec![
-                MachineInst::mov(instr_asm1.result.unwrap(), Register::direct(RAX)),
-                MachineInst::add(instr_asm2.result.unwrap(), Register::direct(RAX)),
+                MachineInst::mov(instr_asm1.result.unwrap(), reg),
+                MachineInst::add(instr_asm2.result.unwrap(), reg),
             ]);
             // FIXME:
             let result = self.precompiled_result(inst);
@@ -295,7 +295,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         result
                     }
                     Value::Instruction(_, _, _) => {
-                        eprintln!("value is {:?}", *value);
                         let ptr = self.compile_value(*value);
 
                         let result = self.precompiled_result(inst);
@@ -416,11 +415,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         self.compiled_insts.borrow().get(&value).is_some()
     }
 
-
     pub fn compile_block(&self, bb: &OxBasicBlock) -> Vec<MachineInst> {
         let mut asm = vec![];
-        //label!(asm, format!("{}", bb.label));
-        eprintln!("{}, {}: {:?}", bb.parent, bb.idx, bb.instrs);
         for (inst_idx, inst) in bb.instrs.iter().enumerate() {
             let inst = &bb.instrs[inst_idx];
             if self.already_compiled(Value::Instruction(bb.parent, bb.idx, inst_idx)) {
@@ -474,47 +470,37 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
         for bb in &f.basic_blocks {
             for inst in &bb.instrs {
-                match inst {
-                    Instruction::Add(_, _) | Instruction::Sub(_, _) => {
-                        size += 8;
+                let instr_asm = match inst {
+                    Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) => {
+                        size +=
+                            (inst.val_ty(self.cx).size(&self.cx.types.borrow()) / 8)
+                                as isize;
                         let result = Location::RbpOffset(-size);
-                        let instr_asm =
-                            CompiledInst::new(vec![]).with_result(Operand::from(result));
-                        self.inst_stack_loc
-                            .borrow_mut()
-                            .insert((*inst).clone(), instr_asm);
+                        CompiledInst::new(vec![]).with_result(Operand::from(result))
                     }
                     Instruction::Call(_, _) => {
                         // FIXME: check non void ret
                         size += 8;
                         let result = Location::RbpOffset(-size);
-                        let instr_asm =
-                            CompiledInst::new(vec![]).with_result(Operand::from(result));
-                        self.inst_stack_loc
-                            .borrow_mut()
-                            .insert((*inst).clone(), instr_asm);
+                        CompiledInst::new(vec![]).with_result(Operand::from(result))
                     }
                     Instruction::Alloca(_, ty, align) => {
                         size += 8;
                         let result = Location::RbpOffset(-size);
-                        let instr_asm =
-                            CompiledInst::new(vec![]).with_result(Operand::from(result));
-                        self.inst_stack_loc
-                            .borrow_mut()
-                            .insert((*inst).clone(), instr_asm);
+                        CompiledInst::new(vec![]).with_result(Operand::from(result))
                     }
                     Instruction::Load(ptr, _) => {
                         size += 8;
                         let result = Operand::Loc(Location::RbpOffset(-size));
-                        let instr_asm =
-                            CompiledInst::new(vec![]).with_result(Operand::from(result));
-                        self.inst_stack_loc
-                            .borrow_mut()
-                            .insert((*inst).clone(), instr_asm);
+                        CompiledInst::new(vec![]).with_result(Operand::from(result))
                     }
-                    _ => {}
+                    _ => continue,
                 };
+                self.inst_stack_loc.borrow_mut().insert((*inst).clone(), instr_asm);
             }
+        }
+        if size % 16 != 0 {
+            size += 16 - size % 16;
         }
         (param_movs, size as usize)
     }
@@ -575,12 +561,12 @@ impl AsmPrinter<'ll, 'tcx> {
                     let const_str = self.get_str(c_str.ptr, c_str.len);
                     asm!(asm, ".type {},@object"; [c_str.name],
                               ".size {},{}"; [c_str.name, c_str.len]);
-                    label!(asm, c_str.name);
+                    asm.push_str(&label(&c_str.name));
                     asm!(asm, ".ascii \"{}\""; [const_str]);
                 }
                 Some(Value::ConstStruct(idx)) => {
                     let const_struct = &self.cx.const_structs.borrow()[idx];
-                    label!(asm, global.name);
+                    asm.push_str(&label(&global.name));
                     for c in &const_struct.components {
                         asm!(asm, &self.compile_const_global(*c));
                     }
@@ -603,14 +589,12 @@ impl AsmPrinter<'ll, 'tcx> {
     }
 
     fn get_decl_directive(&self, ty: Type) -> String {
-        eprintln!("types {:?}", self.cx.types.borrow());
         match self.cx.types.borrow()[*ty] {
             OxType::Scalar(ScalarType::I32) => ".long",
             OxType::Scalar(ScalarType::I64) => ".quad",
             OxType::PtrTo { .. } => ".quad",
             _ => unimplemented!("type of {:?}", ty),
-        }
-        .to_string()
+        }.to_string()
     }
 
 
@@ -637,8 +621,10 @@ impl AsmPrinter<'ll, 'tcx> {
         for f in &self.cx.module.borrow().functions {
             if !f.is_declaration() {
                 let mut fn_asm = String::new();
-                let fn_printer = FunctionPrinter::new(&self.cx);
-                for inst in &fn_printer.codegen_function(&f) {
+                let (label, instructions) =
+                    FunctionPrinter::new(&self.cx).codegen_function(&f);
+                fn_asm.push_str(&label);
+                for inst in instructions {
                     fn_asm.push_str(&format!("{}", inst));
                 }
                 asm.push_str(&fn_asm);
