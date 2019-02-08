@@ -81,9 +81,9 @@ mod intrinsic;
 mod type_of;
 mod metadata;
 mod mono_item;
-mod x86_asm_printer;
-mod x86_instruction;
-mod x86_register;
+mod x86_64_asm_printer;
+mod x86_64_instruction;
+mod x86_64_register;
 
 use context::CodegenCx;
 use ir::constant::{UnsignedConst, SignedConst};

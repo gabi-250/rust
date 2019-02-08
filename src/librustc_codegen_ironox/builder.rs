@@ -241,7 +241,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let mut label;
         {
             let module = self.cx.module.borrow();
-            label = module.functions[dest.0].basic_blocks[dest.1].label.to_string();
+            label = module.functions[dest.0].basic_blocks[dest.1].label.clone();
         }
         let _ = self.emit_instr(Instruction::Br(label));
     }
@@ -252,17 +252,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         then_llbb: BasicBlock,
         else_llbb: BasicBlock,
     ) {
-        let mut true_label;
-        let mut false_label;
-        {
+        let (true_label, false_label) = {
             let module = self.cx.module.borrow();
-            true_label =
-                module.functions[then_llbb.0].basic_blocks[then_llbb.1
-                ].label.to_string();
-            false_label =
-                module.functions[else_llbb.0].basic_blocks[else_llbb.1]
-                .label.to_string();
-        }
+            (module.functions[then_llbb.0].basic_blocks[then_llbb.1].label.clone(),
+             module.functions[else_llbb.0].basic_blocks[else_llbb.1].label.clone())
+        };
         self.emit_instr(Instruction::CondBr(cond, true_label, false_label));
     }
 
