@@ -8,9 +8,6 @@ use ir::type_::Type;
 pub enum Value {
     /// The index of an `IronOxFunction` function in the module.
     Function(usize),
-    /// A `(function index, local index)` pair that can be used to retrieve a
-    /// local value.
-    Local(usize, usize),
     /// An uninitialized constant. This is just a wrapper around a `Type`.
     ConstUndef(Type),
     /// The index of an `UnsignedConst` in `u_consts`.

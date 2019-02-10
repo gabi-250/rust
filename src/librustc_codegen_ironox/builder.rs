@@ -125,39 +125,43 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         use rustc::ty::{Int, Uint};
 
         let new_sty = match ty.sty {
-            Int(Isize) => unimplemented!("check_binop: signed int"),
+            Int(Isize) => Int(self.tcx.sess.target.isize_ty),
             Uint(Usize) => Uint(self.tcx.sess.target.usize_ty),
             ref t @ Uint(_) | ref t @ Int(_) => t.clone(),
             _ => panic!("tried to get overflow intrinsic for op applied to non-int type")
         };
-
-        match oop {
+        eprintln!("ty is {:?}", ty.sty);
+        let (ty, inst, signed) = match oop {
             OverflowOp::Add => match new_sty {
                 Uint(U8) => unimplemented!("u8"),
-                Uint(U16) => {
-                    let ty = self.type_i16();
-                    let inst = self.emit_instr(Instruction::Add(lhs, rhs));
-                    (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty)))
-                },
+                Uint(U16) => (self.type_i16(), Instruction::Add(lhs, rhs), false),
                 Uint(U32) => unimplemented!("u32"),
                 Uint(U64) => unimplemented!("u64"),
                 Uint(U128) => unimplemented!("u128"),
-                _ => unreachable!(),
+
+                Int(I8) => unimplemented!("I8"),
+                Int(I16) => {
+                    eprintln!("signed!");
+                    (self.type_i16(), Instruction::Add(lhs, rhs), true)
+                },
+                Int(I32) => unimplemented!("I32"),
+                Int(I64) => unimplemented!("I64"),
+                Int(I128) => unimplemented!("I128"),
+
+                _ => unreachable!()
             }
             OverflowOp::Sub => match new_sty {
                 Uint(U8) => unimplemented!("u8"),
-                Uint(U16) => {
-                    let ty = self.type_i16();
-                    let inst = self.emit_instr(Instruction::Sub(lhs, rhs));
-                    (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty)))
-                }
+                Uint(U16) => (self.type_i16(), Instruction::Sub(lhs, rhs), false),
                 Uint(U32) => unimplemented!("u32"),
                 Uint(U64) => unimplemented!("u64"),
                 Uint(U128) => unimplemented!("u128"),
                 _ => unreachable!(),
             }
             _ => unimplemented!("overflow op"),
-        }
+        };
+        let inst = self.emit_instr(inst);
+        (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty, signed)))
     }
 
     fn new_block<'b>(

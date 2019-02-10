@@ -7,6 +7,17 @@ pub enum Operand {
     Sym(String),
 }
 
+impl Operand {
+    pub fn access_mode(&self) -> AccessMode {
+        match *self {
+            Operand::Loc(Location::Reg(r)) => r.access_mode(),
+            Operand::Loc(Location::RbpOffset(isize, acc_mode)) => acc_mode,
+            Operand::Loc(Location::RipOffset(_)) => unimplemented!("access mode of rip"),
+            _ => AccessMode::Full,
+        }
+    }
+}
+
 impl fmt::Display for Operand {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -18,19 +29,12 @@ impl fmt::Display for Operand {
 }
 
 pub fn operand_access_mode(op1: &Operand, op2: &Operand) -> AccessMode {
-    match (op1, op2) {
-        (Operand::Loc(Location::Reg(r1)), Operand::Loc(Location::Reg(r2))) => {
-            let am1 = r1.access_mode();
-            let am2 = r2.access_mode();
-            match (am1, am2) {
-                (AccessMode::Low8, _) | (_, AccessMode::Low8) => AccessMode::Low8,
-                (AccessMode::Low16, _) | (_, AccessMode::Low16) => AccessMode::Low16,
-                (AccessMode::Low32, _) | (_, AccessMode::Low32) => AccessMode::Low32,
-                _ => AccessMode::Full,
-            }
-        },
-        (Operand::Loc(Location::Reg(r)), _) |
-        (_, Operand::Loc(Location::Reg(r))) => r.access_mode(),
+    let am1 = op1.access_mode();
+    let am2 = op2.access_mode();
+    match (am1, am2) {
+        (AccessMode::Low8, _) | (_, AccessMode::Low8) => AccessMode::Low8,
+        (AccessMode::Low16, _) | (_, AccessMode::Low16) => AccessMode::Low16,
+        (AccessMode::Low32, _) | (_, AccessMode::Low32) => AccessMode::Low32,
         _ => AccessMode::Full,
     }
 }
@@ -52,7 +56,7 @@ pub fn access_mode(size: u64) -> AccessMode {
 #[derive(Clone, Debug)]
 pub enum Location {
     Reg(Register),
-    RbpOffset(isize),
+    RbpOffset(isize, AccessMode),
     RipOffset(String),
 }
 
@@ -60,7 +64,7 @@ impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Location::Reg(ref r) => r.fmt(f),
-            Location::RbpOffset(ref offset) => write!(f, "{}(%rbp)", offset),
+            Location::RbpOffset(ref offset, _) => write!(f, "{}(%rbp)", offset),
             Location::RipOffset(ref offset) => write!(f, "{}(%rip)", offset),
         }
     }

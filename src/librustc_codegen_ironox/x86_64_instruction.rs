@@ -14,6 +14,7 @@ pub enum MachineInst {
     JE(Operand),
     JL(Operand),
     SETB(Operand),
+    SETO(Operand),
     CALL(Operand),
     PUSH(Operand),
     LEAVE,
@@ -24,7 +25,9 @@ pub enum MachineInst {
 
 
 impl MachineInst {
-    pub fn mov<U: Into<Operand>, V: Into<Operand>>(op: U, loc: V) -> MachineInst {
+    pub fn mov<U: Into<Operand>, V: Into<Operand>>(
+        op: U,
+        loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
             Operand::Loc(_) => MachineInst::MOV(op.into(), loc),
@@ -46,6 +49,10 @@ impl MachineInst {
             Operand::Loc(_) => MachineInst::ADD(op.into(), loc),
             _ => bug!("destination has to be a location"),
         }
+    }
+
+    pub fn xor<U: Into<Operand>, V: Into<Operand>>(op1: U, op2: V) -> MachineInst {
+        MachineInst::XOR(op1.into(), op2.into())
     }
 
     pub fn sub<U: Into<Operand>, V: Into<Operand>>(op: U, loc: V) -> MachineInst {
@@ -80,6 +87,10 @@ impl MachineInst {
         MachineInst::SETB(op.into())
     }
 
+    pub fn seto<U: Into<Operand>>(op: U) -> MachineInst {
+        MachineInst::SETO(op.into())
+    }
+
     pub fn call<U: Into<Operand>>(op: U) -> MachineInst {
         MachineInst::CALL(op.into())
     }
@@ -98,6 +109,7 @@ impl fmt::Display for MachineInst {
            MachineInst::JE(ref op) => write!(f, "\tje {}\n", op),
            MachineInst::JL(ref op) => write!(f, "\tjl {}\n", op),
            MachineInst::SETB(ref op) => write!(f, "\tsetb {}\n", op),
+           MachineInst::SETO(ref op) => write!(f, "\tseto {}\n", op),
            MachineInst::CALL(ref op) => write!(f, "\tcall {}\n", op),
            MachineInst::PUSH(ref op) => write!(f, "\tpush {}\n", op),
            MachineInst::LEAVE => write!(f, "\tleave\n"),

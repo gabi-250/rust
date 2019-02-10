@@ -31,7 +31,8 @@ pub enum Instruction {
     Sub(Value, Value),
     Eq(Value, Value),
     Lt(Value, Value),
-    CheckOverflow(Value, Type),
+    /// Check overflow: (instruction, type, signed).
+    CheckOverflow(Value, Type, bool),
     StructGep(Value, u64),
     Unreachable,
 }
@@ -54,6 +55,7 @@ impl Instruction {
         match *self {
             Instruction::Alloca(_, ty, _) => ty,
             Instruction::Cast(_, ty) => ty,
+            Instruction::Ret(Some(v)) => cx.val_ty(v),
             Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) => {
                 let ty1 = cx.val_ty(v1);
                 let ty2 = cx.val_ty(v2);
