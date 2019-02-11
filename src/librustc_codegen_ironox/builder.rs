@@ -131,33 +131,25 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             _ => panic!("tried to get overflow intrinsic for op applied to non-int type")
         };
         eprintln!("ty is {:?}", ty.sty);
-        let (ty, inst, signed) = match oop {
-            OverflowOp::Add => match new_sty {
-                Uint(U8) => unimplemented!("u8"),
-                Uint(U16) => (self.type_i16(), Instruction::Add(lhs, rhs), false),
-                Uint(U32) => unimplemented!("u32"),
-                Uint(U64) => unimplemented!("u64"),
-                Uint(U128) => unimplemented!("u128"),
 
-                Int(I8) => unimplemented!("I8"),
-                Int(I16) => {
-                    eprintln!("signed!");
-                    (self.type_i16(), Instruction::Add(lhs, rhs), true)
-                },
-                Int(I32) => unimplemented!("I32"),
-                Int(I64) => unimplemented!("I64"),
-                Int(I128) => unimplemented!("I128"),
+        let (ty, signed) = match new_sty {
+            Uint(U8) => (self.type_i8(), false),
+            Uint(U16) => (self.type_i16(), false),
+            Uint(U32) => (self.type_i32(), false),
+            Uint(U64) => (self.type_i64(), false),
+            Uint(U128) => unimplemented!("u128"),
 
-                _ => unreachable!()
-            }
-            OverflowOp::Sub => match new_sty {
-                Uint(U8) => unimplemented!("u8"),
-                Uint(U16) => (self.type_i16(), Instruction::Sub(lhs, rhs), false),
-                Uint(U32) => unimplemented!("u32"),
-                Uint(U64) => unimplemented!("u64"),
-                Uint(U128) => unimplemented!("u128"),
-                _ => unreachable!(),
-            }
+            Int(I8) => (self.type_i8(), true),
+            Int(I16) => (self.type_i16(), true),
+            Int(I32) => (self.type_i32(), true),
+            Int(I64) => (self.type_i64(), true),
+            Int(I128) => unimplemented!("I128"),
+
+            _ => unreachable!()
+        };
+        let inst = match oop {
+            OverflowOp::Add => Instruction::Add(lhs, rhs),
+            OverflowOp::Sub => Instruction::Sub(lhs, rhs),
             _ => unimplemented!("overflow op"),
         };
         let inst = self.emit_instr(inst);

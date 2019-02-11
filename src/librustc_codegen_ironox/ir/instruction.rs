@@ -49,6 +49,34 @@ impl ConstCast {
 }
 
 impl Instruction {
+
+    fn load_ty(val: Value, cx: &CodegenCx) -> Type {
+        if let Value::Instruction(fn_idx, bb_idx, inst_idx) = val {
+            let inst = &cx.module.borrow().functions[fn_idx].
+                basic_blocks[bb_idx].instrs[inst_idx];
+            if let Instruction::Alloca(_, ty, _) = inst {
+                *ty
+            } else if let Instruction::Cast(_, ty) = inst {
+                if let OxType::PtrTo { ref pointee } = cx.types.borrow()[**ty] {
+                    *pointee
+                } else {
+                    bug!("Cannot load from {:?}", *ty);
+                }
+            } else {
+                unimplemented!("Load from instruction {:?}", inst);
+            }
+
+        } else if let Value::Param(_, ty) = val {
+            if let OxType::PtrTo { ref pointee } = cx.types.borrow()[*ty] {
+                *pointee
+            } else {
+                unimplemented!("Load from non-pointer param {:?}", val);
+            }
+        } else {
+            bug!("cannot load from {:?}", val);
+        }
+    }
+
     /// Return the `Type` of the value that would result from evaluating this
     /// instruction.
     pub fn val_ty(&self, cx: &CodegenCx) -> Type {
@@ -66,35 +94,19 @@ impl Instruction {
                 let fn_ty = cx.val_ty(value);
                 match cx.types.borrow()[*fn_ty] {
                     OxType::FnType { ref ret, .. } => *ret,
-                    _ => unimplemented!("val_ty({:?})", fn_ty),
-                }
-            }
-            Instruction::Load(ptr, _) => {
-                match ptr {
-                    Value::Instruction(fn_idx, bb_idx, idx) => {
-                        let module = cx.module.borrow();
-                        let inst =
-                            &module.functions[fn_idx].basic_blocks[bb_idx]
-                                .instrs[idx];
-                        match inst {
-                            Instruction::Alloca(_, ty, _) => {
-                                *ty
-                            },
-                            _ => inst.val_ty(cx)
-                        }
-                    },
-                    Value::Param(_, ty) => {
-                        if let OxType::PtrTo{ pointee } = cx.types.borrow()[*ty] {
-                            pointee
+                    OxType::PtrTo { ref pointee } => {
+                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[**pointee] {
+                            *ret
                         } else {
-                            bug!("Cannot load from non-pointer parameter {:?}", ty);
+                            bug!("Cannot call value {:?}", value);
                         }
                     },
                     _ => {
-                        bug!("Cannot load from value {:?}", ptr);
+                        unimplemented!("val_ty({:?})\n{:?}", fn_ty, cx.types.borrow());
                     }
                 }
-            },
+            }
+            Instruction::Load(ptr, _) => Instruction::load_ty(ptr, cx),
             Instruction::StructGep(val, idx) => {
                 let struct_ty = cx.val_ty(val);
                 if let OxType::StructType { ref members, .. } =

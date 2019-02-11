@@ -289,7 +289,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                                                   Register::direct(param)));
                     }
                 }
-                let result = match value {
+
+                match value {
                     Value::Function(idx) => {
                         // Move the result to the stack, and assume its size is 8.
                         let fn_name = if module.functions[*idx].is_declaration() {
@@ -297,22 +298,28 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         } else {
                             module.functions[*idx].name.clone()
                         };
-                        let result = self.precompiled_result(inst);
-                        let acc_mode = result.access_mode();
-                        asm.extend(vec![
-                            MachineInst::call(fn_name.clone()),
-                            MachineInst::mov(
+                        asm.push(MachineInst::call(fn_name.clone()));
+
+                        let ret_ty = inst.val_ty(self.cx);
+                        // If the function doesn't return anything, carry on.
+                        if let OxType::Void = self.cx.types.borrow()[*ret_ty] {
+                            CompiledInst::new(asm)
+                        } else {
+                            let result = self.precompiled_result(inst);
+                            let acc_mode = result.access_mode();
+                            asm.push(MachineInst::mov(
                                 Register::direct(SubRegister::reg(RAX, acc_mode)),
-                                result.clone()),
-                        ]);
-                        result
+                                result.clone()));
+                            CompiledInst::new(asm).with_result(result)
+                        }
                     }
                     Value::Instruction(_, _, _) => {
                         let ptr = self.compile_value(*value);
 
-                        let result = self.precompiled_result(inst);
+                        let result = ptr.result.clone().unwrap();//self.precompiled_result(inst);
 
                         let acc_mode = result.access_mode();
+
 
                         let reg =
                             Register::direct(SubRegister::reg(RAX, acc_mode));
@@ -320,11 +327,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             MachineInst::call(result.clone()),
                             MachineInst::mov(reg, result.clone()),
                         ]);
-                        result
+
+                        CompiledInst::new(asm).with_result(result)
                     }
                     _ => unimplemented!("call to {:?}", value),
-                };
-                CompiledInst::new(asm).with_result(result)
+                }
             }
             Instruction::Alloca(_, _, _) => {
                 let result = self.precompiled_result(inst);
@@ -507,6 +514,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     }
                     Instruction::Call(_, _) => {
                         let ret_ty = inst.val_ty(self.cx);
+                        // If the function doesn't return anything, carry on.
+                        if let OxType::Void = self.cx.types.borrow()[*ret_ty] {
+                            continue;
+                        }
                         let inst_size = ret_ty.size(&self.cx.types.borrow());
                         let acc_mode = access_mode(inst_size as u64);
                         // FIXME: check non void ret

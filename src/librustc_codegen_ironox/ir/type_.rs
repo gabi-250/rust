@@ -315,16 +315,16 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::Instruction(fn_idx, bb_idx, inst_idx) => {
                 let inst = &module
                     .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
-                inst.val_ty(self)//, module)
+                inst.val_ty(self)
             },
             Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
             Value::ConstStruct(idx) => self.const_structs.borrow()[idx].ty,
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
             Value::Cast(idx) => self.const_casts.borrow()[idx].ty,
+            Value::ConstFatPtr(idx) => self.val_ty(self.const_fat_ptrs.borrow()[idx].0),
             _ => {
                 // FIXME
-                Type(0)
-                //unimplemented!("Type of {:?}", v);
+                unimplemented!("Type of {:?}", v);
             }
         }
     }

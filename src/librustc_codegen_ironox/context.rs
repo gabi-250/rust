@@ -227,8 +227,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn check_overflow(&self) -> bool {
-        false
-        //true
+        true
     }
 
     fn stats(&self) -> &RefCell<Stats> {
