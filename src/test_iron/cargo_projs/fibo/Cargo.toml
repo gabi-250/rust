@@ -1,0 +1,14 @@
+[package]
+name = "fibo"
+version = "0.1.0"
+edition = "2018"
+
+[profile.dev]
+debug = false
+panic = "abort"
+
+[lib]
+name = "fibo"
+path = "src/lib.rs"
+
+[workspace]

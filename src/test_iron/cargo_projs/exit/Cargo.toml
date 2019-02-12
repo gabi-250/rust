@@ -1,0 +1,13 @@
+[package]
+version = "0.1.0"
+name = "exit"
+
+[profile.dev]
+debug = false
+panic = "abort"
+
+[lib]
+name = "exit"
+path = "src/lib.rs"
+
+[workspace]
