@@ -423,7 +423,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 CompiledInst::new(asm)
             }
             _ => {
-                unimplemented!("instruction {:?}", inst);
+                unimplemented!("instruction {:?}\n{:?}",
+                               inst, self.cx.types);
             }
         };
         let compiled_inst = if let Some(ref result) = instr_asm.result {
@@ -589,6 +590,7 @@ impl AsmPrinter<'ll, 'tcx> {
                 let v = self.constant_value(cast_inst.value);
                 asm!(asm, "{}\t{}"; [directive, v]);
             }
+            Value::ConstStruct(idx) => {}
             Value::Function(idx) => {}
             Value::Cast(idx) => {}
             _ => unimplemented!("compile_const_global({:?})", c),

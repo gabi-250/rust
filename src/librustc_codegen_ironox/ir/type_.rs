@@ -71,12 +71,16 @@ pub enum OxType {
         args: Vec<Type>,
         ret: Type
     },
+    /// An array type.
     Array {
-        length: u64,
+        len: u64,
+        ty: Type,
     },
+    /// A pointer type.
     PtrTo {
         pointee: Type,
     },
+    /// A scalar type.
     Scalar(ScalarType),
     StructType {
         name: Option<String>,
@@ -91,18 +95,25 @@ pub enum OxType {
 }
 
 pub trait TypeSize {
+    /// The size in bits.
     fn size(&self, cx: &Vec<OxType>) -> u64;
     fn is_ptr(&self, types: &Vec<OxType>) -> bool;
 }
 
 impl TypeSize for Type {
-    /// The size in bits
     fn size(&self, types: &Vec<OxType>) -> u64 {
         match types[**self] {
             OxType::Scalar(sty) => sty.size(),
             OxType::PtrTo { .. } | OxType::FnType { .. } => 64,
             OxType::FatPtr { ptr, meta } => {
                 ptr.size(types) + meta.size(types)
+            },
+            OxType::StructType { ref name, ref members } => {
+                let mut struct_size = 0;
+                for mem in members {
+                    struct_size += mem.size(types);
+                }
+                struct_size
             },
             ref ty => unimplemented!("size of {:?}", ty),
         }
@@ -146,21 +157,18 @@ impl CodegenCx<'ll, 'tcx> {
         })
     }
 
-    crate fn type_named_struct(&self, name: &str) -> Type {
+    crate fn type_named_struct(
+        &self,
+        name: &str,
+        els: &[Type],
+        packed: bool
+    ) -> Type {
+        // FIXME: do something with packed.
         let struct_type = OxType::StructType {
             name: Some(name.to_string()),
-            members: vec![],
+            members: els.to_vec(),
         };
         self.add_type(struct_type)
-    }
-
-    crate fn set_struct_body(&self, ty: Type, els: &[Type], packed: bool) {
-        let mut types = self.types.borrow_mut();
-        if let OxType::StructType{ ref name, ref mut members } = types[*ty] {
-            *members = els.to_vec();
-            return;
-        }
-        bug!("expected OxType::StructType, found {:?}", types[*ty]);
     }
 }
 
@@ -270,7 +278,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_array(&self, ty: Type, len: u64) -> Type {
-        self.add_type(OxType::Array { length: len })
+        self.add_type(OxType::Array { len, ty })
     }
 
     fn type_vector(&self, ty: Type, len: u64) -> Type {
@@ -318,7 +326,8 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 inst.val_ty(self)
             },
             Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
-            Value::ConstStruct(idx) => self.const_structs.borrow()[idx].ty,
+            Value::ConstStruct(idx) => self.ty_map.borrow()[&v],
+                                       //self.const_structs.borrow()[idx].ty,
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
             Value::Cast(idx) => self.const_casts.borrow()[idx].ty,
             Value::ConstFatPtr(idx) => self.val_ty(self.const_fat_ptrs.borrow()[idx].0),

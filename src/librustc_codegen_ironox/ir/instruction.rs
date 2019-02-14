@@ -34,9 +34,12 @@ pub enum Instruction {
     /// Check overflow: (instruction, type, signed).
     CheckOverflow(Value, Type, bool),
     StructGep(Value, u64),
+    /// (agg_val, elt, idx)
+    InsertValue(Value, Value, u64),
     Unreachable,
 }
 
+#[derive(PartialEq, Clone, Debug, Eq, Hash)]
 pub struct ConstCast {
     pub value: Value,
     pub ty: Type,

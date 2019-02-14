@@ -529,7 +529,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         align: Align
     )-> Value {
-        // FIXME: ignore the alignment for now
         self.emit_instr(Instruction::Load(ptr, align))
     }
 
@@ -611,7 +610,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         idx: u64
     )-> Value {
-        self.emit_instr(Instruction::StructGep(ptr, idx))
+        unimplemented!("struct_gep");
     }
 
     fn trunc(
@@ -619,8 +618,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        // FIXME: implement trunc
-        val
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn sext(
@@ -942,8 +940,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         elt: Value,
         idx: u64
     )-> Value {
-        // FIXME: insert elt into agg_val at idx
-        elt
+        // Insert `elt` into aggregate`agg_val` at `idx`.
+        self.emit_instr(Instruction::InsertValue(agg_val, elt, idx))
     }
 
     fn landing_pad(

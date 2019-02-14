@@ -133,8 +133,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                             cx.type_struct(&[], packed)
                         }
                         Some(ref name) => {
-                            let llty = cx.type_named_struct(name);
-                            cx.set_struct_body(llty, &[], packed);
+                            // FIXME &[]
+                            let llty = cx.type_named_struct(name, &[], packed);
                             llty
                         }
                     }
@@ -149,9 +149,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                             cx.type_struct(&fields, packed)
                         }
                         Some(ref name) => {
-                            let llty = cx.type_named_struct(name);
                             let fields = struct_field_types(cx, *self);
-                            cx.set_struct_body(llty, &fields, packed);
+                            let llty = cx.type_named_struct(name, &fields, packed);
                             llty
                         }
                     }
