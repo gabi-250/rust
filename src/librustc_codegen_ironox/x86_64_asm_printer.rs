@@ -315,9 +315,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     }
                     Value::Instruction(_, _, _) => {
                         let ptr = self.compile_value(*value);
-
                         let result = ptr.result.clone().unwrap();//self.precompiled_result(inst);
-
                         let acc_mode = result.access_mode();
 
 
@@ -392,7 +390,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let acc_mode = access_mode(inst_size as u64);
                 let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
                 asm.push(MachineInst::mov(instr_asm.result.unwrap(), reg));
-                // Allocas are an exception. They don't need to be addrerenced.
+                // Allocas are an exception. They don't need to be dereferenced.
                 if self.cx.val_ty(*ptr).is_ptr(&self.cx.types.borrow()) {
                     // addrerence the pointer.
                     asm.push(MachineInst::mov(
@@ -425,7 +423,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 CompiledInst::new(asm)
             }
             _ => {
-                unimplemented!("instruction {:?}", inst);
+                unimplemented!("instruction {:?}\n{:?}",
+                               inst, self.cx.types);
             }
         };
         let compiled_inst = if let Some(ref result) = instr_asm.result {
@@ -592,6 +591,7 @@ impl AsmPrinter<'ll, 'tcx> {
                 let v = self.constant_value(cast_inst.value);
                 asm!(asm, "{}\t{}"; [directive, v]);
             }
+            Value::ConstStruct(idx) => {}
             Value::Function(idx) => {}
             Value::Cast(idx) => {}
             _ => unimplemented!("compile_const_global({:?})", c),

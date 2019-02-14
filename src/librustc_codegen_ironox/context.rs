@@ -68,6 +68,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub const_cstrs: RefCell<Vec<ConstCstr>>,
     pub const_casts: RefCell<Vec<ConstCast>>,
     pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
+    pub ty_map: RefCell<FxHashMap<Value, Type>>,
     pub sym_count: Cell<usize>,
 }
 
@@ -96,6 +97,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             const_cstrs: Default::default(),
             const_casts: Default::default(),
             const_fat_ptrs: Default::default(),
+            ty_map: Default::default(),
             sym_count: Cell::new(0),
         }
     }
@@ -360,9 +362,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         ptr: Value,
         meta: Value
     ) -> Value {
-        let mut const_fat_ptrs = self.const_fat_ptrs.borrow_mut();
-        const_fat_ptrs.push((ptr, meta));
-        Value::ConstFatPtr(const_fat_ptrs.len() - 1)
+        self.const_struct(&[ptr, meta], false)
     }
 
     fn const_struct(
@@ -370,6 +370,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
+        // FIXME: use an enum variant instead (Sym::Struct for example). Use the
+        // length of self.const_structs to generate the unique IDs.
         let name = self.get_sym_name("struct");
         let mut structs = self.const_structs.borrow_mut();
         let mut elt_tys = Vec::with_capacity(elts.len());
@@ -378,7 +380,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         }
         let ty = self.type_struct(&elt_tys[..], packed);
         structs.push(OxStruct::new(name, elts, ty));
-        Value::ConstStruct(structs.len() - 1)
+        let v = Value::ConstStruct(structs.len() - 1);
+        self.ty_map.borrow_mut().insert(v.clone(), ty);
+        v
     }
 
     fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
@@ -443,8 +447,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 if layout.value == layout::Pointer {
                     unimplemented!("scalar_to_backend: layout::Pointer");
                 } else {
-                    // FIXME? bitcast llval to llty
-                    llval
+                    self.const_ptrcast(llval, llty)
                 }
             },
             Scalar::Ptr(ptr) => {
