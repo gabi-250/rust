@@ -87,7 +87,6 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                     unimplemented!("Vector");
                 }
                 layout::Abi::ScalarPair(ref a, ref b) => {
-                    eprintln!("ty is {:?} scalar pair", *self);
                     // This may or may not be a fat pointer. It could be
                     // another type that must be represented as a pair of scalars.
                     // Create a struct that contains the types of the two elements
@@ -134,8 +133,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                             cx.type_struct(&[], packed)
                         }
                         Some(ref name) => {
-                            let llty = cx.type_named_struct(name);
-                            cx.set_struct_body(llty, &[], packed);
+                            // FIXME &[]
+                            let llty = cx.type_named_struct(name, &[], packed);
                             llty
                         }
                     }
@@ -150,9 +149,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                             cx.type_struct(&fields, packed)
                         }
                         Some(ref name) => {
-                            let llty = cx.type_named_struct(name);
                             let fields = struct_field_types(cx, *self);
-                            cx.set_struct_body(llty, &fields, packed);
+                            let llty = cx.type_named_struct(name, &fields, packed);
                             llty
                         }
                     }
@@ -226,7 +224,5 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             //a.value.size(cx).align_to(b.value.align(cx).abi)
         //};
         self.scalar_ironox_type_at(cx, scalar)
-
-
     }
 }

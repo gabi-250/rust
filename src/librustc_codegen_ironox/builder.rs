@@ -130,8 +130,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             ref t @ Uint(_) | ref t @ Int(_) => t.clone(),
             _ => panic!("tried to get overflow intrinsic for op applied to non-int type")
         };
-        eprintln!("ty is {:?}", ty.sty);
-
         let (ty, signed) = match new_sty {
             Uint(U8) => (self.type_i8(), false),
             Uint(U16) => (self.type_i16(), false),
@@ -532,7 +530,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         align: Align
     )-> Value {
-        // FIXME: ignore the alignment for now
         self.emit_instr(Instruction::Load(ptr, align))
     }
 
@@ -614,7 +611,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         idx: u64
     )-> Value {
-        self.emit_instr(Instruction::StructGep(ptr, idx))
+        unimplemented!("struct_gep");
     }
 
     fn trunc(
@@ -622,8 +619,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        // FIXME: implement trunc
-        val
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn sext(
@@ -947,9 +943,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         elt: Value,
         idx: u64
     )-> Value {
-        // FIXME: insert elt into agg_val at idx
-        eprintln!("insert {:?} into {:?} at {:?}", elt, agg_val, idx);
-        elt
+        // Insert `elt` into aggregate`agg_val` at `idx`.
+        self.emit_instr(Instruction::InsertValue(agg_val, elt, idx))
     }
 
     fn landing_pad(
@@ -1120,7 +1115,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         if funclet.is_some() {
             unimplemented!("call funclet: {:?}", funclet);
         }
-        eprintln!("emit call to {:?} with args {:?}", llfn, args);
         self.emit_instr(Instruction::Call(llfn, args.to_vec()))
     }
 

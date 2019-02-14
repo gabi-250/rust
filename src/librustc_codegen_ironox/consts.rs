@@ -21,8 +21,6 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
         align: Align,
         kind: Option<&str>,
     ) -> Value {
-        eprintln!("static addr of {:?}", cv);
-        eprintln!("static addr of {:?}", self.const_structs.borrow());
         let mut const_globals_cache = self.const_globals_cache.borrow_mut();
         if let Some(&gv) = const_globals_cache.get(&cv) {
             // FIXME: update the alignment
