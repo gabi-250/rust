@@ -7,6 +7,7 @@ use type_of::LayoutIronOxExt;
 use libc::c_uint;
 
 use rustc::ty::{self, Ty, Instance};
+use rustc::ty::layout;
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_codegen_ssa::mir::operand::OperandValue;
@@ -34,12 +35,8 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     ) {
         match ty.mode {
             PassMode::Ignore => {},
-            PassMode::Pair(..) => {
-                unimplemented!("PassMode::Pair");
-            }
-            PassMode::Indirect(_, Some(_)) => {
-                unimplemented!("PassMode::Indirect");
-            }
+            PassMode::Pair(..) => unimplemented!("PassMode::Pair"),
+            PassMode::Indirect(_, Some(_)) => unimplemented!("PassMode::Indirect"),
             PassMode::Direct(_) | PassMode::Indirect(_, None) | PassMode::Cast(_) => {
                 if ty.is_ignore() {
                     return;
@@ -69,7 +66,7 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn memory_ty(&self, ty: &ArgType<'tcx, Ty<'tcx>>) -> Type {
-        unimplemented!("memory_ty");
+        ty.layout.ironox_type(&self.cx)
     }
 }
 
@@ -105,6 +102,24 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             _ => unimplemented!("Unknown calling convention")
         };
 
+        let mut inputs = sig.inputs();
+        let extra_args = if sig.abi == RustCall {
+            assert!(!sig.variadic && extra_args.is_empty());
+            match sig.inputs().last().unwrap().sty {
+                ty::Tuple(ref tupled_arguments) => {
+                    inputs = &sig.inputs()[0..sig.inputs().len() - 1];
+                    tupled_arguments
+                }
+                _ => {
+                    bug!("argument to function with \"rust-call\" ABI \
+                          is not a tuple");
+                }
+            }
+        } else {
+            assert!(sig.variadic || extra_args.is_empty());
+            extra_args
+        };
+
         // Create an ArgType for a function argument of type `ty`.
         // `arg_idx` is None if `ty` is the return type, and Some(index),
         // if `ty` is the type of an argument.
@@ -112,6 +127,11 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             let is_return = arg_idx.is_none();
             // The ArgType of the specified ty.
             let mut arg = ArgType::new(cx.layout_of(ty));
+            if let layout::Abi::ScalarPair(ref a, ref b) = arg.layout.abi {
+                let mut a_attrs = ArgAttributes::new();
+                let mut b_attrs = ArgAttributes::new();
+                arg.mode = PassMode::Pair(a_attrs, b_attrs);
+            }
             // Does the function adhere to the Rust ABI?
             let rust_abi = match sig.abi {
                 RustIntrinsic | PlatformIntrinsic | Rust | RustCall => true,
@@ -142,7 +162,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
         // Create the return type.
         let ret_ty = match self.ret.mode {
             PassMode::Ignore => cx.type_void(),
-            PassMode::Direct(_) => {
+            PassMode::Direct(_) | PassMode::Pair(..) => {
                 self.ret.layout.immediate_ironox_type(cx)
             },
             mode => unimplemented!("{:?}", mode)
@@ -156,6 +176,11 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
                 PassMode::Direct(_) => {
                     arg.layout.immediate_ironox_type(cx)
                 },
+                PassMode::Pair(..) => {
+                    arg_tys.push(arg.layout.scalar_pair_element_ironox_type(cx, 0, true));
+                    arg_tys.push(arg.layout.scalar_pair_element_ironox_type(cx, 1, true));
+                    continue;
+                }
                 mode => unimplemented!("{:?}", mode),
             };
             arg_tys.push(arg_ty);

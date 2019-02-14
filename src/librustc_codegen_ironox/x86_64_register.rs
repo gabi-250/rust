@@ -1,10 +1,13 @@
+use std::cmp::Ordering;
 use std::fmt;
 
 #[derive(Clone, Debug)]
 pub enum Operand {
     Loc(Location),
-    Immediate(isize),
+    Immediate(isize, AccessMode),
     Sym(String),
+    // FIXME: immediates can be dereferenced too...
+    Deref(Location)
 }
 
 impl Operand {
@@ -12,8 +15,45 @@ impl Operand {
         match *self {
             Operand::Loc(Location::Reg(r)) => r.access_mode(),
             Operand::Loc(Location::RbpOffset(isize, acc_mode)) => acc_mode,
+            Operand::Immediate(_, acc_mode) => acc_mode,
             Operand::Loc(Location::RipOffset(_)) => unimplemented!("access mode of rip"),
             _ => AccessMode::Full,
+        }
+    }
+
+    pub fn deref(self) -> Operand {
+        match self {
+            Operand::Loc(l) => Operand::Deref(l),
+            _ => unimplemented!("deref: {:?}", self),
+        }
+    }
+
+    pub fn is_reg(&self) -> bool {
+        match *self {
+            Operand::Loc(Location::Reg(_)) => true,
+            _ => false,
+        }
+    }
+
+    pub fn get_reg(&self) -> Register {
+        match *self {
+            Operand::Loc(Location::Reg(r)) => r,
+            _ => bug!("Operand {:?} is not a register!", self),
+        }
+    }
+
+    pub fn with_acc_mode(&mut self, acc_mode: AccessMode) -> Operand {
+        match *self {
+            Operand::Loc(Location::Reg(r)) => {
+                let r = r.with_acc_mode(acc_mode);
+                Operand::Loc(Location::Reg(r))
+            }
+            Operand::Loc(Location::RbpOffset(off, _)) => {
+                Operand::Loc(Location::RbpOffset(off, acc_mode))
+            }
+            Operand::Immediate(val, _) => Operand::Immediate(val, acc_mode),
+            Operand::Loc(Location::RipOffset(_)) => unimplemented!("access mode of rip"),
+            _ => unimplemented!("with_acc_mode"),
         }
     }
 }
@@ -22,8 +62,9 @@ impl fmt::Display for Operand {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Operand::Loc(ref l) => l.fmt(f),
-            Operand::Immediate(val) => write!(f, "${}", val),
+            Operand::Immediate(val, _) => write!(f, "${}", val),
             Operand::Sym(ref s) => write!(f, "{}", s),
+            Operand::Deref(ref l) => write!(f, "*{}", l),
         }
     }
 }
@@ -102,12 +143,33 @@ impl SubRegister {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AccessMode {
     Full,
     Low32,
     Low16,
     Low8,
+}
+
+impl PartialOrd for AccessMode {
+    fn partial_cmp(&self, other: &AccessMode) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for AccessMode {
+    fn cmp(&self, other: &AccessMode) -> Ordering {
+        if *self == *other {
+            return Ordering::Equal;
+        }
+        match (*self, *other) {
+            (AccessMode::Full, _) |
+            (AccessMode::Low32, AccessMode::Low16) |
+            (AccessMode::Low32, AccessMode::Low8) |
+            (AccessMode::Low16, AccessMode::Low8) => Ordering::Greater,
+            _ => Ordering::Less
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -124,6 +186,19 @@ impl Register {
             Register::Direct(sr) | Register::Indirect(sr) => {
                 sr.access_mode
             }
+        }
+    }
+
+    pub fn with_acc_mode(&self, acc_mode: AccessMode) -> Register {
+        match *self {
+            Register::Direct(sr) => {
+                let sr = SubRegister::reg(sr.reg, acc_mode);
+                Register::Direct(sr)
+            },
+            Register::Indirect(sr) => {
+                let sr = SubRegister::reg(sr.reg, acc_mode);
+                Register::Indirect(sr)
+            },
         }
     }
 }

@@ -270,7 +270,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         catch: BasicBlock,
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        unimplemented!("invoke");
+        self.emit_instr(Instruction::Invoke {
+            llfn, args: args.to_vec(), then, catch
+        })
     }
 
     fn unreachable(&mut self) {
@@ -495,7 +497,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         v: Value
     )-> Value {
-        unimplemented!("not");
+        self.emit_instr(Instruction::Not(v))
     }
 
     fn alloca(
@@ -529,7 +531,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         align: Align
     )-> Value {
-        // FIXME: ignore the alignment for now
         self.emit_instr(Instruction::Load(ptr, align))
     }
 
@@ -595,7 +596,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         indices: &[Value]
     )-> Value {
-        unimplemented!("gep");
+        self.emit_instr(Instruction::Gep(ptr, indices.to_vec()))
     }
 
     fn inbounds_gep(
@@ -619,8 +620,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        // FIXME: implement trunc
-        val
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn sext(
@@ -933,7 +933,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         agg_val: Value,
         idx: u64
     )-> Value {
-        unimplemented!("extract_value");
+        // Extract the value at position `idx` in aggregate `agg_val`.
+        self.emit_instr(Instruction::ExtractValue(agg_val, idx))
     }
 
     fn insert_value(
@@ -942,8 +943,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         elt: Value,
         idx: u64
     )-> Value {
-        // FIXME: insert elt into agg_val at idx
-        elt
+        // Insert `elt` into aggregate`agg_val` at `idx`.
+        self.emit_instr(Instruction::InsertValue(agg_val, elt, idx))
     }
 
     fn landing_pad(
@@ -952,7 +953,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         pers_fn: Value,
         num_clauses: usize
     )-> Value {
-        unimplemented!("landing_pad");
+        self.emit_instr(Instruction::LandingPad(ty, pers_fn, num_clauses))
     }
 
     fn add_clause(
@@ -967,14 +968,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         landing_pad: Value
     ) {
-        unimplemented!("set_cleanup");
+        // FIXME: set_cleanup
     }
 
     fn resume(
         &mut self,
         exn: Value
     )-> Value {
-        unimplemented!("resume");
+        self.emit_instr(Instruction::Resume(exn))
     }
 
     fn cleanup_pad(
@@ -1027,7 +1028,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn set_personality_fn(&mut self, personality: Value) {
-        unimplemented!("set_personality_fn");
+        self.cx.personality_fns.borrow_mut().insert(self.llfn(), personality);
     }
 
     fn atomic_cmpxchg(
@@ -1122,7 +1123,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        unimplemented!("zext");
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     unsafe fn delete_basic_block(&mut self, bb: BasicBlock) {
@@ -1181,29 +1182,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             });
             OperandValue::Immediate(to_immediate(self, llval, place.layout))
         } else if let layout::Abi::ScalarPair(ref a, ref b) = place.layout.abi {
-            // FIXME
-            let b_offset = a.value.size(self).align_to(b.value.align(self).abi);
-
-            let mut load = |i, scalar: &layout::Scalar, align| {
-                let llptr = self.struct_gep(place.llval, i as u64);
-                let load = self.load(llptr, align);
-                if scalar.is_bool() {
-                    let ty = {
-                        self.type_i1()
-                    };
-                    self.trunc(load, ty)
-                } else {
-                    load
-                }
-            };
-            OperandValue::Pair(load(0, a, place.align),
-                               load(1, b, place.align.restrict_for_offset(b_offset)))
+            unimplemented!("ScalarPair");
         } else {
             OperandValue::Ref(place.llval, None, place.align)
         };
-        OperandRef {
-            val,
-            layout: place.layout,
-        }
+        OperandRef { val, layout: place.layout }
     }
 }

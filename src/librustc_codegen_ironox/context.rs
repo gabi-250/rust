@@ -7,7 +7,7 @@ use rustc::mir::mono::Stats;
 use rustc::session::Session;
 
 use rustc::ty::{self, Ty, TyCtxt};
-use rustc::ty::layout::{LayoutOf, LayoutError, self, TyLayout, Size};
+use rustc::ty::layout::{LayoutOf, LayoutError, self, TyLayout, Size, VariantIdx};
 use type_of::LayoutIronOxExt;
 use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::base::wants_msvc_seh;
@@ -51,6 +51,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub vtables: RefCell<
         FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>,
     eh_personality: Cell<Option<Value>>,
+    pub personality_fns: RefCell<FxHashMap<Value, Value>>,
     /// All the types defined in this context.
     pub types: RefCell<Vec<OxType>>,
     /// The index of an `OxType` in `types`.
@@ -68,7 +69,10 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub const_cstrs: RefCell<Vec<ConstCstr>>,
     pub const_casts: RefCell<Vec<ConstCast>>,
     pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
+    pub ty_map: RefCell<FxHashMap<Value, Type>>,
     pub sym_count: Cell<usize>,
+    pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, Type>>,
+    pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), Type>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -96,7 +100,11 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             const_cstrs: Default::default(),
             const_casts: Default::default(),
             const_fat_ptrs: Default::default(),
+            ty_map: Default::default(),
             sym_count: Cell::new(0),
+            personality_fns: Default::default(),
+            scalar_lltypes: Default::default(),
+            lltypes: Default::default(),
         }
     }
 
@@ -194,7 +202,27 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn eh_personality(&self) -> Value {
-        unimplemented!("eh_personality");
+        if let Some(llpersonality) = self.eh_personality.get() {
+            return llpersonality
+        }
+        let tcx = self.tcx;
+        let llfn = match tcx.lang_items().eh_personality() {
+            Some(def_id) if !wants_msvc_seh(self.sess()) => {
+                resolve_and_get_fn(self, def_id, tcx.intern_substs(&[]))
+            }
+            _ => {
+                let name = if wants_msvc_seh(self.sess()) {
+                    unimplemented!("Unsupported platform: MSVC")
+                } else {
+                    "rust_eh_personality"
+                };
+                let fty = self.type_variadic_func(&[], self.type_i32());
+                self.declare_cfn(name, fty)
+            }
+        };
+        //attributes::apply_target_cpu_attr(self, llfn);
+        self.eh_personality.set(Some(llfn));
+        llfn
     }
 
     fn eh_unwind_resume(&self) -> Value {
@@ -360,9 +388,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         ptr: Value,
         meta: Value
     ) -> Value {
-        let mut const_fat_ptrs = self.const_fat_ptrs.borrow_mut();
-        const_fat_ptrs.push((ptr, meta));
-        Value::ConstFatPtr(const_fat_ptrs.len() - 1)
+        self.const_struct(&[ptr, meta], false)
     }
 
     fn const_struct(
@@ -370,6 +396,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
+        // FIXME: use an enum variant instead (Sym::Struct for example). Use the
+        // length of self.const_structs to generate the unique IDs.
         let name = self.get_sym_name("struct");
         let mut structs = self.const_structs.borrow_mut();
         let mut elt_tys = Vec::with_capacity(elts.len());
@@ -378,7 +406,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         }
         let ty = self.type_struct(&elt_tys[..], packed);
         structs.push(OxStruct::new(name, elts, ty));
-        Value::ConstStruct(structs.len() - 1)
+        let v = Value::ConstStruct(structs.len() - 1);
+        self.ty_map.borrow_mut().insert(v.clone(), ty);
+        v
     }
 
     fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
@@ -443,8 +473,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 if layout.value == layout::Pointer {
                     unimplemented!("scalar_to_backend: layout::Pointer");
                 } else {
-                    // FIXME? bitcast llval to llty
-                    llval
+                    self.const_ptrcast(llval, llty)
                 }
             },
             Scalar::Ptr(ptr) => {
@@ -459,6 +488,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         alloc: &Allocation,
         offset: Size,
     ) -> PlaceRef<'tcx, Value> {
-        unimplemented!("from_const_alloc");
+        unimplemented!("from_const_alloc {:?} {:?} {:?}", layout,
+                       alloc, offset);
     }
 }
