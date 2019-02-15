@@ -116,8 +116,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let module = self.cx.module.borrow();
         match value {
             Value::ConstUint(idx) => {
+                let imm_size = self.cx.val_ty(value).size(&self.cx.types.borrow());
+                let acc_mode = access_mode(imm_size as u64);
                 let value = self.cx.u_consts.borrow()[idx].value;
-                let result = Operand::Immediate(value as isize);
+                let result = Operand::Immediate(value as isize, acc_mode);
                 CompiledInst::new(asm).with_result(result)
             }
             Value::Param(_, _) => {
@@ -415,16 +417,36 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 CompiledInst::new(asm).with_result(Operand::from(reg))
             }
             Instruction::Cast(inst, ty) => {
-                // FIXME: Disregard the type for now.
-                self.compile_value(*inst)
+                let mut v = self.compile_value(*inst);
+                if let Some(mut op) = v.result {
+                    let old_acc_mode = op.access_mode();
+                    let val_size = ty.size(&self.cx.types.borrow());
+                    let new_acc_mode = access_mode(val_size);
+                    let op_new = op.with_acc_mode(new_acc_mode);
+                    if old_acc_mode < new_acc_mode {
+                        // This is a widening cast. When switching to a larger
+                        // subregister for example (%ax -> %rax), make sure there
+                        // is no junk leftover in the higher order bits.
+                        let reg_new = Register::direct(
+                            SubRegister::reg(RAX, new_acc_mode));
+                        let reg_old = Register::direct(
+                            SubRegister::reg(RAX, old_acc_mode));
+                        v.asm.extend(vec![
+                            MachineInst::xor(reg_new, reg_new),
+                            MachineInst::mov(op, reg_old),
+                            MachineInst::mov(reg_new, op_new.clone()),
+                        ]);
+                    }
+                    v.result = Some(op_new);
+                }
+                v
             }
             Instruction::Unreachable => {
                 asm.push(MachineInst::UD2);
                 CompiledInst::new(asm)
             }
             _ => {
-                unimplemented!("instruction {:?}\n{:?}",
-                               inst, self.cx.types);
+                unimplemented!("instruction {:?}\n{:?}", inst, self.cx.types);
             }
         };
         let compiled_inst = if let Some(ref result) = instr_asm.result {
@@ -468,7 +490,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         vec![
             MachineInst::push(Register::direct(RBP)),
             MachineInst::mov(Register::direct(RSP), Register::direct(RBP)),
-            MachineInst::sub(Operand::Immediate(stack_size as isize),
+            MachineInst::sub(Operand::Immediate(stack_size as isize, AccessMode::Full),
                              Register::direct(RSP)),
         ]
     }
@@ -487,10 +509,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         for (idx, param) in f.params.iter().enumerate() {
             let param_size =
                 self.cx.val_ty(*param).size(&self.cx.types.borrow()) as isize;
-            size += param_size;
+            size += param_size / 8;
             let acc_mode = access_mode(param_size as u64);
-            let offset = -size / 8;
-            let result = Location::RbpOffset(offset, acc_mode);
+            let result = Location::RbpOffset(-size, acc_mode);
             let reg = FunctionPrinter::get_func_arg_str(idx);
             let reg = Register::direct(SubRegister::reg(reg, acc_mode));
             param_movs.push(MachineInst::mov(reg, result.clone()));
