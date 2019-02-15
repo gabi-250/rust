@@ -265,19 +265,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
                 let reg =
                     Register::direct(SubRegister::reg(RBX, src_result.access_mode()));
-                if self.cx.val_ty(*dest).is_ptr(&self.cx.types.borrow()) {
-                    asm.extend(vec![
-                        MachineInst::mov(dest_result, Register::direct(RAX)),
-                        MachineInst::mov(src_result, reg),
-                        MachineInst::mov(reg, Register::indirect(RAX)),
-                    ]);
-                } else {
-                    asm.extend(vec![
-                        MachineInst::lea(dest_result, Register::direct(RAX)),
-                        MachineInst::mov(src_result, reg),
-                        MachineInst::mov(reg, Register::indirect(RAX)),
-                    ]);
-                }
+                asm.extend(vec![
+                    MachineInst::mov(dest_result, Register::direct(RAX)),
+                    MachineInst::mov(src_result, reg),
+                    MachineInst::mov(reg, Register::indirect(RAX)),
+                ]);
                 CompiledInst::new(asm).with_result(instr_asm1.result.unwrap())
             }
             Instruction::Add(v1, v2) => self.compile_add(inst),
@@ -393,16 +385,19 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     inst.val_ty(self.cx).size(&self.cx.types.borrow());
                 let acc_mode = access_mode(inst_size as u64);
                 let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
-                asm.push(MachineInst::mov(instr_asm.result.unwrap(), reg));
-                if self.cx.val_ty(*ptr).is_ptr(&self.cx.types.borrow()) {
-                    asm.push(MachineInst::mov(
-                        Register::indirect(RAX),
-                        Register::direct(SubRegister::reg(RAX, acc_mode))));
-                }
-
                 let result = self.precompiled_result(inst);
-                asm.push(MachineInst::mov(
-                    Register::direct(SubRegister::reg(RAX, acc_mode)), result.clone()));
+                asm.extend(vec![
+                    // This assumes instr_asm.result is a stack location.
+                    MachineInst::mov(
+                        instr_asm.result.unwrap(),
+                        Register::direct(RAX)),
+                    MachineInst::mov(
+                        Register::indirect(RAX),
+                        Register::direct(SubRegister::reg(RAX, acc_mode))),
+                    MachineInst::mov(
+                        Register::direct(SubRegister::reg(RAX, acc_mode)),
+                        result.clone()),
+                ]);
                 CompiledInst::new(asm).with_result(result)
             }
             Instruction::CheckOverflow(inst, ty, signed) => {
@@ -550,14 +545,25 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let acc_mode = access_mode(inst_size as u64);
                         size += (inst_size / 8) as isize;
                         let result = Location::RbpOffset(-size, acc_mode);
-                        CompiledInst::new(vec![]).with_result(Operand::from(result))
+                        size += 8;
+                        let result_addr = Location::RbpOffset(-size, AccessMode::Full);
+                        let asm = vec![
+                            MachineInst::lea(result, Register::direct(RAX)),
+                            MachineInst::mov(Register::direct(RAX),
+                                             result_addr.clone()),
+                        ];
+                        // FIXME: This is not a param move.
+                        param_movs.extend(asm.clone());
+                        CompiledInst::new(asm.clone()).with_result(
+                            Operand::from(result_addr))
                     }
                     Instruction::Load(ptr, _) => {
                         let inst_size =
                             inst.val_ty(self.cx).size(&self.cx.types.borrow());
                         let acc_mode = access_mode(inst_size as u64);
                         size += (inst_size / 8) as isize;
-                        let result = Operand::Loc(Location::RbpOffset(-size, acc_mode));
+                        let result =
+                            Operand::Loc(Location::RbpOffset(-size, acc_mode));
                         CompiledInst::new(vec![]).with_result(Operand::from(result))
                     }
                     _ => continue,
