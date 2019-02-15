@@ -68,7 +68,6 @@ impl Instruction {
             } else {
                 unimplemented!("Load from instruction {:?}", inst);
             }
-
         } else if let Value::Param(_, ty) = val {
             if let OxType::PtrTo { ref pointee } = cx.types.borrow()[*ty] {
                 *pointee

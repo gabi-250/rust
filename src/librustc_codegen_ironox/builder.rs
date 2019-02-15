@@ -1182,29 +1182,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             });
             OperandValue::Immediate(to_immediate(self, llval, place.layout))
         } else if let layout::Abi::ScalarPair(ref a, ref b) = place.layout.abi {
-            // FIXME
-            let b_offset = a.value.size(self).align_to(b.value.align(self).abi);
-
-            let mut load = |i, scalar: &layout::Scalar, align| {
-                let llptr = self.struct_gep(place.llval, i as u64);
-                let load = self.load(llptr, align);
-                if scalar.is_bool() {
-                    let ty = {
-                        self.type_i1()
-                    };
-                    self.trunc(load, ty)
-                } else {
-                    load
-                }
-            };
-            OperandValue::Pair(load(0, a, place.align),
-                               load(1, b, place.align.restrict_for_offset(b_offset)))
+            unimplemented!("ScalarPair");
         } else {
             OperandValue::Ref(place.llval, None, place.align)
         };
-        OperandRef {
-            val,
-            layout: place.layout,
-        }
+        OperandRef { val, layout: place.layout }
     }
 }
