@@ -1172,42 +1172,20 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn load_operand(&mut self, place: PlaceRef<'tcx, Value>)
         -> OperandRef<'tcx, Value> {
         // FIXME?
-        eprintln!("place.llval is {:?}", place.llval);
         let val = if let Some(llextra) = place.llextra {
             OperandValue::Ref(place.llval, Some(llextra), place.align)
         } else if place.layout.is_ironox_immediate() {
             let mut const_llval = None;
             // FIXME: If this is a constant global, get its initializer.
-            eprintln!("place.llval is an ironox immediate");
             let llval = const_llval.unwrap_or_else(|| {
                 self.load(place.llval, place.align)
             });
             OperandValue::Immediate(to_immediate(self, llval, place.layout))
         } else if let layout::Abi::ScalarPair(ref a, ref b) = place.layout.abi {
-            eprintln!("scalar pair {:?} {:?}", a, b);
-            // FIXME
-            let b_offset = a.value.size(self).align_to(b.value.align(self).abi);
-
-            let mut load = |i, scalar: &layout::Scalar, align| {
-                let llptr = self.struct_gep(place.llval, i as u64);
-                let load = self.load(llptr, align);
-                if scalar.is_bool() {
-                    let ty = {
-                        self.type_i1()
-                    };
-                    self.trunc(load, ty)
-                } else {
-                    load
-                }
-            };
-            OperandValue::Pair(load(0, a, place.align),
-                               load(1, b, place.align.restrict_for_offset(b_offset)))
+            unimplemented!("ScalarPair");
         } else {
             OperandValue::Ref(place.llval, None, place.align)
         };
-        OperandRef {
-            val,
-            layout: place.layout,
-        }
+        OperandRef { val, layout: place.layout }
     }
 }

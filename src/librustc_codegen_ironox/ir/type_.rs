@@ -43,7 +43,7 @@ impl ScalarType {
             ScalarType::I16 => 16,
             ScalarType::I32 => 32,
             ScalarType::I64 => 64,
-            ScalarType::ISize => 64, // FIXME
+            ScalarType::ISize => (std::mem::size_of::<isize>() * 8) as u64,
             ScalarType::Ix(bits) => bits,
         }
     }
