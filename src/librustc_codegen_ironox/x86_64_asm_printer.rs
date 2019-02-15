@@ -158,7 +158,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let function_name = if module.functions[idx].is_declaration() {
                     format!("{}@PLT", &module.functions[idx].name)
                 } else {
-                    module.functions[idx].name.clone()
+                    format!("{}(%rip)", &module.functions[idx].name)
                 };
                 // %rax
                 let result = Location::from(Register::direct(RAX));
@@ -274,7 +274,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let mut instr_asm = self.compile_value(*arg);
                     asm.append(&mut instr_asm.asm);
                     let param = FunctionPrinter::get_func_arg_str(idx);
-                    if arg.is_global() {
+                    // FIXME: always handle globals correctly
+                    if let Some(Operand::Loc(Location::RipOffset(_))) = instr_asm.result.clone() {
                         // globals are always treated as addresses
                         asm.push(MachineInst::lea(instr_asm.result.unwrap(),
                                                   Register::direct(param)));
@@ -313,8 +314,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let acc_mode = result.access_mode();
                         let reg =
                             Register::direct(SubRegister::reg(RAX, acc_mode));
+                        // dereference result
                         asm.extend(vec![
-                            MachineInst::call(result.clone()),
+                            MachineInst::call(result.clone().deref()),
                             MachineInst::mov(reg, result.clone()),
                         ]);
                         CompiledInst::new(asm).with_result(result)
@@ -614,7 +616,10 @@ impl AsmPrinter<'ll, 'tcx> {
                 asm!(asm, "{}\t{}"; [directive, v]);
             }
             Value::ConstStruct(idx) => {}
-            Value::Function(idx) => {}
+            Value::Function(idx) => {
+                let name = self.cx.module.borrow().functions[idx].name.clone();
+                asm!(asm, ".quad\t{}"; [name]);
+            }
             Value::Cast(idx) => {}
             _ => unimplemented!("compile_const_global({:?})", c),
         };
