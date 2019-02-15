@@ -6,6 +6,8 @@ pub enum Operand {
     Loc(Location),
     Immediate(isize, AccessMode),
     Sym(String),
+    // FIXME: immediates can be dereferenced too...
+    Deref(Location)
 }
 
 impl Operand {
@@ -16,6 +18,13 @@ impl Operand {
             Operand::Immediate(_, acc_mode) => acc_mode,
             Operand::Loc(Location::RipOffset(_)) => unimplemented!("access mode of rip"),
             _ => AccessMode::Full,
+        }
+    }
+
+    pub fn deref(self) -> Operand {
+        match self {
+            Operand::Loc(l) => Operand::Deref(l),
+            _ => unimplemented!("deref: {:?}", self),
         }
     }
 
@@ -55,6 +64,7 @@ impl fmt::Display for Operand {
             Operand::Loc(ref l) => l.fmt(f),
             Operand::Immediate(val, _) => write!(f, "${}", val),
             Operand::Sym(ref s) => write!(f, "{}", s),
+            Operand::Deref(ref l) => write!(f, "*{}", l),
         }
     }
 }
