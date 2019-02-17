@@ -76,6 +76,7 @@ mod const_cstr;
 mod context;
 mod debuginfo;
 mod declare;
+mod gas_directive;
 mod global;
 mod intrinsic;
 mod type_of;
