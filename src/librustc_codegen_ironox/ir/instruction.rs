@@ -52,7 +52,6 @@ impl ConstCast {
 }
 
 impl Instruction {
-
     fn load_ty(val: Value, cx: &CodegenCx) -> Type {
         if let Value::Instruction(fn_idx, bb_idx, inst_idx) = val {
             let inst = &cx.module.borrow().functions[fn_idx].
