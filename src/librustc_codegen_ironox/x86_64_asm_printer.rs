@@ -12,6 +12,8 @@ use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::traits::BaseTypeMethods;
 use rustc_codegen_ssa::traits::MiscMethods;
 use std::cell::{Cell, RefCell};
+
+use gas_directive::{BigNum, GasDirective, GasType};
 use x86_64_instruction::MachineInst;
 use x86_64_register::GeneralPurposeReg::{self, *};
 use x86_64_register::{Location, Operand, Register, SubRegister, AccessMode,
@@ -32,10 +34,6 @@ macro_rules! asm {
     ($m:ident, $new_asm:expr) => {
         $m.push_str($new_asm);
     }
-}
-
-fn label(sym: &str) -> String {
-    format!("{}:\n", sym)
 }
 
 /// The result of evaluating an `Instruction`.
@@ -652,53 +650,60 @@ impl AsmPrinter<'ll, 'tcx> {
         }
     }
 
-    fn compile_const_global(&self, c: Value) -> String {
-        let mut asm = String::new();
+    fn compile_const_global(&self, c: Value) -> Vec<MachineInst> {
+        let mut asm = vec![];
         match c {
             Value::ConstFatPtr(idx) => {
                 let (v1, v2) = self.cx.const_fat_ptrs.borrow()[idx];
-                asm!(asm, &self.compile_const_global(v1));
-                asm!(asm, &self.compile_const_global(v2));
+                asm.append(&mut self.compile_const_global(v1));
+                asm.append(&mut self.compile_const_global(v2));
             }
             Value::ConstUint(idx) => {
                 let u_const = self.cx.u_consts.borrow()[idx];
-                let directive = self.get_decl_directive(u_const.ty);
-                asm!(asm, "{}\t{}"; [directive, u_const.value]);
+                let directive = self.declare_scalar(u_const.ty, u_const.value);
+                asm.push(MachineInst::Directive(directive));
             }
             Value::Cast(idx) => {
                 let cast_inst = &self.cx.const_casts.borrow()[idx];
-                let directive = self.get_decl_directive(cast_inst.ty);
-                let v = self.constant_value(cast_inst.value);
-                asm!(asm, "{}\t{}"; [directive, v]);
+                let name = self.constant_value(cast_inst.value);
+                asm.push(MachineInst::Directive(GasDirective::Quad(
+                            vec![BigNum::Sym(name)])));
             }
             Value::ConstStruct(idx) => {}
             Value::Function(idx) => {
                 let name = self.cx.module.borrow().functions[idx].name.clone();
-                asm!(asm, ".quad\t{}"; [name]);
+                asm.push(MachineInst::Directive(GasDirective::Quad(
+                            vec![BigNum::Sym(name)])));
             }
             Value::Cast(idx) => {}
             _ => unimplemented!("compile_const_global({:?})", c),
         };
-        asm.to_string()
+        asm
     }
 
-    fn declare_globals(&self) -> String {
-        let mut asm = ".section .rodata\n".to_string();
+    fn declare_globals(&self) -> Vec<MachineInst> {
+        let mut asm = vec![
+            MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
         for global in self.cx.globals.borrow().iter() {
             match global.initializer {
                 Some(Value::ConstCstr(idx)) => {
                     let c_str = &self.cx.const_cstrs.borrow()[idx];
                     let const_str = self.get_str(c_str.ptr, c_str.len);
-                    asm!(asm, ".type {},@object"; [c_str.name],
-                              ".size {},{}"; [c_str.name, c_str.len]);
-                    asm.push_str(&label(&c_str.name));
-                    asm!(asm, ".ascii \"{}\""; [const_str]);
+                    asm.extend(vec![
+                        MachineInst::Directive(
+                            GasDirective::Type(c_str.name.clone(), GasType::Object)),
+                        MachineInst::Directive(
+                            GasDirective::Size(c_str.name.clone(), c_str.len)),
+                        MachineInst::Label(c_str.name.clone()),
+                        MachineInst::Directive(
+                            GasDirective::Ascii(vec![const_str])),
+                    ]);
                 }
                 Some(Value::ConstStruct(idx)) => {
                     let const_struct = &self.cx.const_structs.borrow()[idx];
-                    asm.push_str(&label(&global.name));
+                    asm.push(MachineInst::Label(global.name.clone()));
                     for c in &const_struct.components {
-                        asm!(asm, &self.compile_const_global(*c));
+                        asm.extend(self.compile_const_global(*c));
                     }
                 }
                 None => bug!("no initializer found for {:?}", global),
@@ -718,22 +723,25 @@ impl AsmPrinter<'ll, 'tcx> {
         c_str
     }
 
-    fn get_decl_directive(&self, ty: Type) -> String {
+    fn declare_scalar(&self, ty: Type, value: u128) -> GasDirective {
         match self.cx.types.borrow()[*ty] {
-            OxType::Scalar(ScalarType::I32) => ".long",
-            OxType::Scalar(ScalarType::I64) => ".quad",
-            OxType::PtrTo { .. } => ".quad",
+            OxType::Scalar(ScalarType::I32) => GasDirective::Long(vec![value as u32]),
+            OxType::Scalar(ScalarType::I64) => GasDirective::Quad(
+                vec![BigNum::Immediate(value as u64)]),
             _ => unimplemented!("type of {:?}", ty),
-        }.to_string()
+        }
     }
 
-
-    fn declare_functions(&self) -> String {
-        let mut asm = ".text\n".to_string();
+    fn declare_functions(&self) -> Vec<MachineInst> {
+        let mut asm: Vec<MachineInst> = vec![
+            MachineInst::Directive(GasDirective::Text)];
         let module = self.cx.module.borrow();
         for f in &module.functions {
-            asm!(asm, ".globl {}"; [f.name],
-                      ".type {},@function"; [f.name]);
+            asm.extend(vec![
+                MachineInst::Directive(GasDirective::Global(f.name.clone())),
+                MachineInst::Directive(GasDirective::Type(f.name.clone(),
+                                                          GasType::Function)),
+            ]);
         }
         asm
     }
@@ -745,9 +753,13 @@ impl AsmPrinter<'ll, 'tcx> {
     pub fn codegen(self) -> (Stats, String) {
         let mut asm = String::new();
         // Define the globals.
-        asm!(asm, &self.declare_globals());
+        for globl in &self.declare_globals() {
+            asm.push_str(&globl.to_string());
+        }
         // Declare the functions.
-        asm!(asm, &self.declare_functions());
+        for decl in &self.declare_functions() {
+            asm.push_str(&decl.to_string());
+        }
         for f in &self.cx.module.borrow().functions {
             if !f.is_declaration() {
                 let mut fn_asm = String::new();
