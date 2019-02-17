@@ -1,3 +1,4 @@
+use gas_directive::GasDirective;
 use x86_64_register::{Location, Operand, Register};
 
 use std::fmt;
@@ -21,8 +22,14 @@ pub enum MachineInst {
     RET,
     UD2,
     Label(String),
+    Directive(GasDirective),
 }
 
+impl From<GasDirective> for MachineInst {
+    fn from(d: GasDirective) -> Self {
+        MachineInst::Directive(d)
+    }
+}
 
 impl MachineInst {
     pub fn mov<U: Into<Operand>, V: Into<Operand>>(
@@ -116,6 +123,7 @@ impl fmt::Display for MachineInst {
            MachineInst::RET => write!(f, "\tret\n"),
            MachineInst::UD2 => write!(f, "\tud2\n"),
            MachineInst::Label(ref s) => write!(f, "{}:\n", s),
+           MachineInst::Directive(ref d) => write!(f, "\t{}\n", d),
         }
     }
 }
