@@ -270,7 +270,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         catch: BasicBlock,
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        unimplemented!("invoke");
+        self.emit_instr(Instruction::Invoke {
+            llfn, args: args.to_vec(), then, catch
+        })
     }
 
     fn unreachable(&mut self) {
@@ -495,7 +497,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         v: Value
     )-> Value {
-        unimplemented!("not");
+        self.emit_instr(Instruction::Not(v))
     }
 
     fn alloca(
@@ -594,7 +596,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         indices: &[Value]
     )-> Value {
-        unimplemented!("gep");
+        self.emit_instr(Instruction::Gep(ptr, indices.to_vec()))
     }
 
     fn inbounds_gep(
@@ -610,7 +612,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         idx: u64
     )-> Value {
-        unimplemented!("struct_gep");
+        self.emit_instr(Instruction::StructGep(ptr, idx))
     }
 
     fn trunc(
@@ -931,7 +933,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         agg_val: Value,
         idx: u64
     )-> Value {
-        unimplemented!("extract_value");
+        // Extract the value at position `idx` in aggregate `agg_val`.
+        self.emit_instr(Instruction::ExtractValue(agg_val, idx))
     }
 
     fn insert_value(
@@ -950,7 +953,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         pers_fn: Value,
         num_clauses: usize
     )-> Value {
-        unimplemented!("landing_pad");
+        self.emit_instr(Instruction::LandingPad(ty, pers_fn, num_clauses))
     }
 
     fn add_clause(
@@ -965,14 +968,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         landing_pad: Value
     ) {
-        unimplemented!("set_cleanup");
+        // FIXME: set_cleanup
     }
 
     fn resume(
         &mut self,
         exn: Value
     )-> Value {
-        unimplemented!("resume");
+        self.emit_instr(Instruction::Resume(exn))
     }
 
     fn cleanup_pad(
@@ -1025,7 +1028,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn set_personality_fn(&mut self, personality: Value) {
-        unimplemented!("set_personality_fn");
+        self.cx.personality_fns.borrow_mut().insert(self.llfn(), personality);
     }
 
     fn atomic_cmpxchg(
@@ -1120,7 +1123,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        unimplemented!("zext");
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     unsafe fn delete_basic_block(&mut self, bb: BasicBlock) {

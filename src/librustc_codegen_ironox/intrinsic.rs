@@ -18,7 +18,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         llresult: Value,
         span: Span,
     ) {
-        unimplemented!("codegen_intrinsic_call");
+        // FIXME: ignoring intrinsic calls.
     }
 
     fn abort(&mut self) {
