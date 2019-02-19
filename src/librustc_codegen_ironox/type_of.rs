@@ -18,6 +18,7 @@ pub trait LayoutIronOxExt<'tcx> {
                              scalar: &layout::Scalar) -> Type;
     fn scalar_pair_element_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>,
                                        index: usize, immediate: bool) -> Type;
+    fn ironox_field_index(&self, index: usize) -> u64;
 }
 
 /// Return the IronOx `Type`s of the fields of the specified `layout`.
@@ -46,6 +47,9 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
 
     fn ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type {
         if let layout::Abi::Scalar(ref scalar) = self.abi {
+            if let Some(&llty) = cx.scalar_lltypes.borrow().get(&self.ty) {
+                return llty;
+            }
             let llty = match self.ty.sty {
                 ty::Ref(_, ty, _) |
                 ty::RawPtr(ty::TypeAndMut { ty, .. }) => {
@@ -65,9 +69,17 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                     self.scalar_ironox_type_at(cx, scalar)
                 }
             };
+            cx.scalar_lltypes.borrow_mut().insert(self.ty, llty);
             return llty;
         }
 
+        let variant_index = match self.variants {
+            layout::Variants::Single { index } => Some(index),
+            _ => None
+        };
+        if let Some(&llty) = cx.lltypes.borrow().get(&(self.ty, variant_index)) {
+            return llty;
+        }
         assert!(!self.ty.has_escaping_bound_vars(),
                 "{:?} has escaping bound vars", self.ty);
 
@@ -77,8 +89,13 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
         // types for Rust types that only differ in the choice of lifetimes.
         let normal_ty = cx.tcx.erase_regions(&self.ty);
 
+        // Leave the llfields for later.
+        let mut defer = None;
         let llty = if self.ty != normal_ty {
             let mut layout = cx.layout_of(normal_ty);
+            if let Some(v) = variant_index {
+                layout = layout.for_variant(cx, v);
+            }
             layout.ironox_type(cx)
         } else {
             match self.abi {
@@ -149,14 +166,20 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                             cx.type_struct(&fields, packed)
                         }
                         Some(ref name) => {
-                            let fields = struct_field_types(cx, *self);
-                            let llty = cx.type_named_struct(name, &fields, packed);
+                            // Initialize the fields of the struct later.
+                            let llty = cx.type_named_struct(name, &[], packed);
+                            defer = Some((llty, *self));
                             llty
                         }
                     }
                 }
             }
         };
+        cx.lltypes.borrow_mut().insert((self.ty, variant_index), llty);
+        if let Some((llty, layout)) = defer {
+            let (llfields, packed) = (struct_field_types(cx, layout), false);
+            cx.set_struct_body(llty, &llfields, packed)
+        }
         return llty;
     }
 
@@ -224,5 +247,28 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             //a.value.size(cx).align_to(b.value.align(cx).abi)
         //};
         self.scalar_ironox_type_at(cx, scalar)
+    }
+
+    fn ironox_field_index(&self, index: usize) -> u64 {
+        match self.abi {
+            layout::Abi::Scalar(_) |
+            layout::Abi::ScalarPair(..) => {
+                bug!("TyLayout::llvm_field_index({:?}): not applicable", self)
+            }
+            _ => {}
+        }
+        match self.fields {
+            layout::FieldPlacement::Union(_) => {
+                bug!("TyLayout::llvm_field_index({:?}): not applicable", self)
+            }
+
+            layout::FieldPlacement::Array { .. } => {
+                index as u64
+            }
+
+            layout::FieldPlacement::Arbitrary { .. } => {
+                1 + (self.fields.memory_index(index) as u64) * 2
+            }
+        }
     }
 }

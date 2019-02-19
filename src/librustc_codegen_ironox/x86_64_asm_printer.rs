@@ -6,7 +6,7 @@ use ir::value::Value;
 
 use ir::basic_block::OxBasicBlock;
 use ir::function::OxFunction;
-use ir::type_::{OxType, ScalarType, Type, TypeSize};
+use ir::type_::{OxType, ScalarType, Type};
 use rustc::mir::mono::Stats;
 use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::traits::BaseTypeMethods;
@@ -18,23 +18,6 @@ use x86_64_instruction::MachineInst;
 use x86_64_register::GeneralPurposeReg::{self, *};
 use x86_64_register::{Location, Operand, Register, SubRegister, AccessMode,
                       operand_access_mode, access_mode};
-
-macro_rules! asm {
-    (
-        $m:ident,
-        $(
-            $fmt:expr; [ $($args:expr),* ]
-        ),*
-    ) => {
-        let mut asm_lines = vec![$(format!($fmt, $($args),*)),*];
-        asm_lines = asm_lines.iter().map(|x| format!("\t{}\n", x)).collect();
-        let asm_lines = asm_lines.join("");
-        $m.push_str(&asm_lines);
-    };
-    ($m:ident, $new_asm:expr) => {
-        $m.push_str($new_asm);
-    }
-}
 
 /// The result of evaluating an `Instruction`.
 #[derive(Clone, Debug)]
@@ -107,9 +90,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
 
     fn get_func_arg_str(idx: usize) -> GeneralPurposeReg {
-        let regs = vec![RDI, RSI, RDX, RCX, R8, R9];
+        let regs = [RDI, RSI, RDX, RCX, R8, R9];
         if idx < 6 {
-            return regs[idx].clone();
+            return regs[idx];
         } else {
             unimplemented!("function arg no {}", idx);
         }
@@ -144,8 +127,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 }
             }
             Value::Global(idx) => {
-                let global = self.cx.globals.borrow()[idx].name.clone();
-                let result = Operand::Loc(Location::RipOffset(global));
+                let global = &self.cx.globals.borrow()[idx];
+                let global_size = global.ty.size(&self.cx.types.borrow());
+                let result = Operand::Loc(Location::RipOffset(global.name.clone()));
                 CompiledInst::with_result(result)
             }
             Value::Cast(idx) => {
@@ -243,7 +227,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         module.functions[*idx].name.clone()
                     };
                     asm.push(MachineInst::call(fn_name.clone()));
-
                     let ret_ty = inst.val_ty(self.cx);
                     // If the function doesn't return anything, carry on.
                     if let OxType::Void = self.cx.types.borrow()[*ret_ty] {
@@ -261,8 +244,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let ptr = self.compile_value(*callee);
                     let result = ptr.result.clone().unwrap();
                     let acc_mode = result.access_mode();
-                    let reg =
-                        Register::direct(SubRegister::reg(RAX, acc_mode));
+                    let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
                     // dereference result
                     asm.extend(vec![
                         MachineInst::call(result.clone().deref()),
@@ -308,27 +290,17 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let module = self.cx.module.borrow();
                     let cond_inst =
                         &module.functions[*fn_idx].basic_blocks[*bb_idx].instrs[*idx];
-                    match cond_inst {
-                        Instruction::Eq(_, _) => {
-                            let _ = self.compile_instruction(*cond);
-                            asm.extend(vec![
-                                MachineInst::je(bb1.to_string()),
-                                MachineInst::jmp(bb2.to_string()),
-                            ]);
-                            CompiledInst::with_instructions(asm)
-                        }
-                        Instruction::Lt(_, _) => {
-                            let _ = self.compile_instruction(*cond);
-                            asm.extend(vec![
-                                MachineInst::jl(bb1.to_string()),
-                                MachineInst::jmp(bb2.to_string()),
-                            ]);
-                            CompiledInst::with_instructions(asm)
-                        }
-                        x => {
-                            unimplemented!("cond br: {:?}", cond);
-                        }
-                    }
+                    let _ = self.compile_instruction(*cond);
+                    let true_branch_jmp = match cond_inst {
+                        Instruction::Eq(_, _) => MachineInst::je(bb1.to_string()),
+                        Instruction::Lt(_, _) => MachineInst::jl(bb1.to_string()),
+                        _ => unimplemented!("cond br: {:?}", cond),
+                    };
+                    asm.extend(vec![
+                        true_branch_jmp,
+                        MachineInst::jmp(bb2.to_string()),
+                    ]);
+                    CompiledInst::with_instructions(asm)
                 }
                 _ => {
                     bug!("cond must be a Value::Instruction, not {:?}", cond);
@@ -673,13 +645,30 @@ impl AsmPrinter<'ll, 'tcx> {
                 asm.push(MachineInst::Directive(GasDirective::Quad(
                             vec![BigNum::Sym(name)])));
             }
-            Value::ConstStruct(idx) => {}
+            Value::ConstStruct(idx) => {
+                let const_struct = &self.cx.const_structs.borrow()[idx];
+                asm.push(MachineInst::Label(const_struct.name.clone()));
+                for c in &const_struct.components {
+                    asm.extend(self.compile_const_global(*c));
+                }
+            }
             Value::Function(idx) => {
                 let name = self.cx.module.borrow().functions[idx].name.clone();
                 asm.push(MachineInst::Directive(GasDirective::Quad(
                             vec![BigNum::Sym(name)])));
             }
-            Value::Cast(idx) => {}
+            Value::ConstCstr(idx) => {
+                let c_str = &self.cx.const_cstrs.borrow()[idx];
+                let const_str = self.get_str(c_str.ptr, c_str.len);
+                asm.extend(vec![
+                    MachineInst::Directive(
+                        GasDirective::Type(c_str.name.clone(), GasType::Object)),
+                    MachineInst::Directive(
+                        GasDirective::Size(c_str.name.clone(), c_str.len)),
+                    MachineInst::Label(c_str.name.clone()),
+                    MachineInst::Directive(GasDirective::Ascii(vec![const_str])),
+                ]);
+            }
             _ => unimplemented!("compile_const_global({:?})", c),
         };
         asm
@@ -689,30 +678,12 @@ impl AsmPrinter<'ll, 'tcx> {
         let mut asm = vec![
             MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
         for global in self.cx.globals.borrow().iter() {
+            asm.push(MachineInst::Label(global.name.clone()));
             match global.initializer {
-                Some(Value::ConstCstr(idx)) => {
-                    let c_str = &self.cx.const_cstrs.borrow()[idx];
-                    let const_str = self.get_str(c_str.ptr, c_str.len);
-                    asm.extend(vec![
-                        MachineInst::Directive(
-                            GasDirective::Type(c_str.name.clone(), GasType::Object)),
-                        MachineInst::Directive(
-                            GasDirective::Size(c_str.name.clone(), c_str.len)),
-                        MachineInst::Label(c_str.name.clone()),
-                        MachineInst::Directive(
-                            GasDirective::Ascii(vec![const_str])),
-                    ]);
-                }
-                Some(Value::ConstStruct(idx)) => {
-                    let const_struct = &self.cx.const_structs.borrow()[idx];
-                    asm.push(MachineInst::Label(global.name.clone()));
-                    for c in &const_struct.components {
-                        asm.extend(self.compile_const_global(*c));
-                    }
-                }
+                Some(v) => asm.extend(self.compile_const_global(v)),
                 None => bug!("no initializer found for {:?}", global),
                 _ => unimplemented!("declare_globals({:?})", global),
-            }
+            };
         }
         asm
     }

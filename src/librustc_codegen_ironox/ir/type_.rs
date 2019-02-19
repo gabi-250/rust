@@ -94,14 +94,8 @@ pub enum OxType {
     Void,
 }
 
-pub trait TypeSize {
-    /// The size in bits.
-    fn size(&self, cx: &Vec<OxType>) -> u64;
-    fn is_ptr(&self, types: &Vec<OxType>) -> bool;
-}
-
-impl TypeSize for Type {
-    fn size(&self, types: &Vec<OxType>) -> u64 {
+impl Type {
+    pub fn size(&self, types: &Vec<OxType>) -> u64 {
         match types[**self] {
             OxType::Scalar(sty) => sty.size(),
             OxType::PtrTo { .. } | OxType::FnType { .. } => 64,
@@ -111,7 +105,8 @@ impl TypeSize for Type {
             OxType::StructType { ref name, ref members } => {
                 let mut struct_size = 0;
                 for mem in members {
-                    struct_size += mem.size(types);
+                    let size = mem.size(types);
+                    struct_size += size;
                 }
                 struct_size
             },
@@ -119,11 +114,19 @@ impl TypeSize for Type {
         }
     }
 
-    fn is_ptr(&self, types: &Vec<OxType>) -> bool {
+    pub fn is_ptr(&self, types: &Vec<OxType>) -> bool {
         match types[**self] {
             OxType::FnType {..} => true,
             OxType::PtrTo {..} => true,
             ref ty => false,
+        }
+    }
+
+    pub fn ty_at_idx(&self, idx: u64, types: &Vec<OxType>) -> Type {
+        match types[**self] {
+            OxType::StructType { ref name, ref members } => members[idx as usize],
+            OxType::FnType { ref args, ref ret } => ret.ty_at_idx(idx, types),
+            ref ty => unimplemented!("Type at index {} for {:?}", idx, ty),
         }
     }
 }
@@ -157,18 +160,24 @@ impl CodegenCx<'ll, 'tcx> {
         })
     }
 
-    crate fn type_named_struct(
-        &self,
-        name: &str,
-        els: &[Type],
-        packed: bool
-    ) -> Type {
+    crate fn type_named_struct(&self, name: &str, els: &[Type], packed: bool) -> Type {
         // FIXME: do something with packed.
         let struct_type = OxType::StructType {
             name: Some(name.to_string()),
             members: els.to_vec(),
         };
         self.add_type(struct_type)
+    }
+
+    /// If two structs have the same Type `ty`, this will modify the type of both
+    /// structs.
+    crate fn set_struct_body(&self, ty: Type, els: &[Type], packed: bool) {
+        let mut types = self.types.borrow_mut();
+        if let OxType::StructType{ ref name, ref mut members } = types[*ty] {
+            *members = els.to_vec();
+            return;
+        }
+        bug!("expected OxType::StructType, found {:?}", types[*ty]);
     }
 }
 
@@ -373,7 +382,7 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn backend_field_index(&self, ty: TyLayout<'tcx>, index: usize) -> u64 {
-        unimplemented!("backend_field_index");
+        ty.ironox_field_index(index)
     }
 
     fn scalar_pair_element_backend_type<'a>(
@@ -382,7 +391,7 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         index: usize,
         immediate: bool
     ) -> Type {
-        unimplemented!("scalar_pair_element_backend_type");
+        ty.scalar_pair_element_ironox_type(self, index, immediate)
     }
 
     fn cast_backend_type(&self, ty: &CastTarget) -> Type {
