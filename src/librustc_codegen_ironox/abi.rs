@@ -35,12 +35,8 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     ) {
         match ty.mode {
             PassMode::Ignore => {},
-            PassMode::Pair(..) => {
-                unimplemented!("PassMode::Pair");
-            }
-            PassMode::Indirect(_, Some(_)) => {
-                unimplemented!("PassMode::Indirect");
-            }
+            PassMode::Pair(..) => unimplemented!("PassMode::Pair"),
+            PassMode::Indirect(_, Some(_)) => unimplemented!("PassMode::Indirect"),
             PassMode::Direct(_) | PassMode::Indirect(_, None) | PassMode::Cast(_) => {
                 if ty.is_ignore() {
                     return;
@@ -70,7 +66,7 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn memory_ty(&self, ty: &ArgType<'tcx, Ty<'tcx>>) -> Type {
-        unimplemented!("memory_ty");
+        ty.layout.ironox_type(&self.cx)
     }
 }
 
@@ -166,7 +162,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
         // Create the return type.
         let ret_ty = match self.ret.mode {
             PassMode::Ignore => cx.type_void(),
-            PassMode::Direct(_) => {
+            PassMode::Direct(_) | PassMode::Pair(..) => {
                 self.ret.layout.immediate_ironox_type(cx)
             },
             mode => unimplemented!("{:?}", mode)

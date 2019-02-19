@@ -5,7 +5,7 @@ use ir::value::Value;
 
 /// The index of the parent function, and the index of the basic block
 /// in the function.
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub struct BasicBlock(pub usize, pub usize);
 
 /// A basic block.

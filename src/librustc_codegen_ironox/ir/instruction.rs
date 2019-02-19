@@ -1,4 +1,5 @@
 use context::CodegenCx;
+use ir::basic_block::BasicBlock;
 use ir::type_::{OxType, Type};
 use ir::value::Value;
 use super::super::ModuleIronOx;
@@ -31,11 +32,21 @@ pub enum Instruction {
     Sub(Value, Value),
     Eq(Value, Value),
     Lt(Value, Value),
+    Not(Value),
     /// Check overflow: (instruction, type, signed).
     CheckOverflow(Value, Type, bool),
-    StructGep(Value, u64),
     /// (agg_val, elt, idx)
     InsertValue(Value, Value, u64),
+    ExtractValue(Value, u64),
+    /// Get an element from an aggregate value, as indicated by the indices:
+    /// (agg_val, [indices]).
+    Gep(Value, Vec<Value>),
+    StructGep(Value, u64),
+    /// (type, pers_fn, num_clauses)
+    LandingPad(Type, Value, usize),
+    Resume(Value),
+    // FIXME: add the funclet?
+    Invoke { llfn: Value, args: Vec<Value>, then: BasicBlock, catch: BasicBlock },
     Unreachable,
 }
 
@@ -108,8 +119,8 @@ impl Instruction {
                 }
             }
             Instruction::Load(ptr, _) => Instruction::load_ty(ptr, cx),
-            Instruction::StructGep(val, idx) => {
-                let struct_ty = cx.val_ty(val);
+            Instruction::StructGep(ptr, idx) => {
+                let struct_ty = cx.val_ty(ptr);
                 if let OxType::StructType { ref members, .. } =
                     cx.types.borrow()[*struct_ty] {
                     members[idx as usize]
@@ -117,6 +128,14 @@ impl Instruction {
                     bug!("expected OxType::StructType, found {:?}", struct_ty);
                 }
             },
+            Instruction::ExtractValue(ptr, idx) => {
+                let agg_ty = cx.val_ty(ptr);
+                agg_ty.ty_at_idx(idx, &cx.types.borrow())
+            },
+            // FIXME: is that right?
+            Instruction::LandingPad(ty, _, _) => ty,
+            // FIXME: is that right?
+            Instruction::Invoke { llfn, .. } => cx.val_ty(llfn),
             _ => unimplemented!("instruction {:?}", *self),
         }
     }
