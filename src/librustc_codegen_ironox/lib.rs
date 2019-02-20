@@ -19,6 +19,7 @@ extern crate syntax_pos;
 extern crate rustc_errors as errors;
 extern crate libc;
 extern crate syntax;
+extern crate tempfile;
 
 
 use std::sync::{mpsc, Arc};
@@ -54,6 +55,7 @@ use std::io::Write;
 
 mod back {
     pub use rustc_codegen_utils::symbol_names;
+    pub mod link;
     pub mod write;
 }
 
@@ -336,11 +338,28 @@ impl CodegenBackend for IronOxCodegenBackend {
 
     fn join_codegen_and_link(
         &self,
-        _ongoing_codegen: Box<dyn Any>,
-        _sess: &Session,
+        ongoing_codegen: Box<dyn Any>,
+        sess: &Session,
         _dep_graph: &DepGraph,
-        _outputs: &OutputFilenames,
+        outputs: &OutputFilenames,
     ) -> Result<(), CompileIncomplete> {
+        let (codegen_results, work_products) =
+            ongoing_codegen.downcast::
+                <rustc_codegen_ssa::back::write::OngoingCodegen<IronOxCodegenBackend>>()
+                .expect("Expected IronOxCodegenBackend's OngoingCodegen, found Box<Any>")
+                .join(sess);
+        if sess.opts.debugging_opts.incremental_info {
+            bug!("IronOx does not support incremental compilation");
+        }
+        sess.compile_status()?;
+        //eprintln!("output type is {:?}", sess.opts.output_types);
+        // No need to link unless this is an executable
+        if !sess.opts.output_types.keys().any(|&i| i == OutputType::Exe ||
+                                                   i == OutputType::Metadata) {
+            return Ok(());
+        }
+        back::link::link_binary(sess, &codegen_results,
+                                outputs, &codegen_results.crate_name.as_str());
         Ok(())
     }
 }
