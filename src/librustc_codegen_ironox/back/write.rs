@@ -34,27 +34,38 @@ pub unsafe fn codegen(
     config: &ModuleConfig,
     timeline: &mut Timeline
 ) -> Result<CompiledModule, FatalError> {
-    let module_name = Some(&module.name[..]);
-    // The path to the assembly file in which to write the module.
-    let asm_path =
-        cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
-    write_module(&module.module_llvm, &asm_path, diag_handler);
-    // The path to the object file in which to assemble the module.
-    let mut obj_path = None;
-    // `no_integrated_as` must be explicitly set to 'true' for all 'regular'
-    // modules. For 'metadata' and 'allocator' modules, `no_integrated_as` is
-    // always set to `false`. `metadata` and `allocator` modules are not assembled.
-    if config.no_integrated_as {
-        obj_path = Some(
-            cgcx.output_filenames.temp_path(OutputType::Object, module_name));
-        // Run the assembler to produce the object file from the assembly.
-        run_assembler(cgcx, diag_handler, &asm_path, &obj_path.clone().unwrap());
+    if config.obj_is_bitcode || config.emit_bc || config.emit_bc_compressed {
+        unimplemented!("IronOx can't emit bitcode!");
     }
-    Ok(CompiledModule {
-        name: module.name.clone(),
-        kind: module.kind,
-        object: obj_path,
-        bytecode: None,
-        bytecode_compressed: None,
-    })
+    let module_name = module.name.clone();
+    let module_name = Some(&module_name[..]);
+
+    let obj_path =
+        cgcx.output_filenames.temp_path(OutputType::Object, module_name);
+    match module.kind {
+        ModuleKind::Regular | ModuleKind::Allocator => {
+            // The path to the assembly file in which to write the module.
+            let asm_path =
+                cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
+            write_module(&module.module_llvm, &asm_path, diag_handler);
+            // `no_integrated_as` must be explicitly set to 'true' for all 'regular'
+            // modules. For 'metadata' and 'allocator' modules, `no_integrated_as` is
+            // always set to `false`. `metadata` and `allocator` modules are not
+            // assembled.
+            if config.emit_obj {
+                // The path to the object file in which to assemble the module.
+                let obj_path =
+                    cgcx.output_filenames.temp_path(OutputType::Object, module_name);
+                // Run the assembler to produce the object file from the assembly.
+                run_assembler(cgcx, diag_handler, &asm_path, &obj_path);
+                if !config.emit_asm && !cgcx.save_temps {
+                    fs::remove_file(&asm_path);
+                }
+            }
+        }
+    }
+    Ok(module.into_compiled_module(config.emit_obj,
+                                   config.emit_bc,
+                                   config.emit_bc_compressed,
+                                   &cgcx.output_filenames))
 }

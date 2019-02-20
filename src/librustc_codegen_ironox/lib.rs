@@ -19,6 +19,7 @@ extern crate syntax_pos;
 extern crate rustc_errors as errors;
 extern crate libc;
 extern crate syntax;
+extern crate tempfile;
 
 
 use std::sync::{mpsc, Arc};
@@ -26,7 +27,7 @@ use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::dep_graph::DepGraph;
 use rustc::middle::cstore::MetadataLoader;
 use rustc::session::{CompileIncomplete, Session};
-use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
+use rustc::session::config::{self, OutputFilenames, OutputType, PrintRequest};
 use rustc::ty::{self, TyCtxt};
 use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
@@ -54,6 +55,7 @@ use std::io::Write;
 
 mod back {
     pub use rustc_codegen_utils::symbol_names;
+    pub mod link;
     pub mod write;
 }
 
@@ -112,8 +114,20 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
         tcx: TyCtxt<'b, 'gcx, 'gcx>,
         _metadata: &ModuleIronOx
     ) -> EncodedMetadata {
-        let metadata = tcx.encode_metadata();
-        metadata
+        let mut emit_metadata = false;
+        for ty in tcx.sess.crate_types.borrow() {
+            match *ty {
+                config::CrateType::Rlib => emit_metadata = true,
+                config::CrateType::Dylib |
+                config::CrateType::ProcMacro => unimplemented!("compressed metadata"),
+                _ => {}
+            }
+        }
+        if emit_metadata {
+            tcx.encode_metadata()
+        } else {
+            EncodedMetadata::new()
+        }
     }
 
     fn codegen_allocator(&self, _tcx: TyCtxt, _mods: &ModuleIronOx, _kind: AllocatorKind) {
@@ -336,11 +350,27 @@ impl CodegenBackend for IronOxCodegenBackend {
 
     fn join_codegen_and_link(
         &self,
-        _ongoing_codegen: Box<dyn Any>,
-        _sess: &Session,
+        ongoing_codegen: Box<dyn Any>,
+        sess: &Session,
         _dep_graph: &DepGraph,
-        _outputs: &OutputFilenames,
+        outputs: &OutputFilenames,
     ) -> Result<(), CompileIncomplete> {
+        let (codegen_results, work_products) =
+            ongoing_codegen.downcast::
+                <rustc_codegen_ssa::back::write::OngoingCodegen<IronOxCodegenBackend>>()
+                .expect("Expected IronOxCodegenBackend's OngoingCodegen, found Box<Any>")
+                .join(sess);
+        if sess.opts.debugging_opts.incremental_info {
+            bug!("IronOx does not support incremental compilation");
+        }
+        sess.compile_status()?;
+        // No need to link unless this is an executable
+        if !sess.opts.output_types.keys().any(|&i| i == OutputType::Exe ||
+                                                   i == OutputType::Metadata) {
+            return Ok(());
+        }
+        back::link::link_binary(sess, &codegen_results,
+                                outputs, &codegen_results.crate_name.as_str());
         Ok(())
     }
 }
