@@ -1,0 +1,4 @@
+[build]
+
+rustflags = ["-C", "no-integrated-as", "-Z", "no-landing-pads"]
+
