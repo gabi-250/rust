@@ -121,7 +121,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 // If the instruction has already been compiled, return its
                 // cached result.
                 if let Some(inst_asm) = self.compiled_insts.borrow().get(&value) {
-                    CompiledInst::with_result(inst_asm.result.clone().unwrap())
+                    // if this instruction is a call, store its result (if it has
+                    // one)
+                    if let Some(ref result) = inst_asm.result {
+                        CompiledInst::with_result(result.clone())
+                    } else {
+                        CompiledInst::with_instructions(vec![])
+                    }
                 } else {
                     self.compile_instruction(value)
                 }

@@ -36,8 +36,8 @@ fn codegen_ironox_module<'ll, 'tcx>(
     let cgu = tcx.codegen_unit(cgu_name);
     let mut ironox_module = backend.new_metadata(tcx.sess, &cgu_name.as_str());
     let (stats, asm) = {
-        let cx = CodegenCx::new(tcx, cgu, &mut ironox_module);
-        let mono_items = cx.codegen_unit
+        let cx = CodegenCx::new(tcx, Some(cgu), &mut ironox_module);
+        let mono_items = cx.codegen_unit()
                            .items_in_deterministic_order(cx.tcx);
         for &(mono_item, (linkage, visibility)) in &mono_items {
             mono_item.predefine::<Builder>(&cx, linkage, visibility);

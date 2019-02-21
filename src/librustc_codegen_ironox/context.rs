@@ -45,7 +45,7 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
 pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     pub stats: RefCell<Stats>,
-    pub codegen_unit: Arc<CodegenUnit<'tcx>>,
+    pub codegen_unit: Option<Arc<CodegenUnit<'tcx>>>,
     pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
     pub module: RefCell<&'ll mut ModuleIronOx>,
     pub vtables: RefCell<
@@ -77,7 +77,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
     pub fn new(tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-               codegen_unit: Arc<CodegenUnit<'tcx>>,
+               codegen_unit: Option<Arc<CodegenUnit<'tcx>>>,
                module: &'ll mut ModuleIronOx)
                  -> CodegenCx<'ll, 'tcx> {
         CodegenCx {
@@ -246,7 +246,11 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn codegen_unit(&self) -> &Arc<CodegenUnit<'tcx>> {
-        &self.codegen_unit
+        if let Some(ref codegen_unit) = self.codegen_unit {
+            codegen_unit
+        } else {
+            panic!("The codegen context has no codegen unit!");
+        }
     }
 
     fn used_statics(&self) -> &RefCell<Vec<Value>> {

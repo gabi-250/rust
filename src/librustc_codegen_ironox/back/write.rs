@@ -1,7 +1,7 @@
 use errors::{Handler, FatalError};
 use rustc::session::config::OutputType;
 use rustc::util::time_graph::Timeline;
-use rustc_codegen_ssa::{ModuleCodegen, CompiledModule};
+use rustc_codegen_ssa::{CompiledModule, ModuleCodegen, ModuleKind};
 use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig, run_assembler};
 
 use std::fs;
@@ -42,23 +42,29 @@ pub unsafe fn codegen(
 
     let obj_path =
         cgcx.output_filenames.temp_path(OutputType::Object, module_name);
-    if config.no_integrated_as {
-        // The path to the assembly file in which to write the module.
-        let asm_path =
-            cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
-        write_module(&module.module_llvm, &asm_path, diag_handler);
-        // `no_integrated_as` must be explicitly set to 'true' for all 'regular'
-        // modules. For 'metadata' and 'allocator' modules, `no_integrated_as` is
-        // always set to `false`. `metadata` and `allocator` modules are not assembled.
-        if config.emit_obj {
-            // The path to the object file in which to assemble the module.
-            let obj_path =
-                cgcx.output_filenames.temp_path(OutputType::Object, module_name);
-            // Run the assembler to produce the object file from the assembly.
-            run_assembler(cgcx, diag_handler, &asm_path, &obj_path);
-            if !config.emit_asm && !cgcx.save_temps {
-                fs::remove_file(&asm_path);
+    match module.kind {
+        ModuleKind::Regular | ModuleKind::Allocator => {
+            // The path to the assembly file in which to write the module.
+            let asm_path =
+                cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
+            write_module(&module.module_llvm, &asm_path, diag_handler);
+            // `no_integrated_as` must be explicitly set to 'true' for all 'regular'
+            // modules. For 'metadata' and 'allocator' modules, `no_integrated_as` is
+            // always set to `false`. `metadata` and `allocator` modules are not
+            // assembled.
+            if config.emit_obj {
+                // The path to the object file in which to assemble the module.
+                let obj_path =
+                    cgcx.output_filenames.temp_path(OutputType::Object, module_name);
+                // Run the assembler to produce the object file from the assembly.
+                run_assembler(cgcx, diag_handler, &asm_path, &obj_path);
+                if !config.emit_asm && !cgcx.save_temps {
+                    //fs::remove_file(&asm_path);
+                }
             }
+        },
+        _ => {
+            eprintln!("not emitting: {:?}", obj_path);
         }
     }
     Ok(module.into_compiled_module(config.emit_obj,
