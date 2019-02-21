@@ -11,9 +11,11 @@ use rustc_codegen_ssa::back::linker::Linker;
 use rustc_codegen_ssa::back::link::{remove, ignored_for_lto, each_linked_rlib,
                                     linker_and_flavor, get_linker};
 pub use rustc_codegen_utils::link::{find_crate_name, filename_for_input,
-                                    default_output_for_target, invalid_output_for_target,
+                                    default_output_for_target,
+                                    invalid_output_for_target,
                                     filename_for_metadata, out_filename,
                                     check_file_is_writeable};
+use rustc_data_structures::fx::FxHashSet;
 use rustc::middle::cstore::{NativeLibrary, NativeLibraryKind};
 use rustc::middle::dependency_format::Linkage;
 use rustc_target::spec::{PanicStrategy, RelroLevel, LinkerFlavor};
@@ -350,7 +352,7 @@ fn link_args(cmd: &mut dyn Linker,
         .and_then(|m| m.object.as_ref());
     if let Some(obj) = obj {
         // FIXME: codegen_allocator....
-        //cmd.add_object(obj);
+        cmd.add_object(obj);
     }
 
     // Try to strip as much out of the generated object by removing unused
@@ -512,11 +514,38 @@ fn add_upstream_rust_crates(cmd: &mut dyn Linker,
     // crates.
     let deps = &codegen_results.crate_info.used_crates_dynamic;
     //panic!("deps are {:?}", deps);
+    //
+    let mut group_end = None;
+    let mut group_start = None;
+    let mut end_with = FxHashSet::default();
+    let info = &codegen_results.crate_info;
+    for &(cnum, _) in deps.iter().rev() {
+        if let Some(missing) = info.missing_lang_items.get(&cnum) {
+            end_with.extend(missing.iter().cloned());
+            if end_with.len() > 0 && group_end.is_none() {
+                group_end = Some(cnum);
+            }
+        }
+        end_with.retain(|item| info.lang_item_to_crate.get(item) != Some(&cnum));
+        if end_with.len() == 0 && group_end.is_some() {
+            group_start = Some(cnum);
+            break
+        }
+    }
+
+    // If we didn't end up filling in all lang items from upstream crates then
+    // we'll be filling it in with our crate. This probably means we're the
+    // standard library itself, so skip this for now.
+    if group_end.is_some() && group_start.is_none() {
+        group_end = None;
+    }
+
+    //let mut compiler_builtins = None;
 
     for &(cnum, _) in deps.iter() {
-        //if group_start == Some(cnum) {
-            //cmd.group_start();
-        //}
+        if group_start == Some(cnum) {
+            cmd.group_start();
+        }
 
         // We may not pass all crates through to the linker. Some crates may
         // appear statically in an existing dylib, meaning we'll pick up all the
@@ -543,6 +572,10 @@ fn add_upstream_rust_crates(cmd: &mut dyn Linker,
             Linkage::Dynamic => {
                 add_dynamic_crate(cmd, sess, &src.dylib.as_ref().unwrap().0)
             }
+        }
+
+        if group_end == Some(cnum) {
+            cmd.group_end();
         }
     }
 

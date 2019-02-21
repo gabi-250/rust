@@ -70,6 +70,7 @@ mod ir {
 }
 
 mod abi;
+mod allocator;
 mod asm;
 mod base;
 mod builder;
@@ -112,7 +113,7 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
     fn write_metadata<'b, 'gcx>(
         &self,
         tcx: TyCtxt<'b, 'gcx, 'gcx>,
-        _metadata: &ModuleIronOx
+        _metadata: &mut ModuleIronOx
     ) -> EncodedMetadata {
         let mut emit_metadata = false;
         for ty in tcx.sess.crate_types.borrow() {
@@ -130,7 +131,12 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
         }
     }
 
-    fn codegen_allocator(&self, _tcx: TyCtxt, _mods: &ModuleIronOx, _kind: AllocatorKind) {
+    fn codegen_allocator<'b, 'gcx>(
+        &self,
+        tcx: TyCtxt<'b, 'gcx, 'gcx>,
+        mods: &'b mut ModuleIronOx,
+        kind: AllocatorKind) {
+        allocator::codegen(tcx, mods, kind);
         // FIXME
     }
 
@@ -162,6 +168,7 @@ pub struct ModuleIronOx {
     /// The x86-64 program which corresponds to the module. This field is only
     /// initialised after the code emitter processes the module.
     pub asm: Option<String>,
+    pub allocators: Option<Vec<OxFunction>>,
 }
 
 impl ModuleIronOx {
@@ -170,6 +177,7 @@ impl ModuleIronOx {
         ModuleIronOx {
             functions: Default::default(),
             asm: None,
+            allocators: None,
         }
     }
 
@@ -184,9 +192,14 @@ impl ModuleIronOx {
         cx: &CodegenCx,
         name: &str,
         fn_type: Type) -> Value {
-        let idx = self.functions.len();
-        self.functions.push(OxFunction::new(cx, name, idx, fn_type));
-        Value::Function(idx)
+        let llfn = self.functions.iter().find(|x| x.name == name).map(|f| f.idx);
+        if let Some(idx) = llfn {
+            Value::Function(idx)
+        } else {
+            let idx = self.functions.len();
+            self.functions.push(OxFunction::new(cx, name, idx, fn_type));
+            Value::Function(idx)
+        }
     }
 }
 

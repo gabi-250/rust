@@ -1,7 +1,7 @@
 use errors::{Handler, FatalError};
 use rustc::session::config::OutputType;
 use rustc::util::time_graph::Timeline;
-use rustc_codegen_ssa::{ModuleCodegen, CompiledModule};
+use rustc_codegen_ssa::{CompiledModule, ModuleCodegen, ModuleKind};
 use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig, run_assembler};
 
 use std::fs;
@@ -62,6 +62,9 @@ pub unsafe fn codegen(
                     fs::remove_file(&asm_path);
                 }
             }
+        },
+        _ => {
+            // FIXME: Do nothing.
         }
     }
     Ok(module.into_compiled_module(config.emit_obj,
