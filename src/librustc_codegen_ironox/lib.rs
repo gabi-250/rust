@@ -27,7 +27,7 @@ use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::dep_graph::DepGraph;
 use rustc::middle::cstore::MetadataLoader;
 use rustc::session::{CompileIncomplete, Session};
-use rustc::session::config::{OutputFilenames, OutputType, PrintRequest};
+use rustc::session::config::{self, OutputFilenames, OutputType, PrintRequest};
 use rustc::ty::{self, TyCtxt};
 use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
@@ -115,8 +115,20 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
         tcx: TyCtxt<'b, 'gcx, 'gcx>,
         _metadata: &mut ModuleIronOx
     ) -> EncodedMetadata {
-        let metadata = tcx.encode_metadata();
-        metadata
+        let mut emit_metadata = false;
+        for ty in tcx.sess.crate_types.borrow() {
+            match *ty {
+                config::CrateType::Rlib => emit_metadata = true,
+                config::CrateType::Dylib |
+                config::CrateType::ProcMacro => unimplemented!("compressed metadata"),
+                _ => {}
+            }
+        }
+        if emit_metadata {
+            tcx.encode_metadata()
+        } else {
+            EncodedMetadata::new()
+        }
     }
 
     fn codegen_allocator<'b, 'gcx>(

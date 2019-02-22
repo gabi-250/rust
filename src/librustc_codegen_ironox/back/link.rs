@@ -1,4 +1,5 @@
 use rustc::hir::def_id::CrateNum;
+use rustc::middle::cstore::METADATA_FILENAME;
 use rustc::session::filesearch;
 use rustc::session::Session;
 use rustc::session::config::{self, OutputFilenames, OutputType};
@@ -21,9 +22,10 @@ use rustc_target::spec::{PanicStrategy, RelroLevel, LinkerFlavor};
 use tempfile::{Builder as TempFileBuilder, TempDir};
 
 use std::ascii;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Output, Stdio};
+use std::process::{Command as ShellCommand, Output, Stdio};
 use std::str;
 use syntax::attr;
 
@@ -71,13 +73,7 @@ pub(crate) fn link_binary(sess: &Session,
                 remove(sess, obj);
             }
         }
-        for obj in codegen_results.modules.iter()
-            .filter_map(|m| m.bytecode_compressed.as_ref()) {
-            remove(sess, obj);
-        }
-        if let Some(ref obj) = codegen_results.metadata_module.object {
-            remove(sess, obj);
-        }
+        // FIXME: the metadata module is never emitted
         if let Some(ref allocator) = codegen_results.allocator_module {
             if let Some(ref obj) = allocator.object {
                 remove(sess, obj);
@@ -98,21 +94,21 @@ fn link_binary_output(sess: &Session,
                       crate_name: &str) -> Vec<PathBuf> {
     let mut out_filenames = vec![];
     if outputs.outputs.contains_key(&OutputType::Metadata) {
-        //let out_filename = filename_for_metadata(sess, crate_name, outputs);
+        let out_filename = filename_for_metadata(sess, crate_name, outputs);
         // To avoid races with another rustc process scanning the output directory,
         // we need to write the file somewhere else and atomically move it to its
         // final destination, with a `fs::rename` call. In order for the rename to
         // always succeed, the temporary file needs to be on the same filesystem,
         // which is why we create it inside the output directory specifically.
-        //let metadata_tmpdir = TempFileBuilder::new()
-            //.prefix("rmeta")
-            //.tempdir_in(out_filename.parent().unwrap())
-            //.unwrap_or_else(|err| sess.fatal(&format!("couldn't create a temp dir: {}", err)));
-        //let metadata = emit_metadata(sess, codegen_results, &metadata_tmpdir);
-        //if let Err(e) = fs::rename(metadata, &out_filename) {
-            //sess.fatal(&format!("failed to write {}: {}", out_filename.display(), e));
-        //}
-        //out_filenames.push(out_filename);
+        let metadata_tmpdir = TempFileBuilder::new()
+            .prefix("rmeta")
+            .tempdir_in(out_filename.parent().unwrap())
+            .unwrap_or_else(|err| sess.fatal(&format!("couldn't create a temp dir: {}", err)));
+        let metadata = emit_metadata(sess, codegen_results, &metadata_tmpdir);
+        if let Err(e) = fs::rename(metadata, &out_filename) {
+            sess.fatal(&format!("failed to write {}: {}", out_filename.display(), e));
+        }
+        out_filenames.push(out_filename);
     }
 
     let tmpdir = TempFileBuilder::new().prefix("rustc").tempdir().unwrap_or_else(|err|
@@ -122,12 +118,11 @@ fn link_binary_output(sess: &Session,
         let out_filename = out_filename(sess, crate_type, outputs, crate_name);
         match crate_type {
             config::CrateType::Rlib => {
-                unimplemented!("rlib");
-                //link_rlib(sess,
-                          //crate_type,
-                          //codegen_results,
-                          //&out_filename,
-                          //&tmpdir);
+                link_rlib(sess,
+                          crate_type,
+                          &out_filename,
+                          codegen_results,
+                          &tmpdir);
             }
             config::CrateType::Staticlib => {
                 link_staticlib(sess, codegen_results, &out_filename, &tmpdir);
@@ -744,6 +739,47 @@ fn link_rlib(sess: &'a Session,
              crate_type: config::CrateType,
              out_filename: &Path,
              codegen_results: &CodegenResults,
-             tmpdir: &Path) {
-    unimplemented!("link_rlib");
+             tmpdir: &TempDir) {
+    // Instead of putting the metadata in an object file section, rlibs
+    // contain the metadata in a separate file.
+    let metadata_filename = emit_metadata(sess, codegen_results, tmpdir);
+    // The files to be added to the rlib.
+    let mut ar_files = Vec::new();
+    // Add all the object files produced.
+    for obj in codegen_results.modules.iter().filter_map(|m| m.object.as_ref()) {
+        ar_files.push(obj)
+    }
+    for lib in codegen_results.crate_info.used_libraries.iter() {
+        match lib.kind {
+            NativeLibraryKind::NativeStatic => {}
+            NativeLibraryKind::NativeStaticNobundle |
+            NativeLibraryKind::NativeFramework |
+            NativeLibraryKind::NativeUnknown => continue,
+        }
+        if let Some(name) = lib.name {
+            unimplemented!("add native lib: {}", name.as_str());
+        }
+    }
+    ar_files.push(&metadata_filename);
+    // FIXME: handle compressed bytecode?
+    let mut cmd = ShellCommand::new("ar");
+    cmd.arg("cr").arg(out_filename).args(ar_files);
+    if cmd.status().is_err() {
+        sess.struct_err(&format!("failed to execute: {:?}", cmd));
+        sess.abort_if_errors();
+    }
+}
+
+
+fn emit_metadata<'a>(
+    sess: &'a Session,
+    codegen_results: &CodegenResults,
+    tmpdir: &TempDir
+) -> PathBuf {
+    let out_filename = tmpdir.path().join(METADATA_FILENAME);
+    let result = fs::write(&out_filename, &codegen_results.metadata.raw_data);
+    if let Err(e) = result {
+        sess.fatal(&format!("failed to write {}: {}", out_filename.display(), e));
+    }
+    out_filename
 }

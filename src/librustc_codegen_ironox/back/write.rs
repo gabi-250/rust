@@ -59,7 +59,7 @@ pub unsafe fn codegen(
                 // Run the assembler to produce the object file from the assembly.
                 run_assembler(cgcx, diag_handler, &asm_path, &obj_path);
                 if !config.emit_asm && !cgcx.save_temps {
-                    //fs::remove_file(&asm_path);
+                    fs::remove_file(&asm_path);
                 }
             }
         },
