@@ -17,7 +17,7 @@ $(TEST_NAME): $(PROJ_DIR)/$(TEST_NAME).c rust_proj | $(BUILD_DIR)
 	$(CC) -o $@ $(STDLIB_SO) $(CARGO_BUILD_DIR)/*.s $(PROJ_DIR)/$@.c && mv $@ ./$(BUILD_DIR)
 
 rust_proj:
-	cargo +$(TOOLCHAIN) build $(MANIFEST_PATH)
+	cargo +$(TOOLCHAIN) rustc $(MANIFEST_PATH) -- --emit asm
 
 clean:
 	rm -f $(BUILD_DIR)/$(TEST_NAME); cargo clean $(MANIFEST_PATH)
