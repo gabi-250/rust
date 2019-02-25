@@ -35,7 +35,7 @@ impl OxFunction {
             OxType::FnType { ref args, ref ret } => {
                 let mut params = Vec::with_capacity(args.len());
                 for (index, arg_ty) in args.iter().enumerate() {
-                    params.push(Value::Param(index, *arg_ty));
+                    params.push(Value::Param(idx, index, *arg_ty));
                 }
                 let ret = *ret;
                 OxFunction {

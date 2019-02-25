@@ -20,7 +20,7 @@ extern crate rustc_errors as errors;
 extern crate libc;
 extern crate syntax;
 extern crate tempfile;
-
+extern crate rustc_demangle;
 
 use std::sync::{mpsc, Arc};
 use rustc::hir::def_id::LOCAL_CRATE;
@@ -137,7 +137,6 @@ impl ExtraBackendMethods for IronOxCodegenBackend {
         mods: &'b mut ModuleIronOx,
         kind: AllocatorKind) {
         allocator::codegen(tcx, mods, kind);
-        // FIXME
     }
 
     fn compile_codegen_unit<'ll, 'tcx: 'll>(
@@ -376,6 +375,7 @@ impl CodegenBackend for IronOxCodegenBackend {
         if sess.opts.debugging_opts.incremental_info {
             bug!("IronOx does not support incremental compilation");
         }
+
         sess.compile_status()?;
         // No need to link unless this is an executable
         if !sess.opts.output_types.keys().any(|&i| i == OutputType::Exe ||
