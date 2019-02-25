@@ -21,6 +21,13 @@ impl Operand {
         }
     }
 
+    pub fn rbp_offset(&self) -> isize {
+        match *self {
+            Operand::Loc(Location::RbpOffset(offset, _)) => offset,
+            _ => bug!("Operand {:?} is not a stack location!", *self),
+        }
+    }
+
     pub fn deref(self) -> Operand {
         match self {
             Operand::Loc(l) => Operand::Deref(l),
@@ -90,7 +97,7 @@ pub fn access_mode(size: u64) -> AccessMode {
     } else if size <= 64 {
         AccessMode::Full
     } else {
-        bug!("unsupported register size {}", size)
+        AccessMode::Large(size / 8)
     }
 }
 
@@ -149,6 +156,7 @@ pub enum AccessMode {
     Low32,
     Low16,
     Low8,
+    Large(u64),
 }
 
 impl PartialOrd for AccessMode {
@@ -275,6 +283,7 @@ impl fmt::Display for SubRegister {
                 AccessMode::Low32 => format!("e{}x", reg_str),
                 AccessMode::Low16 => format!("{}x", reg_str),
                 AccessMode::Low8 => format!("{}l", reg_str),
+                _ => bug!("unsupported access mode: {:?}", self.access_mode),
             }
         } else {
             match self.access_mode {
@@ -282,6 +291,7 @@ impl fmt::Display for SubRegister {
                 AccessMode::Low32 => format!("e{}", reg_str),
                 AccessMode::Low16 => format!("{}", reg_str),
                 AccessMode::Low8 => format!("{}l", reg_str),
+                _ => bug!("unsupported access mode: {:?}", self.access_mode),
             }
         };
         write!(f, "%{}", reg_str)

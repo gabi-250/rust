@@ -673,6 +673,7 @@ fn add_upstream_native_libraries(cmd: &mut dyn Linker,
     let data = formats.get(&crate_type).unwrap();
 
     let crates = &codegen_results.crate_info.used_crates_static;
+
     for &(cnum, _) in crates {
         for lib in codegen_results.crate_info.native_libraries[&cnum].iter() {
             let name = match lib.name {
@@ -749,6 +750,7 @@ fn link_rlib(sess: &'a Session,
     for obj in codegen_results.modules.iter().filter_map(|m| m.object.as_ref()) {
         ar_files.push(obj)
     }
+
     for lib in codegen_results.crate_info.used_libraries.iter() {
         match lib.kind {
             NativeLibraryKind::NativeStatic => {}
@@ -760,8 +762,11 @@ fn link_rlib(sess: &'a Session,
             unimplemented!("add native lib: {}", name.as_str());
         }
     }
+
     ar_files.push(&metadata_filename);
+
     // FIXME: handle compressed bytecode?
+
     let mut cmd = ShellCommand::new("ar");
     cmd.arg("cr").arg(out_filename).args(ar_files);
     if cmd.status().is_err() {
