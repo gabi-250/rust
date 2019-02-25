@@ -17,9 +17,9 @@ pub enum Value {
     /// The index of an `IronOxStruct` in the `structs` vec from `ModuleIronOx`.
     ConstStruct(usize),
     /// The parameter of an `IronOxFunction`. This is just a wrapper around a
-    /// `Type`. A parameter is an (index, type) pair, where 'index' is the
+    /// `Type`. A parameter is an (fnindex, index, type) pair, where 'index' is the
     /// index of the parameter in the list of parameters of the function.
-    Param(usize, Type),
+    Param(usize, usize, Type),
     /// An instruction: (functiton index, basic block index, instruction index).
     Instruction(usize, usize, usize),
     StructPtr(usize),
@@ -29,6 +29,7 @@ pub enum Value {
     Bool(bool),
     Cast(usize),
     ConstFatPtr(usize),
+    ConstBytes(usize),
     Intrinsic,
 }
 

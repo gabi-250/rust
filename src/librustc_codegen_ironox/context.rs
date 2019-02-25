@@ -16,7 +16,8 @@ use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
 use rustc_target::abi::HasDataLayout;
-use rustc::mir::interpret::{Scalar, Allocation};
+use rustc_target::spec::{HasTargetSpec, Target};
+use rustc::mir::interpret::{Scalar, Allocation, read_target_uint};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
@@ -44,8 +45,9 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
 
 pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-    pub stats: RefCell<Stats>,
     pub codegen_unit: Option<Arc<CodegenUnit<'tcx>>>,
+    pub check_overflow: bool,
+    pub stats: RefCell<Stats>,
     pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
     pub module: RefCell<&'ll mut ModuleIronOx>,
     pub vtables: RefCell<
@@ -73,6 +75,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub sym_count: Cell<usize>,
     pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, Type>>,
     pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), Type>>,
+    pub bytes: RefCell<Vec<Vec<u8>>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -83,6 +86,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
         CodegenCx {
             tcx,
             codegen_unit,
+            check_overflow: tcx.sess.overflow_checks(),
             stats: RefCell::new(Stats::default()),
             instances: Default::default(),
             module: RefCell::new(module),
@@ -105,6 +109,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             personality_fns: Default::default(),
             scalar_lltypes: Default::default(),
             lltypes: Default::default(),
+            bytes: Default::default(),
         }
     }
 
@@ -159,6 +164,12 @@ impl ty::layout::HasDataLayout for CodegenCx<'ll, 'tcx> {
     }
 }
 
+impl HasTargetSpec for CodegenCx<'ll, 'tcx> {
+    fn target_spec(&self) -> &Target {
+        &self.tcx.sess.target.target
+    }
+}
+
 impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn vtables(&self) -> &RefCell<
@@ -171,8 +182,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self.instances
     }
 
-    fn get_fn(&self, instance: Instance<'tcx>) ->
-        Value {
+    fn get_fn(&self, instance: Instance<'tcx>) -> Value {
         if let Some(ref llfn) = self.instances.borrow().get(&instance) {
             // The function has already been defined
             return **llfn;
@@ -220,7 +230,6 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 self.declare_cfn(name, fty)
             }
         };
-        //attributes::apply_target_cpu_attr(self, llfn);
         self.eh_personality.set(Some(llfn));
         llfn
     }
@@ -234,7 +243,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn check_overflow(&self) -> bool {
-        true
+        self.check_overflow
     }
 
     fn stats(&self) -> &RefCell<Stats> {
@@ -347,7 +356,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_u8(&self, i: u8) -> Value {
-        unimplemented!("const_u8");
+        self.const_unsigned(self.type_i8(), i as u128)
     }
 
     fn const_cstr(
@@ -424,7 +433,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_bytes(&self, bytes: &[u8]) -> Value {
-        unimplemented!("const_bytes");
+        let mut c_bytes = self.bytes.borrow_mut();
+        c_bytes.push(bytes.to_vec());
+        Value::ConstBytes(c_bytes.len() - 1)
     }
 
     fn const_get_elt(&self, v: Value, idx: u64) -> Value {
@@ -440,7 +451,10 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn is_const_integral(&self, v: Value) -> bool {
-        unimplemented!("is_const_integral");
+        match v {
+            Value::ConstUint(_) | Value::ConstInt(_) => true,
+            _ => false,
+        }
     }
 
     fn is_const_real(&self, v: Value) -> bool {
@@ -492,7 +506,6 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         alloc: &Allocation,
         offset: Size,
     ) -> PlaceRef<'tcx, Value> {
-        unimplemented!("from_const_alloc {:?} {:?} {:?}", layout,
-                       alloc, offset);
+        unimplemented!("from_const_alloc");
     }
 }

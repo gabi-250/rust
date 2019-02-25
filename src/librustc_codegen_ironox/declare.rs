@@ -1,3 +1,4 @@
+
 use abi::FnTypeExt;
 use context::CodegenCx;
 use ir::type_::Type;
@@ -6,6 +7,7 @@ use global::Global;
 
 use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
+use rustc_demangle;
 
 impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 

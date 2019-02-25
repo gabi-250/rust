@@ -5,7 +5,7 @@ use ir::value::Value;
 use super::super::ModuleIronOx;
 
 use rustc::ty::layout::Align;
-use rustc_codegen_ssa::traits::BaseTypeMethods;
+use rustc_codegen_ssa::traits::{BaseTypeMethods, DerivedTypeMethods};
 
 /// An IronOx instruction.
 #[derive(PartialEq, Clone, Debug, Eq, Hash)]
@@ -17,6 +17,8 @@ pub enum Instruction {
     /// An unconditional branch to a label.
     Br(String),
     CondBr(Value, String, String),
+    /// (cond, then_val, else_val)
+    Select(Value, Value, Value),
     /// Return instruction.
     Ret(Option<Value>),
     /// Call(fn_idx, args). Emit a call to the function found at index `fn_idx`
@@ -29,9 +31,10 @@ pub enum Instruction {
     Cast(Value, Type),
     /// Add two values and return the result.
     Add(Value, Value),
+    /// Multiply two values and return the result.
+    Mul(Value, Value, bool),
     Sub(Value, Value),
-    Eq(Value, Value),
-    Lt(Value, Value),
+    Icmp(Value, Value, CompOp),
     Not(Value),
     /// Check overflow: (instruction, type, signed).
     CheckOverflow(Value, Type, bool),
@@ -39,15 +42,30 @@ pub enum Instruction {
     InsertValue(Value, Value, u64),
     ExtractValue(Value, u64),
     /// Get an element from an aggregate value, as indicated by the indices:
-    /// (agg_val, [indices]).
-    Gep(Value, Vec<Value>),
+    /// (agg_val, [indices], inbounds).
+    Gep(Value, Vec<Value>, bool),
     StructGep(Value, u64),
     /// (type, pers_fn, num_clauses)
-    LandingPad(Type, Value, usize),
+    LandingPad { ty: Type, pers_fn: Value, num_clauses: usize, cleanup: bool },
     Resume(Value),
+    Switch { value: Value, default: BasicBlock, cases: Vec<(Value, BasicBlock)>},
     // FIXME: add the funclet?
-    Invoke { llfn: Value, args: Vec<Value>, then: BasicBlock, catch: BasicBlock },
+    Invoke { callee: Value, args: Vec<Value>, then: BasicBlock, catch: BasicBlock },
     Unreachable,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug, Eq, Hash)]
+pub enum CompOp {
+    Eq,
+    Ne,
+    Ugt,
+    Sgt,
+    Uge,
+    Sge,
+    Ult,
+    Slt,
+    Ule,
+    Sle,
 }
 
 #[derive(PartialEq, Clone, Debug, Eq, Hash)]
@@ -67,18 +85,35 @@ impl Instruction {
         if let Value::Instruction(fn_idx, bb_idx, inst_idx) = val {
             let inst = &cx.module.borrow().functions[fn_idx].
                 basic_blocks[bb_idx].instrs[inst_idx];
-            if let Instruction::Alloca(_, ty, _) = inst {
-                *ty
-            } else if let Instruction::Cast(_, ty) = inst {
-                if let OxType::PtrTo { ref pointee } = cx.types.borrow()[**ty] {
-                    *pointee
-                } else {
-                    bug!("Cannot load from {:?}", *ty);
+            match inst {
+                Instruction::Alloca(_, ty, _) |
+                Instruction::Cast(_, ty) => ty.pointee_ty(&cx.types.borrow()),
+                Instruction::StructGep(_, _) => {
+                    let ty = inst.val_ty(cx);
+                    match cx.types.borrow()[*ty] {
+                        OxType::PtrTo { pointee } => pointee,
+                        _ => unimplemented!("Load from non-pointer ty {:?}", ty),
+                    }
+                },
+                Instruction::Load(ptr, _) => {
+                    let ty = Instruction::load_ty(*ptr, cx);
+                    ty.pointee_ty(&cx.types.borrow())
+                },
+                Instruction::Call(llfn, ..) => {
+                    if let Value::Function(idx) = llfn {
+                        let fn_ty = cx.module.borrow().functions[*idx].ret;
+                        fn_ty.pointee_ty(&cx.types.borrow())
+                    } else {
+                        unimplemented!("Call to {:?}", llfn);
+                    }
+                },
+                Instruction::Gep(..) => {
+                    let ty = cx.val_ty(val);
+                    ty.pointee_ty(&cx.types.borrow())
                 }
-            } else {
-                unimplemented!("Load from instruction {:?}", inst);
+                _ => unimplemented!("Load from instruction {:?}", inst)
             }
-        } else if let Value::Param(_, ty) = val {
+        } else if let Value::Param(_, _, ty) = val {
             if let OxType::PtrTo { ref pointee } = cx.types.borrow()[*ty] {
                 *pointee
             } else {
@@ -96,7 +131,8 @@ impl Instruction {
             Instruction::Alloca(_, ty, _) => ty,
             Instruction::Cast(_, ty) => ty,
             Instruction::Ret(Some(v)) => cx.val_ty(v),
-            Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) => {
+            Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) |
+            Instruction::Mul(v1, v2, _) => {
                 let ty1 = cx.val_ty(v1);
                 let ty2 = cx.val_ty(v2);
                 assert_eq!(ty1, ty2);
@@ -120,22 +156,73 @@ impl Instruction {
             }
             Instruction::Load(ptr, _) => Instruction::load_ty(ptr, cx),
             Instruction::StructGep(ptr, idx) => {
-                let struct_ty = cx.val_ty(ptr);
-                if let OxType::StructType { ref members, .. } =
-                    cx.types.borrow()[*struct_ty] {
-                    members[idx as usize]
-                } else {
-                    bug!("expected OxType::StructType, found {:?}", struct_ty);
-                }
+                let member_ty = {
+                    let types = cx.types.borrow();
+                    let struct_ptr = cx.val_ty(ptr);
+                    let struct_ptr = &types[*struct_ptr];
+                    if let OxType::PtrTo { pointee } = struct_ptr {
+                        let struct_ty = &types[**pointee];
+                        if let OxType::StructType { ref members, .. } = struct_ty {
+                            members[idx as usize]
+                        } else {
+                            bug!("expected OxType::StructType, found {:?}", struct_ty);
+                        }
+                    } else {
+                        bug!("expected OxType::PtrTo, found {:?}", struct_ptr);
+                    }
+                };
+                cx.type_ptr_to(member_ty)
             },
             Instruction::ExtractValue(ptr, idx) => {
                 let agg_ty = cx.val_ty(ptr);
                 agg_ty.ty_at_idx(idx, &cx.types.borrow())
             },
             // FIXME: is that right?
-            Instruction::LandingPad(ty, _, _) => ty,
+            Instruction::LandingPad { ty, .. } => ty,
             // FIXME: is that right?
-            Instruction::Invoke { llfn, .. } => cx.val_ty(llfn),
+            Instruction::Invoke { callee, .. } => {
+                match cx.types.borrow()[*cx.val_ty(callee)] {
+                    OxType::FnType { ref ret, .. } => *ret,
+                    OxType::PtrTo { ref pointee } => {
+                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[**pointee] {
+                            *ret
+                        } else {
+                            bug!("Cannot call value {:?}", callee);
+                        }
+                    },
+                    _ => {
+                        unimplemented!("val_ty({:?})\n{:?}", callee, cx.types.borrow());
+                    }
+                }
+            },
+            Instruction::Not(v) => cx.val_ty(v),
+            Instruction::InsertValue(agg, v, idx) => cx.val_ty(agg),
+            Instruction::Select(_, v1, v2) => {
+                let ty = cx.val_ty(v1);
+                assert_eq!(ty, cx.val_ty(v2));
+                ty
+            },
+            Instruction::Icmp(..) => cx.type_bool(),
+            Instruction::Gep(agg, ref indices, inbounds) => {
+                let ty = cx.val_ty(agg);
+                let ty = ty.pointee_ty(&cx.types.borrow());
+                let arr_ty = match cx.types.borrow()[*ty] {
+                    OxType::Array { len, ty } => {
+                        assert_eq!(indices.len(), 2);
+                        ty
+                    },
+                    OxType::Scalar(..) => ty,
+                    OxType::StructType { .. } => {
+                        // The type of a getelementptr on a struct* is a struct*
+                        // if the getelementptr uses a single index.
+                        // FIXME: explain this better.
+                        assert_eq!(indices.len(), 1);
+                        ty
+                    }
+                    _ => unimplemented!("GEP({:?}) {:?}", ty, cx.types.borrow()),
+                };
+                cx.type_ptr_to(ty)
+            },
             _ => unimplemented!("instruction {:?}", *self),
         }
     }

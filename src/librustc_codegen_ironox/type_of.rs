@@ -3,7 +3,7 @@ use context::CodegenCx;
 use ir::type_::Type;
 
 use rustc::ty::{self, TypeFoldable};
-use rustc::ty::layout::{self, TyLayout};
+use rustc::ty::layout::{self, Size, TyLayout};
 use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods, DerivedTypeMethods};
 use rustc_mir::monomorphize::item::DefPathBasedNames;
 use rustc_target::abi::{FloatTy, LayoutOf};
@@ -15,7 +15,8 @@ pub trait LayoutIronOxExt<'tcx> {
     fn ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type;
     fn immediate_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type;
     fn scalar_ironox_type_at(&self, cx: &CodegenCx<'_, 'tcx>,
-                             scalar: &layout::Scalar) -> Type;
+                             scalar: &layout::Scalar,
+                             size: Size) -> Type;
     fn scalar_pair_element_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>,
                                        index: usize, immediate: bool) -> Type;
     fn ironox_field_index(&self, index: usize) -> u64;
@@ -25,13 +26,43 @@ pub trait LayoutIronOxExt<'tcx> {
 fn struct_field_types(
     cx: &CodegenCx<'_, 'tcx>,
     layout: TyLayout<'tcx>) -> Vec<Type> {
-    let mut fields = vec![];
+    let field_count = layout.fields.count();
+
+    let mut packed = false;
+    let mut offset = Size::ZERO;
+    let mut prev_effective_align = layout.align.abi;
+    let mut result: Vec<_> = Vec::with_capacity(1 + field_count * 2);
     for i in layout.fields.index_by_increasing_offset() {
+        let target_offset = layout.fields.offset(i as usize);
         let field = layout.field(cx, i);
-        // FIXME: handle field alignment
-        fields.push(field.ironox_type(cx));
+        let effective_field_align = layout.align.abi
+            .min(field.align.abi)
+            .restrict_for_offset(target_offset);
+        packed |= effective_field_align < field.align.abi;
+
+        assert!(target_offset >= offset);
+        let padding = target_offset - offset;
+        let padding_align = prev_effective_align.min(effective_field_align);
+        assert_eq!(offset.align_to(padding_align) + padding, target_offset);
+        result.push(cx.type_padding_filler( padding, padding_align));
+
+        result.push(field.ironox_type(cx));
+        offset = target_offset + field.size;
+        prev_effective_align = effective_field_align;
     }
-    fields
+    if !layout.is_unsized() && field_count > 0 {
+        if offset > layout.size {
+            bug!("layout: {:#?} stride: {:?} offset: {:?}",
+                 layout, layout.size, offset);
+        }
+        let padding = layout.size - offset;
+        let padding_align = prev_effective_align;
+        assert_eq!(offset.align_to(padding_align) + padding, layout.size);
+        result.push(cx.type_padding_filler(padding, padding_align));
+        assert_eq!(result.len(), 1 + field_count * 2);
+    }
+
+    result
 }
 
 impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
@@ -66,7 +97,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                     cx.fn_ptr_backend_type(&FnType::new(cx, sig, &[]))
                 }
                 _ => {
-                    self.scalar_ironox_type_at(cx, scalar)
+                    self.scalar_ironox_type_at(cx, scalar, Size::ZERO)
                 }
             };
             cx.scalar_lltypes.borrow_mut().insert(self.ty, llty);
@@ -139,19 +170,18 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                 }
                 _ => None
             };
-            // FIXME: Packed is always false. Structs are never packed.
-            let packed = false;
+            // FIXME: Packed is always true. Structs are always packed.
+            let packed = true;
             match self.fields {
                 layout::FieldPlacement::Union(_) => {
-                    //let fill = cx.type_padding_filler(layout.size, layout.align.abi);
-                    let packed = false;
+                    let fill = cx.type_padding_filler(self.size, self.align.abi);
+                    let packed = true;
                     match name {
                         None => {
-                            cx.type_struct(&[], packed)
+                            cx.type_struct(&[fill], packed)
                         }
                         Some(ref name) => {
-                            // FIXME &[]
-                            let llty = cx.type_named_struct(name, &[], packed);
+                            let llty = cx.type_named_struct(name, &[fill], packed);
                             llty
                         }
                     }
@@ -177,7 +207,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
         };
         cx.lltypes.borrow_mut().insert((self.ty, variant_index), llty);
         if let Some((llty, layout)) = defer {
-            let (llfields, packed) = (struct_field_types(cx, layout), false);
+            let (llfields, packed) = (struct_field_types(cx, layout), true);
             cx.set_struct_body(llty, &llfields, packed)
         }
         return llty;
@@ -196,7 +226,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
     }
 
     fn scalar_ironox_type_at(&self, cx: &CodegenCx<'_, 'tcx>,
-                             scalar: &layout::Scalar) -> Type {
+                             scalar: &layout::Scalar,
+                             offset: Size) -> Type {
         match scalar.value {
             layout::Int(i, _) => cx.type_from_integer(i),
             layout::Float(FloatTy::F32) => cx.type_f32(),
@@ -239,7 +270,13 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
         if immediate && scalar.is_bool() {
             return cx.type_i1();
         }
-        self.scalar_ironox_type_at(cx, scalar)
+
+        let offset = if index == 0 {
+            Size::ZERO
+        } else {
+            a.value.size(cx).align_to(b.value.align(cx).abi)
+        };
+        self.scalar_ironox_type_at(cx, scalar, offset)
     }
 
     fn ironox_field_index(&self, index: usize) -> u64 {
@@ -254,12 +291,11 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             layout::FieldPlacement::Union(_) => {
                 bug!("TyLayout::llvm_field_index({:?}): not applicable", self)
             }
-
             layout::FieldPlacement::Array { .. } => {
                 index as u64
             }
-
             layout::FieldPlacement::Arbitrary { .. } => {
+                // FIXME:
                 1 + (self.fields.memory_index(index) as u64) * 2
             }
         }

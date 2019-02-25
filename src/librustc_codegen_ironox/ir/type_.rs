@@ -1,4 +1,4 @@
-use abi::FnTypeExt;
+use abi::{FnTypeExt, IronOxType};
 use context::CodegenCx;
 use ir::instruction::Instruction;
 use type_of::LayoutIronOxExt;
@@ -94,6 +94,26 @@ pub enum OxType {
     Void,
 }
 
+impl OxType {
+    pub fn offset(&self, idx: u64, types: &Vec<OxType>) -> u64 {
+        // FIXME:?
+        match *self {
+            OxType::StructType { ref name, ref members } => {
+                let idx = idx as usize;
+                let mut offset = 0;
+                for i in 0..idx {
+                    offset += members[i].size(types);
+                }
+                offset
+            },
+            OxType::Array { len, ty } => {
+                idx * ty.size(types)
+            }
+            _ => unimplemented!("{:?}.offset({})", *self, idx)
+        }
+    }
+}
+
 impl Type {
     pub fn size(&self, types: &Vec<OxType>) -> u64 {
         match types[**self] {
@@ -110,6 +130,7 @@ impl Type {
                 }
                 struct_size
             },
+            OxType::Array { len, ty } => len * ty.size(types),
             ref ty => unimplemented!("size of {:?}", ty),
         }
     }
@@ -122,10 +143,21 @@ impl Type {
         }
     }
 
+    pub fn pointee_ty(&self, types: &Vec<OxType>) -> Type {
+        assert!(self.is_ptr(types));
+        if let OxType::PtrTo { ref pointee } = types[**self] {
+            *pointee
+        } else {
+            bug!("cannot get pointee of non-pointer type: {:?}", *self);
+        }
+    }
+
     pub fn ty_at_idx(&self, idx: u64, types: &Vec<OxType>) -> Type {
         match types[**self] {
             OxType::StructType { ref name, ref members } => members[idx as usize],
             OxType::FnType { ref args, ref ret } => ret.ty_at_idx(idx, types),
+            OxType::PtrTo { ref pointee } => *pointee,
+            OxType::Array { len, ref ty } => *ty,
             ref ty => unimplemented!("Type at index {} for {:?}", idx, ty),
         }
     }
@@ -254,7 +286,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         ret: Type
     ) -> Type {
         // define the types of the arguments of the function
-        let mut ll_args = vec![];
+        let mut ll_args = Vec::with_capacity(args.len());
         for arg in args {
             ll_args.push(arg.clone());
         }
@@ -279,10 +311,9 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         els: &[Type],
         packed: bool
     ) -> Type {
-        let mut members = els.to_vec();
         self.add_type(OxType::StructType {
             name: None,
-            members,
+            members: els.to_vec(),
         })
     }
 
@@ -327,7 +358,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         match v {
             Value::ConstUint(const_idx) => self.u_consts.borrow()[const_idx].ty,
             Value::ConstInt(const_idx) => self.i_consts.borrow()[const_idx].ty,
-            Value::Param(_, ty) => ty,
+            Value::Param(_, _, ty) => ty,
             Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
             Value::Instruction(fn_idx, bb_idx, inst_idx) => {
                 let inst = &module
@@ -340,8 +371,10 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
             Value::Cast(idx) => self.const_casts.borrow()[idx].ty,
             Value::ConstFatPtr(idx) => self.val_ty(self.const_fat_ptrs.borrow()[idx].0),
+            Value::ConstUndef(ty) => ty,
             _ => {
                 // FIXME
+                //Type(0)
                 unimplemented!("Type of {:?}", v);
             }
         }
@@ -395,7 +428,7 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn cast_backend_type(&self, ty: &CastTarget) -> Type {
-        unimplemented!("cast_backend_type");
+        ty.ironox_type(self)
     }
 
     fn fn_backend_type(&self, ty: &FnType<'tcx, Ty<'tcx>>) -> Type {
@@ -408,5 +441,9 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn fn_ptr_backend_type(&self, ty: &FnType<'tcx, Ty<'tcx>>) -> Type {
         ty.ptr_to_ironox_type(self)
+        //let arg_tys: Vec<Type> = vec![];
+        //let ret_ty = self.type_void();
+        //let fn_ty = self.type_func(&arg_tys, ret_ty);
+        //self.add_type(OxType::PtrTo { pointee: fn_ty })
     }
 }
