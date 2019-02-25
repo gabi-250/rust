@@ -94,6 +94,23 @@ pub enum OxType {
     Void,
 }
 
+impl OxType {
+    pub fn offset(&self, idx: u64, types: &Vec<OxType>) -> u64 {
+        // FIXME:?
+        let idx = idx as usize;
+        match *self {
+            OxType::StructType { ref name, ref members } => {
+                let mut offset = 0;
+                for i in 0..idx {
+                    offset += members[i].size(types);
+                }
+                offset
+            },
+            _ => unimplemented!("{:?}.offset({})", *self, idx)
+        }
+    }
+}
+
 impl Type {
     pub fn size(&self, types: &Vec<OxType>) -> u64 {
         match types[**self] {
@@ -121,6 +138,15 @@ impl Type {
             OxType::FnType {..} => true,
             OxType::PtrTo {..} => true,
             ref ty => false,
+        }
+    }
+
+    pub fn pointee_ty(&self, types: &Vec<OxType>) -> Type {
+        assert!(self.is_ptr(types));
+        if let OxType::PtrTo { ref pointee } = types[**self] {
+            *pointee
+        } else {
+            bug!("cannot get pointee of non-pointer type: {:?}", *self);
         }
     }
 
@@ -256,7 +282,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         ret: Type
     ) -> Type {
         // define the types of the arguments of the function
-        let mut ll_args = vec![];
+        let mut ll_args = Vec::with_capacity(args.len());
         for arg in args {
             ll_args.push(arg.clone());
         }
@@ -281,10 +307,9 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         els: &[Type],
         packed: bool
     ) -> Type {
-        let mut members = els.to_vec();
         self.add_type(OxType::StructType {
             name: None,
-            members,
+            members: els.to_vec(),
         })
     }
 
@@ -342,8 +367,10 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
             Value::Cast(idx) => self.const_casts.borrow()[idx].ty,
             Value::ConstFatPtr(idx) => self.val_ty(self.const_fat_ptrs.borrow()[idx].0),
+            Value::ConstUndef(ty) => ty,
             _ => {
                 // FIXME
+                //Type(0)
                 unimplemented!("Type of {:?}", v);
             }
         }

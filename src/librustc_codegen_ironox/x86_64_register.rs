@@ -149,6 +149,7 @@ pub enum AccessMode {
     Low32,
     Low16,
     Low8,
+    Large(u64),
 }
 
 impl PartialOrd for AccessMode {
@@ -275,6 +276,7 @@ impl fmt::Display for SubRegister {
                 AccessMode::Low32 => format!("e{}x", reg_str),
                 AccessMode::Low16 => format!("{}x", reg_str),
                 AccessMode::Low8 => format!("{}l", reg_str),
+                _ => bug!("unsupported access mode: {:?}", self.access_mode),
             }
         } else {
             match self.access_mode {
@@ -282,6 +284,7 @@ impl fmt::Display for SubRegister {
                 AccessMode::Low32 => format!("e{}", reg_str),
                 AccessMode::Low16 => format!("{}", reg_str),
                 AccessMode::Low8 => format!("{}l", reg_str),
+                _ => bug!("unsupported access mode: {:?}", self.access_mode),
             }
         };
         write!(f, "%{}", reg_str)

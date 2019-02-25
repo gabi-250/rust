@@ -73,6 +73,8 @@ pub enum AccessMode {
     Low32,
     Low16,
     Low8,
+    // Only applicable for rbp offsets
+    Large(u64),
 }
 
 #[derive(Clone, Copy, Debug)]

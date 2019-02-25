@@ -3,7 +3,7 @@ use context::CodegenCx;
 use ir::type_::Type;
 
 use rustc::ty::{self, TypeFoldable};
-use rustc::ty::layout::{self, TyLayout};
+use rustc::ty::layout::{self, Size, TyLayout};
 use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods, DerivedTypeMethods};
 use rustc_mir::monomorphize::item::DefPathBasedNames;
 use rustc_target::abi::{FloatTy, LayoutOf};
@@ -15,7 +15,8 @@ pub trait LayoutIronOxExt<'tcx> {
     fn ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type;
     fn immediate_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>) -> Type;
     fn scalar_ironox_type_at(&self, cx: &CodegenCx<'_, 'tcx>,
-                             scalar: &layout::Scalar) -> Type;
+                             scalar: &layout::Scalar,
+                             size: Size) -> Type;
     fn scalar_pair_element_ironox_type(&self, cx: &CodegenCx<'_, 'tcx>,
                                        index: usize, immediate: bool) -> Type;
     fn ironox_field_index(&self, index: usize) -> u64;
@@ -241,12 +242,12 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             return cx.type_i1();
         }
 
-        //let offset = if index == 0 {
-            //Size::ZERO
-        //} else {
-            //a.value.size(cx).align_to(b.value.align(cx).abi)
-        //};
-        self.scalar_ironox_type_at(cx, scalar)
+        let offset = if index == 0 {
+            Size::ZERO
+        } else {
+            a.value.size(cx).align_to(b.value.align(cx).abi)
+        };
+        self.scalar_ironox_type_at(cx, scalar, offset)
     }
 
     fn ironox_field_index(&self, index: usize) -> u64 {
@@ -261,11 +262,9 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             layout::FieldPlacement::Union(_) => {
                 bug!("TyLayout::llvm_field_index({:?}): not applicable", self)
             }
-
             layout::FieldPlacement::Array { .. } => {
                 index as u64
             }
-
             layout::FieldPlacement::Arbitrary { .. } => {
                 1 + (self.fields.memory_index(index) as u64) * 2
             }

@@ -29,6 +29,7 @@ pub enum Value {
     Bool(bool),
     Cast(usize),
     ConstFatPtr(usize),
+    ConstBytes(usize),
     Intrinsic,
 }
 

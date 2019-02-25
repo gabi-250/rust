@@ -16,7 +16,8 @@ use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
 use rustc_target::abi::HasDataLayout;
-use rustc::mir::interpret::{Scalar, Allocation};
+use rustc_target::spec::{HasTargetSpec, Target};
+use rustc::mir::interpret::{Scalar, Allocation, read_target_uint};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
@@ -73,6 +74,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub sym_count: Cell<usize>,
     pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, Type>>,
     pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), Type>>,
+    pub bytes: RefCell<Vec<Vec<u8>>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -105,6 +107,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             personality_fns: Default::default(),
             scalar_lltypes: Default::default(),
             lltypes: Default::default(),
+            bytes: Default::default(),
         }
     }
 
@@ -159,6 +162,12 @@ impl ty::layout::HasDataLayout for CodegenCx<'ll, 'tcx> {
     }
 }
 
+impl HasTargetSpec for CodegenCx<'ll, 'tcx> {
+    fn target_spec(&self) -> &Target {
+        &self.tcx.sess.target.target
+    }
+}
+
 impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn vtables(&self) -> &RefCell<
@@ -171,8 +180,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         &self.instances
     }
 
-    fn get_fn(&self, instance: Instance<'tcx>) ->
-        Value {
+    fn get_fn(&self, instance: Instance<'tcx>) -> Value {
         if let Some(ref llfn) = self.instances.borrow().get(&instance) {
             // The function has already been defined
             return **llfn;
@@ -220,7 +228,6 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 self.declare_cfn(name, fty)
             }
         };
-        //attributes::apply_target_cpu_attr(self, llfn);
         self.eh_personality.set(Some(llfn));
         llfn
     }
@@ -424,7 +431,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_bytes(&self, bytes: &[u8]) -> Value {
-        unimplemented!("const_bytes");
+        let mut c_bytes = self.bytes.borrow_mut();
+        c_bytes.push(bytes.to_vec());
+        Value::ConstBytes(c_bytes.len() - 1)
     }
 
     fn const_get_elt(&self, v: Value, idx: u64) -> Value {

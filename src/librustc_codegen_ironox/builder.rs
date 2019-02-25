@@ -333,7 +333,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        unimplemented!("mul");
+        self.emit_instr(Instruction::Mul(lhs, rhs))
     }
 
     fn fmul(
@@ -506,6 +506,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ty: Type,
         name: &str, align: Align
     )-> Value {
+        let ty = self.type_ptr_to(ty);
         self.emit_instr(Instruction::Alloca(name.to_string(), ty, align))
     }
 
@@ -693,7 +694,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        unimplemented!("inttoptr");
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn bitcast(
@@ -727,11 +728,19 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value, rhs: Value
     )-> Value {
         match op {
-            IntPredicate::IntEQ => {
-                self.emit_instr(Instruction::Eq(lhs, rhs))
+            IntPredicate::IntEQ => self.emit_instr(Instruction::Eq(lhs, rhs)),
+            IntPredicate::IntNE => self.emit_instr(Instruction::Ne(lhs, rhs)),
+            IntPredicate::IntUGT | IntPredicate::IntSGT => {
+                self.emit_instr(Instruction::Gt(lhs, rhs))
+            },
+            IntPredicate::IntUGE | IntPredicate::IntSGE => {
+                unimplemented!("IntUGE | IntSGE");
             },
             IntPredicate::IntULT | IntPredicate::IntSLT => {
                 self.emit_instr(Instruction::Lt(lhs, rhs))
+            },
+            IntPredicate::IntULE | IntPredicate::IntSLE => {
+                unimplemented!("IntULE | IntSLE");
             },
             _ => {
                 unimplemented!("icmp");
@@ -793,7 +802,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         then_val: Value,
         else_val: Value,
     )-> Value {
-        unimplemented!("select");
+        self.emit_instr(Instruction::Select(cond, then_val, else_val))
     }
 
     fn va_arg(
@@ -1134,7 +1143,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn do_not_inline(&mut self, llret: Value) {
-        unimplemented!("do_not_inline");
+        // No need to do anything. IronOx never inlines.
     }
 
     fn memcpy(
@@ -1227,7 +1236,17 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             });
             OperandValue::Immediate(to_immediate(self, llval, place.layout))
         } else if let layout::Abi::ScalarPair(ref a, ref b) = place.layout.abi {
-            unimplemented!("ScalarPair");
+            // FIXME: also handle the metadata
+            let b_offset = a.value.size(self).align_to(b.value.align(self).abi);
+            // Load and return both elements of the pair.
+            let a_ptr = self.struct_gep(place.llval, 0);
+            let a = self.load(a_ptr, place.align);
+            let b_ptr = self.struct_gep(place.llval, 1);
+            let b = self.load(b_ptr, place.align.restrict_for_offset(b_offset));
+            eprintln!("scalar pair {:?}", place);
+            eprintln!("a ptr {:?}", a_ptr);
+            eprintln!("b ptr {:?}", b_ptr);
+            OperandValue::Pair(a, b)
         } else {
             OperandValue::Ref(place.llval, None, place.align)
         };

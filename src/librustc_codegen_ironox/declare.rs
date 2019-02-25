@@ -6,6 +6,7 @@ use global::Global;
 
 use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
+use rustc_demangle;
 
 impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 

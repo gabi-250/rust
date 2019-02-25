@@ -12,6 +12,7 @@ use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_codegen_ssa::mir::operand::OperandValue;
 use rustc_target::abi::LayoutOf;
+use rustc_target::spec::HasTargetSpec;
 
 pub use rustc_target::spec::abi::Abi;
 pub use rustc_target::abi::call::*;
@@ -26,6 +27,25 @@ impl AbiBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 }
 
+fn store(
+    ty: &ArgType<'tcx, Ty<'tcx>>,
+    bx: &mut Builder<'_, 'll, 'tcx>,
+    val: Value,
+    dst: PlaceRef<'tcx, Value>) {
+    if ty.is_ignore() {
+        return;
+    }
+    if ty.is_sized_indirect() {
+        unimplemented!("sized indirect");
+    } else if ty.is_unsized_indirect() {
+        bug!("unsized ArgType must be handled through store_fn_arg");
+    } else if let PassMode::Cast(cast) = ty.mode {
+        unimplemented!("PassMode::Cast");
+    } else {
+        OperandValue::Immediate(val).store(bx, dst);
+    }
+}
+
 impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn store_fn_arg(
         &mut self,
@@ -35,23 +55,18 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     ) {
         match ty.mode {
             PassMode::Ignore => {},
-            PassMode::Pair(..) => unimplemented!("PassMode::Pair"),
+            PassMode::Pair(..) => {
+                let arg1 = self.get_param(self.llfn(), *idx as u32);
+                *idx += 1;
+                let arg2 = self.get_param(self.llfn(), *idx as u32);
+                *idx += 1;
+                OperandValue::Pair(arg1, arg2).store(self, dst);
+            },
             PassMode::Indirect(_, Some(_)) => unimplemented!("PassMode::Indirect"),
             PassMode::Direct(_) | PassMode::Indirect(_, None) | PassMode::Cast(_) => {
-                if ty.is_ignore() {
-                    return;
-                }
-                let val = self.cx.get_param(self.llfn(), *idx as c_uint);
+                let val = self.get_param(self.llfn(), *idx as u32);
                 *idx += 1;
-                if ty.is_sized_indirect() {
-                    unimplemented!("sized indirect");
-                } else if ty.is_unsized_indirect() {
-                    bug!("unsized ArgType must be handled through store_fn_arg");
-                } else if let PassMode::Cast(cast) = ty.mode {
-                    unimplemented!("PassMode::Cast");
-                } else {
-                    OperandValue::Immediate(val).store(self, dst);
-                }
+                store(ty, self, val, dst);
             }
         }
     }
@@ -62,7 +77,7 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dst: PlaceRef<'tcx, Value>
     ) {
-        unimplemented!("store_arg_ty");
+        store(ty, self, val, dst)
     }
 
     fn memory_ty(&self, ty: &ArgType<'tcx, Ty<'tcx>>) -> Type {
@@ -78,6 +93,7 @@ pub trait FnTypeExt<'tcx> {
     fn ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type;
     /// Return the IronOx `Type` that is equivalent to this pointer type.
     fn ptr_to_ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type;
+    fn adjust_for_abi(&mut self, cx: &CodegenCx<'ll, 'tcx>, abi: Abi);
 }
 
 impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
@@ -86,20 +102,19 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
         let sig = cx.tcx.normalize_erasing_late_bound_regions(ty::ParamEnv::reveal_all(), &sig);
         FnType::new(cx, sig, &[])
     }
+
     fn new(
         cx: &CodegenCx<'_, 'tcx>,
         sig: ty::FnSig<'tcx>,
         extra_args: &[Ty<'tcx>]) -> Self {
         use self::Abi::*;
-
         let conv = match cx.tcx.sess.target.target.adjust_abi(sig.abi) {
-            RustIntrinsic | PlatformIntrinsic |
+            RustIntrinsic |
             Rust | RustCall => Conv::C,
             System => bug!("system abi should be selected elsewhere"),
             C => Conv::C,
-            Unadjusted => Conv::C,
             Cdecl => Conv::C,
-            _ => unimplemented!("Unknown calling convention")
+            conv => unimplemented!("unsupported calling convention: {:?}", conv)
         };
 
         let mut inputs = sig.inputs();
@@ -134,7 +149,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             }
             // Does the function adhere to the Rust ABI?
             let rust_abi = match sig.abi {
-                RustIntrinsic | PlatformIntrinsic | Rust | RustCall => true,
+                RustIntrinsic | Rust | RustCall => true,
                 _ => false
             };
             // Is this a zero-sized type?
@@ -154,23 +169,105 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             variadic: sig.variadic,
             conv
         };
+        // The arguments/return type of the function may not fit in registers,
+        // so adjust the way they are passed:
+        fn_ty.adjust_for_abi(cx, sig.abi);
         fn_ty
+    }
+
+    fn adjust_for_abi(&mut self, cx: &CodegenCx<'ll, 'tcx>, abi: Abi) {
+        if abi == Abi::Rust || abi == Abi::RustCall ||
+           abi == Abi::RustIntrinsic || abi == Abi::PlatformIntrinsic {
+            let fixup = |arg: &mut ArgType<'tcx, Ty<'tcx>>| {
+                if arg.is_ignore() { return; }
+
+                match arg.layout.abi {
+                    layout::Abi::Aggregate { .. } => {}
+
+                    // This is a fun case! The gist of what this is doing is
+                    // that we want callers and callees to always agree on the
+                    // ABI of how they pass SIMD arguments. If we were to *not*
+                    // make these arguments indirect then they'd be immediates
+                    // in LLVM, which means that they'd used whatever the
+                    // appropriate ABI is for the callee and the caller. That
+                    // means, for example, if the caller doesn't have AVX
+                    // enabled but the callee does, then passing an AVX argument
+                    // across this boundary would cause corrupt data to show up.
+                    //
+                    // This problem is fixed by unconditionally passing SIMD
+                    // arguments through memory between callers and callees
+                    // which should get them all to agree on ABI regardless of
+                    // target feature sets. Some more information about this
+                    // issue can be found in #44367.
+                    //
+                    // Note that the platform intrinsic ABI is exempt here as
+                    // that's how we connect up to LLVM and it's unstable
+                    // anyway, we control all calls to it in libstd.
+                    layout::Abi::Vector { .. }
+                        if cx.sess().target.target.options.simd_types_indirect =>
+                    {
+                        unimplemented!("vector layout for arg {:?}", arg);
+                        //arg.make_indirect();
+                        return
+                    }
+
+                    _ => return
+                }
+                let size = arg.layout.size;
+                if arg.layout.is_unsized() || size > layout::Pointer.size(cx) {
+                    arg.make_indirect();
+                } else {
+
+                    // We want to pass small aggregates as immediates, but using
+                    // a LLVM aggregate type for this leads to bad optimizations,
+                    // so we pick an appropriately sized integer type instead.
+                    arg.cast_to(Reg {
+                        kind: RegKind::Integer,
+                        size
+                    });
+                }
+            };
+            fixup(&mut self.ret);
+            for arg in &mut self.args {
+                fixup(arg);
+            }
+            return;
+        }
+        if let Err(msg) = self.adjust_for_cabi(cx, abi) {
+            cx.sess().fatal(&msg);
+        }
     }
 
     /// Return the IronOx `Type` of this `FnType`.
     fn ironox_type(&self, cx: &CodegenCx<'a, 'tcx>) -> Type {
+        let return_val_as_param = {
+            if let PassMode::Indirect(..) = self.ret.mode { 1 } else { 0 }
+        };
+        let args_capacity: usize = self.args.iter().map(|arg|
+            //if arg.pad.is_some() { 1 } else { 0 } +
+            if let PassMode::Pair(_, _) = arg.mode { 2 } else { 1 }
+        ).sum();
+        let mut arg_tys = Vec::with_capacity(return_val_as_param + args_capacity);
         // Create the return type.
         let ret_ty = match self.ret.mode {
             PassMode::Ignore => cx.type_void(),
             PassMode::Direct(_) | PassMode::Pair(..) => {
                 self.ret.layout.immediate_ironox_type(cx)
             },
-            mode => unimplemented!("{:?}", mode)
+            PassMode::Indirect(..) => {
+                // The first argument acts as the return value:
+                arg_tys.push(cx.type_ptr_to(self.ret.layout.ironox_type(cx)));
+                // The function's return type is now void, because the 'return
+                // value' is actually one of its arguments, which is a pointer
+                // it modifies
+                cx.type_void()
+            },
+            _ => unimplemented!("mode: {:?}", self.ret.mode),
         };
-        // Create the types of the arguments.
-        let mut arg_tys = Vec::with_capacity(self.args.len());
 
+        let mut idx = 0;
         for arg in &self.args {
+            idx += 1;
             let arg_ty = match arg.mode {
                 PassMode::Ignore => continue,
                 PassMode::Direct(_) => {

@@ -17,6 +17,8 @@ pub enum Instruction {
     /// An unconditional branch to a label.
     Br(String),
     CondBr(Value, String, String),
+    /// (cond, then_val, else_val)
+    Select(Value, Value, Value),
     /// Return instruction.
     Ret(Option<Value>),
     /// Call(fn_idx, args). Emit a call to the function found at index `fn_idx`
@@ -29,9 +31,13 @@ pub enum Instruction {
     Cast(Value, Type),
     /// Add two values and return the result.
     Add(Value, Value),
+    /// Multiply two values and return the result.
+    Mul(Value, Value),
     Sub(Value, Value),
     Eq(Value, Value),
+    Ne(Value, Value),
     Lt(Value, Value),
+    Gt(Value, Value),
     Not(Value),
     /// Check overflow: (instruction, type, signed).
     CheckOverflow(Value, Type, bool),
@@ -67,16 +73,17 @@ impl Instruction {
         if let Value::Instruction(fn_idx, bb_idx, inst_idx) = val {
             let inst = &cx.module.borrow().functions[fn_idx].
                 basic_blocks[bb_idx].instrs[inst_idx];
-            if let Instruction::Alloca(_, ty, _) = inst {
-                *ty
-            } else if let Instruction::Cast(_, ty) = inst {
-                if let OxType::PtrTo { ref pointee } = cx.types.borrow()[**ty] {
-                    *pointee
-                } else {
-                    bug!("Cannot load from {:?}", *ty);
-                }
-            } else {
-                unimplemented!("Load from instruction {:?}", inst);
+            match inst {
+                Instruction::Alloca(_, ty, _) |
+                Instruction::Cast(_, ty) => ty.pointee_ty(&cx.types.borrow()),
+                Instruction::StructGep(_, _) => {
+                    let ty = inst.val_ty(cx);
+                    match cx.types.borrow()[*ty] {
+                        OxType::PtrTo { pointee } => pointee,
+                        _ => unimplemented!("Load from non-pointer ty {:?}", ty),
+                    }
+                },
+                _ => unimplemented!("Load from instruction {:?}", inst)
             }
         } else if let Value::Param(_, ty) = val {
             if let OxType::PtrTo { ref pointee } = cx.types.borrow()[*ty] {
@@ -120,13 +127,23 @@ impl Instruction {
             }
             Instruction::Load(ptr, _) => Instruction::load_ty(ptr, cx),
             Instruction::StructGep(ptr, idx) => {
-                let struct_ty = cx.val_ty(ptr);
-                if let OxType::StructType { ref members, .. } =
-                    cx.types.borrow()[*struct_ty] {
-                    members[idx as usize]
-                } else {
-                    bug!("expected OxType::StructType, found {:?}", struct_ty);
-                }
+                let member_ty = {
+                    let types = cx.types.borrow();
+                    let struct_ptr = cx.val_ty(ptr);
+                    let struct_ptr = &types[*struct_ptr];
+                    if let OxType::PtrTo { pointee } = struct_ptr {
+                        let struct_ty = &types[**pointee];
+                        if let OxType::StructType { ref members, .. } = struct_ty {
+                            eprintln!("ptr to {:?}", members[idx as usize]);
+                            members[idx as usize]
+                        } else {
+                            bug!("expected OxType::StructType, found {:?}", struct_ty);
+                        }
+                    } else {
+                        bug!("expected OxType::PtrTo, found {:?}", struct_ptr);
+                    }
+                };
+                cx.type_ptr_to(member_ty)
             },
             Instruction::ExtractValue(ptr, idx) => {
                 let agg_ty = cx.val_ty(ptr);
@@ -136,6 +153,8 @@ impl Instruction {
             Instruction::LandingPad(ty, _, _) => ty,
             // FIXME: is that right?
             Instruction::Invoke { llfn, .. } => cx.val_ty(llfn),
+            Instruction::Not(v) => cx.val_ty(v),
+            Instruction::InsertValue(agg, v, idx) => cx.val_ty(agg),
             _ => unimplemented!("instruction {:?}", *self),
         }
     }

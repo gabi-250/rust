@@ -14,6 +14,7 @@ pub enum MachineInst {
     JMP(Operand),
     JE(Operand),
     JL(Operand),
+    NOT(Operand),
     SETB(Operand),
     SETO(Operand),
     CALL(Operand),
@@ -86,6 +87,10 @@ impl MachineInst {
         MachineInst::JL(op.into())
     }
 
+    pub fn not<U: Into<Operand>>(op: U) -> MachineInst {
+        MachineInst::NOT(op.into())
+    }
+
     pub fn push<U: Into<Operand>>(op: U) -> MachineInst {
         MachineInst::PUSH(op.into())
     }
@@ -115,6 +120,7 @@ impl fmt::Display for MachineInst {
            MachineInst::JMP(ref op) => write!(f, "\tjmp {}\n", op),
            MachineInst::JE(ref op) => write!(f, "\tje {}\n", op),
            MachineInst::JL(ref op) => write!(f, "\tjl {}\n", op),
+           MachineInst::NOT(ref op) => write!(f, "\tnot {}\n", op),
            MachineInst::SETB(ref op) => write!(f, "\tsetb {}\n", op),
            MachineInst::SETO(ref op) => write!(f, "\tseto {}\n", op),
            MachineInst::CALL(ref op) => write!(f, "\tcall {}\n", op),

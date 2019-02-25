@@ -34,7 +34,8 @@ pub unsafe fn codegen(
     config: &ModuleConfig,
     timeline: &mut Timeline
 ) -> Result<CompiledModule, FatalError> {
-    if config.obj_is_bitcode || config.emit_bc || config.emit_bc_compressed {
+    // FIXME: emit_bc_compressed
+    if config.obj_is_bitcode || config.emit_bc {
         unimplemented!("IronOx can't emit bitcode!");
     }
     let module_name = module.name.clone();
@@ -63,7 +64,7 @@ pub unsafe fn codegen(
                 }
             }
         },
-        _ => {
+        ModuleKind::Metadata => {
             eprintln!("not emitting: {:?}", obj_path);
         }
     }
