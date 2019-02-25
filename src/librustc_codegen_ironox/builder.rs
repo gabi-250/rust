@@ -1146,7 +1146,49 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         size: Self::Value,
         flags: MemFlags,
     ) {
-        unimplemented!("memcpy");
+        let mut memcpy_start = self.build_sibling_block("memcpy_start");
+        let mut memcpy_end = self.build_sibling_block("memcpy_end");
+        let i8p = self.type_i8p();
+        let size_align = Align::from_bytes(8).unwrap();
+        let dst = memcpy_start.pointercast(dst, i8p);
+        let src = memcpy_start.pointercast(src, i8p);
+        // Store the source and destination pointers to the stack.
+        let src_loc = self.alloca(i8p, "memcpy_src", src_align);
+        let dst_loc = self.alloca(i8p, "memcpy_dst", dst_align);
+        let size_loc = self.alloca(i8p, "memcpy_size", size_align);
+        self.store(src, src_loc, src_align);
+        self.store(dst, dst_loc, dst_align);
+        self.store(size, size_loc, size_align);
+        // Branch to memcpy_start.
+        self.br(memcpy_start.llbb());
+        // Load the pointers from the stack.
+        let src = memcpy_start.load(src_loc, src_align);
+        let dst = memcpy_start.load(dst_loc, dst_align);
+        let size = memcpy_start.load(size_loc, size_align);
+        // Load the first byte pointed to by src.
+        let src_val = memcpy_start.load(src, src_align);
+        memcpy_start.store(src_val, dst, dst_align);
+
+        let const_one = memcpy_start.cx.const_uint(
+            memcpy_start.cx.type_i64(), 1);
+        let const_zero = memcpy_start.cx.const_uint(
+            memcpy_start.cx.type_i64(), 0);
+
+        // src += 1; dst += 1;
+        let new_src = memcpy_start.add(src, const_one);
+        let new_dst = memcpy_start.add(dst, const_one);
+        let new_size = memcpy_start.sub(size, const_one);
+
+        // Store the pointers and the size back to the stack.
+        memcpy_start.store(new_src, src_loc, src_align);
+        memcpy_start.store(new_dst, dst_loc, dst_align);
+        memcpy_start.store(new_size, size_loc, dst_align);
+
+        let cond = memcpy_start.icmp(IntPredicate::IntUGT, new_size, const_zero);
+        let memcpy_start_bb = memcpy_start.llbb();
+        let memcpy_end_bb = memcpy_end.llbb();
+        memcpy_start.cond_br(cond, memcpy_start_bb, memcpy_end_bb);
+        *self = memcpy_end;
     }
 
     fn memmove(
