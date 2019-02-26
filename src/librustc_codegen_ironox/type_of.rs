@@ -67,7 +67,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                     cx.fn_ptr_backend_type(&FnType::new(cx, sig, &[]))
                 }
                 _ => {
-                    self.scalar_ironox_type_at(cx, scalar)
+                    self.scalar_ironox_type_at(cx, scalar, Size::ZERO)
                 }
             };
             cx.scalar_lltypes.borrow_mut().insert(self.ty, llty);

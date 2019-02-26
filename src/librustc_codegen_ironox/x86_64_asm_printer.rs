@@ -18,6 +18,8 @@ use x86_64_register::GeneralPurposeReg::{self, *};
 use x86_64_register::{Location, Operand, Register, SubRegister, AccessMode,
                       operand_access_mode, access_mode};
 
+const FN_ARG_REGS: [GeneralPurposeReg; 6] = [RDI, RSI, RDX, RCX, R8, R9];
+
 /// The result of evaluating an `Instruction`.
 #[derive(Clone, Debug)]
 pub struct CompiledInst {
@@ -33,12 +35,14 @@ impl CompiledInst {
         CompiledInst { asm, result: Some(result) }
     }
 
-    /// Return the same `CompiledInst`, but with the specified result. This
-    /// consumes the `CompiledInst`.
+    /// Create a `CompiledInst` with a result, and without any other machine
+    /// instructions.
     pub fn with_result(result: Operand) -> CompiledInst {
         CompiledInst { asm: vec![], result: Some(result) }
     }
 
+    /// Create a `CompiledInst` with a list of machine instructions, but without
+    /// a result.
     pub fn with_instructions(asm: Vec<MachineInst>) -> CompiledInst {
         CompiledInst { asm, result: None }
     }
@@ -87,11 +91,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         asm
     }
 
-
     fn get_func_arg_str(idx: usize) -> GeneralPurposeReg {
-        let regs = [RDI, RSI, RDX, RCX, R8, R9];
         if idx < 6 {
-            return regs[idx];
+            return FN_ARG_REGS[idx];
         } else {
             unimplemented!("function arg no {}", idx);
         }
@@ -224,82 +226,87 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_call(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::Call(callee, ref args) = inst {
-            let mut asm = vec![];
-            // Prepare the function arguments.
-            for (idx, arg) in args.iter().enumerate() {
-                let mut instr_asm = self.compile_value(*arg);
-                asm.append(&mut instr_asm.asm);
-                let param = FunctionPrinter::get_func_arg_str(idx);
-                // FIXME: always handle globals correctly
-                if let Some(Operand::Loc(Location::RipOffset(_))) = instr_asm.result.clone() {
-                    // globals are always treated as addresses
-                    asm.push(MachineInst::lea(instr_asm.result.unwrap(),
-                                              Register::direct(param)));
-                } else {
-                    asm.push(MachineInst::mov(instr_asm.result.unwrap(),
-                                              Register::direct(param)));
-                }
+        let (callee, args) = match inst {
+            Instruction::Call(callee, ref args) |
+            Instruction::Invoke { callee, ref args, .. } => (callee, args),
+            _ => bug!("Expected invoke or call, found {:?}", inst)
+        };
+        let mut asm = vec![];
+        // Prepare the function arguments.
+        for (idx, arg) in args.iter().enumerate() {
+            let mut instr_asm = self.compile_value(*arg);
+            asm.append(&mut instr_asm.asm);
+            let param = FunctionPrinter::get_func_arg_str(idx);
+            // FIXME: always handle globals correctly
+            if let Some(Operand::Loc(Location::RipOffset(_))) = instr_asm.result.clone() {
+                // globals are always treated as addresses
+                asm.push(MachineInst::lea(instr_asm.result.unwrap(),
+                                          Register::direct(param)));
+            } else {
+                asm.push(MachineInst::mov(instr_asm.result.unwrap(),
+                                          Register::direct(param)));
             }
-            match callee {
-                Value::Function(idx) => {
-                    let module = self.cx.module.borrow();
-                    // Move the result to the stack, and assume its size is 8.
-                    let fn_name = if module.functions[*idx].is_declaration() {
-                        format!("{}@PLT", &module.functions[*idx].name)
-                    } else {
-                        module.functions[*idx].name.clone()
-                    };
-                    asm.push(MachineInst::call(fn_name.clone()));
-                    let ret_ty = inst.val_ty(self.cx);
-                    // If the function doesn't return anything, carry on.
-                    if let OxType::Void = self.cx.types.borrow()[*ret_ty] {
-                        CompiledInst::with_instructions(asm)
-                    } else {
-                        let result = self.precompiled_result(inst);
-                        let acc_mode = result.access_mode();
-                        match acc_mode {
-                            AccessMode::Large(16) => {
-                                asm.extend(vec![
-                                    MachineInst::mov(
-                                        Register::direct(
-                                            SubRegister::reg(RAX, AccessMode::Full)),
-                                        result.clone()),
-                                    // FIXME: load RDX at result - 8
-                                    MachineInst::mov(
-                                        Register::direct(
-                                            SubRegister::reg(RDX, AccessMode::Full)),
-                                        result.clone()),
-                                ]);
-                            },
-                            AccessMode::Large(bytes) => {
-                                unimplemented!("AccessMode::Large({}))", bytes);
-                            },
-                            _ => {
-                                asm.push(MachineInst::mov(
-                                    Register::direct(SubRegister::reg(RAX, acc_mode)),
-                                    result.clone()));
-                            }
-                        };
-                        CompiledInst::new(asm, result)
-                    }
-                }
-                Value::Instruction(_, _, _) => {
-                    let ptr = self.compile_value(*callee);
-                    let result = ptr.result.clone().unwrap();
+        }
+        match callee {
+            Value::Function(idx) => {
+                let module = self.cx.module.borrow();
+                // Move the result to the stack, and assume its size is 8.
+                let fn_name = if module.functions[*idx].is_declaration() {
+                    format!("{}@PLT", &module.functions[*idx].name)
+                } else {
+                    module.functions[*idx].name.clone()
+                };
+                asm.push(MachineInst::call(fn_name.clone()));
+                let ret_ty = inst.val_ty(self.cx);
+                // If the function doesn't return anything, carry on.
+                if let OxType::Void = self.cx.types.borrow()[*ret_ty] {
+                    CompiledInst::with_instructions(asm)
+                } else {
+                    let result = self.precompiled_result(inst);
                     let acc_mode = result.access_mode();
-                    let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
-                    // dereference result
-                    asm.extend(vec![
-                        MachineInst::call(result.clone().deref()),
-                        MachineInst::mov(reg, result.clone()),
-                    ]);
+                    let offset = result.rbp_offset();
+                    match acc_mode {
+                        AccessMode::Large(16) => {
+                            let am_full = AccessMode::Full;
+                            let result1 = Location::RbpOffset(offset, am_full);
+                            let result2 = Location::RbpOffset(offset + 8, am_full);
+                            asm.extend(vec![
+                                MachineInst::mov(
+                                    Register::direct(
+                                        SubRegister::reg(RAX, AccessMode::Full)),
+                                    result1),
+                                // FIXME: load RDX at result - 8
+                                MachineInst::mov(
+                                    Register::direct(
+                                        SubRegister::reg(RDX, AccessMode::Full)),
+                                    result2),
+                            ]);
+                        },
+                        AccessMode::Large(bytes) => {
+                            unimplemented!("AccessMode::Large({}))", bytes);
+                        },
+                        _ => {
+                            asm.push(MachineInst::mov(
+                                Register::direct(SubRegister::reg(RAX, acc_mode)),
+                                result.clone()));
+                        }
+                    };
                     CompiledInst::new(asm, result)
                 }
-                _ => unimplemented!("call to {:?}", callee),
-            }
-        } else {
-            bug!("expected Instruction::Call, found {:?}", inst);
+            },
+            Value::Instruction(_, _, _) => {
+                let ptr = self.compile_value(*callee);
+                let result = ptr.result.clone().unwrap();
+                let acc_mode = result.access_mode();
+                let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
+                // dereference result
+                asm.extend(vec![
+                    MachineInst::call(result.clone().deref()),
+                    MachineInst::mov(reg, result.clone()),
+                ]);
+                CompiledInst::new(asm, result)
+            },
+            _ => unimplemented!("call to {:?}", callee),
         }
     }
 
@@ -375,13 +382,55 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm2.asm);
             let dest_result = instr_asm1.result.clone().unwrap();
             let src_result = instr_asm2.result.unwrap();
-            let reg =
-                Register::direct(SubRegister::reg(RCX, src_result.access_mode()));
-            asm.extend(vec![
-                MachineInst::mov(dest_result, Register::direct(RAX)),
-                MachineInst::mov(src_result, reg),
-                MachineInst::mov(reg, Register::indirect(RAX)),
-            ]);
+            let src_am = src_result.access_mode();
+            match src_am {
+                AccessMode::Large(16) => {
+                    match (&src_result, &dest_result) {
+                        (Operand::Loc(Location::RbpOffset(src_offset, _)),
+                         Operand::Loc(Location::RbpOffset(dst_offset, _))) => {
+                            let am_full = AccessMode::Full;
+                            // Move two quad words from src to dst.
+                            let reg =
+                                Register::direct(SubRegister::reg(RCX, am_full));
+                            let src_word1 = Operand::Loc(
+                                Location::RbpOffset(*src_offset, am_full));
+                            let src_word2 = Operand::Loc(
+                                Location::RbpOffset(src_offset + 8, am_full));
+                            // check if dest result is a ptr?
+                            asm.extend(vec![
+                                // Move the first word.
+                                MachineInst::mov(dest_result.clone(),
+                                                 Register::direct(RAX)),
+                                MachineInst::mov(src_word1, reg),
+                                MachineInst::mov(reg, Register::indirect(RAX)),
+                                // Move the second word.
+                                MachineInst::add(Operand::Immediate(8, am_full),
+                                                 Register::direct(RAX)),
+                                MachineInst::mov(src_word2, reg),
+                                MachineInst::mov(reg, Register::indirect(RAX)),
+                            ]);
+                         },
+                         _ => {
+                            bug!("Invalid src-dst pair: ({:?}, {:?})",
+                                 src_result, dest_result)
+                         }
+                    }
+                },
+                AccessMode::Large(bytes) => {
+                    unimplemented!("AccessMode::Large({})", bytes)
+                },
+                _ => {
+                    let reg =
+                        Register::direct(SubRegister::reg(RCX,
+                                                          src_result.access_mode()));
+                    asm.extend(vec![
+                        MachineInst::NOP,
+                        MachineInst::mov(dest_result, Register::direct(RAX)),
+                        MachineInst::mov(src_result, reg),
+                        MachineInst::mov(reg, Register::indirect(RAX)),
+                    ]);
+                }
+            }
             CompiledInst::new(asm, instr_asm1.result.unwrap())
         } else {
             bug!("expected Instruction::Store, found {:?}", inst);
@@ -533,11 +582,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     CompiledInst::new(asm, stack_loc)
                 },
                 _ => {
-
-                    CompiledInst::new(vec![], Operand::Loc(
-                            Location::Reg(Register::direct(RAX))))
-                    //unimplemented!("extract value at idx {:?} from agg {:?}",
-                                   //idx, self.cx.val_ty(*agg));
+                    unimplemented!("extract value at idx {:?} from agg {:?}",
+                                   idx, self.cx.val_ty(*agg));
                 }
             }
         } else {
@@ -545,11 +591,88 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
+    fn compile_insertvalue_struct(
+        &self,
+        agg_dst: Operand,
+        agg: Value,
+        v: Value,
+        idx: u64
+    ) -> CompiledInst {
+        let types = self.cx.types.borrow();
+        let agg_ty = self.cx.val_ty(agg);
+        let agg_size = self.cx.val_ty(agg).size(&types) / 8;
+        let members = match types[*agg_ty] {
+            OxType::StructType { ref members, .. } => members,
+            ref ty => bug!("Expected OxType::StructType, found {:?}", ty),
+        };
+
+        // The offset within the aggregated of the member at
+        // position `idx`.
+        let offset = types[*agg_ty].offset(idx, &types) as isize;
+        //let agg_val = self.compile_value(*agg);
+        let compiled_v = self.compile_value(v).result.unwrap();
+        let member_rbp_offset = agg_dst.rbp_offset() + offset;
+        let member_rbp_offset = Location::RbpOffset(member_rbp_offset,
+                                                    AccessMode::Full);
+        let member_am = access_mode(members[idx as usize].size(&types));
+        match agg {
+            // FIXME? an aggregate is only undefined if it is a Value::ConstUndef.
+            // This is because storing an undefined value is a no-op.
+            Value::ConstUndef(ty) => {
+                eprintln!("ty is {:?}", self.cx.val_ty(agg));
+                eprintln!("add size {:?}", agg_size);
+                for (i, c) in types.iter().enumerate() {
+                    eprintln!("Type {}: {:?}", i, c);
+                }
+                let reg =
+                    Register::direct(SubRegister::reg(RCX, member_am));
+                eprintln!("agg is {:?} {:?}", agg, member_rbp_offset);
+                let asm = vec![
+                    MachineInst::mov(compiled_v, reg),
+                    MachineInst::lea(member_rbp_offset,
+                                     Register::direct(RAX)),
+                    MachineInst::mov(reg, Register::indirect(RAX)),
+                ];
+                CompiledInst::new(asm, agg_dst)
+            },
+            Value::Instruction(fn_idx, bb_idx, idx) => {
+                let inst = &self.cx.module.borrow().functions[fn_idx]
+                    .basic_blocks[bb_idx].instrs[idx];
+                let compiled_insts = self.compiled_insts.borrow();
+                let reg =
+                    Register::direct(SubRegister::reg(RCX, member_am));
+                if let Some(old_struct) = compiled_insts.get(&agg) {
+                    let old_struct_loc = old_struct.result.clone().unwrap();
+                    let asm = vec![
+                        MachineInst::mov(old_struct_loc, reg),
+                        MachineInst::mov(reg, agg_dst.clone()),
+                        MachineInst::xor(reg, reg),
+                        MachineInst::mov(compiled_v, reg),
+                        MachineInst::lea(member_rbp_offset,
+                                         Register::direct(RAX)),
+                        MachineInst::mov(reg, Register::indirect(RAX)),
+                    ];
+                    CompiledInst::new(asm, agg_dst)
+                } else {
+                    bug!("Instruction {:?} has not yet been compiled", inst);
+                }
+            },
+            _ => unimplemented!("InsertValue into {:?} {:?}", agg,
+                                self.cx.val_ty(agg)),
+        }
+    }
+
     fn compile_insertvalue(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::InsertValue(agg, v, idx) = inst {
-            // FIXME: handle this in compute_stack_size
-            CompiledInst::new(vec![], Operand::Loc(
-                    Location::Reg(Register::direct(RAX))))
+            let types = self.cx.types.borrow();
+            let agg_ty = self.cx.val_ty(*agg);
+            match types[*agg_ty] {
+                OxType::StructType { .. } => {
+                    let agg_dst = self.precompiled_result(inst);
+                    self.compile_insertvalue_struct(agg_dst, *agg, *v, *idx)
+                }
+                ref ty => unimplemented!("Insert into ty {:?}", ty),
+            }
         } else {
             bug!("expected Instruction::Unreachable, found {:?}", inst);
         }
@@ -559,7 +682,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let Instruction::StructGep(agg, idx)= inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
-            let offset = 2;//types[*agg_ty].offset(*idx, &types);
+            let offset = types[*agg_ty.pointee_ty(&types)].offset(*idx, &types);
             let agg_val = self.compile_value(*agg).result.unwrap();
             let stack_loc = self.precompiled_result(inst);
             // FIXME:
@@ -578,10 +701,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_invoke(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::Invoke { llfn, args, then, catch } = inst {
-            // FIXME: handle this in compute_stack_size
-            CompiledInst::new(vec![], Operand::Loc(
-                    Location::Reg(Register::direct(RAX))))
+        if let Instruction::Invoke { callee, args, then, catch } = inst {
+            unimplemented!("Invoke");
         } else {
             bug!("expected Instruction::Invoke, found {:?}", inst);
         }
@@ -589,9 +710,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn compile_resume(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Resume(v) = inst {
-            // FIXME: handle this in compute_stack_size
-            CompiledInst::new(vec![], Operand::Loc(
-                    Location::Reg(Register::direct(RAX))))
+            // FIXME: do nothing for now.
+            CompiledInst::with_instructions(vec![])
         } else {
             bug!("expected Instruction::Resume, found {:?}", inst);
         }
@@ -599,9 +719,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn compile_landingpad(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::LandingPad(ty, llfn, idx) = inst {
-            // FIXME: handle this in compute_stack_size
-            CompiledInst::new(vec![], Operand::Loc(
-                    Location::Reg(Register::direct(RAX))))
+            unimplemented!("LandingPad");
         } else {
             bug!("expected Instruction::LandingPad, found {:?}", inst);
         }
@@ -609,9 +727,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn compile_mul(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Mul(lhs, rhs) = inst {
-            // FIXME: handle this in compute_stack_size
-            CompiledInst::new(vec![], Operand::Loc(
-                    Location::Reg(Register::direct(RAX))))
+            unimplemented!("Mul");
         } else {
             bug!("expected Instruction::Mul, found {:?}", inst);
         }
@@ -619,9 +735,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn compile_select(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Select(cond, then_val, else_val) = inst {
-            // FIXME: handle this in compute_stack_size
-            CompiledInst::new(vec![], Operand::Loc(
-                    Location::Reg(Register::direct(RAX))))
+            unimplemented!("Select");
         } else {
             bug!("expected Instruction::Select, found {:?}", inst);
         }
@@ -776,7 +890,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let inst_size =
                             ty.pointee_ty(types).size(types);
                         //let acc_mode = access_mode(inst_size as u64);
-                        let acc_mode = AccessMode::Full;
+                        let acc_mode = access_mode(inst_size);
                         size += (inst_size / 8) as isize;
                         let result = Location::RbpOffset(-size, acc_mode);
                         size += 8;
@@ -801,6 +915,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             self.cx.val_ty(*v).size(&self.cx.types.borrow()) as isize;
                         size += val_size / 8;
                         let result = Location::RbpOffset(-size, AccessMode::Full);
+                        CompiledInst::with_result(Operand::from(result))
+                    }
+                    Instruction::InsertValue(agg, v, idx) => {
+                        let agg_size = self.cx.val_ty(*agg).
+                            size(&self.cx.types.borrow()) as isize;
+                        size += agg_size / 8;
+                        let result =
+                            Location::RbpOffset(-size, AccessMode::Full);
                         CompiledInst::with_result(Operand::from(result))
                     }
                     _ => continue,

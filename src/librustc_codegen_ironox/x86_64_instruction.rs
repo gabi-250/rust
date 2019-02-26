@@ -22,6 +22,7 @@ pub enum MachineInst {
     LEAVE,
     RET,
     UD2,
+    NOP,
     Label(String),
     Directive(GasDirective),
 }
@@ -130,6 +131,7 @@ impl fmt::Display for MachineInst {
            MachineInst::UD2 => write!(f, "\tud2\n"),
            MachineInst::Label(ref s) => write!(f, "{}:\n", s),
            MachineInst::Directive(ref d) => write!(f, "\t{}\n", d),
+           MachineInst::NOP => write!(f, "\tnop\n"),
         }
     }
 }

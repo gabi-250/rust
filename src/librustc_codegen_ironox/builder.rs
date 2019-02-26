@@ -260,7 +260,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         else_llbb: BasicBlock,
         num_cases: usize,
     )-> Value {
-        unimplemented!("switch");
+        self.emit_instr(Instruction::Switch {
+            value: v,
+            default: else_llbb,
+            cases: Vec::with_capacity(num_cases)
+        })
     }
 
     fn invoke(
@@ -272,7 +276,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         funclet: Option<&Self::Funclet>,
     )-> Value {
         self.emit_instr(Instruction::Invoke {
-            llfn, args: args.to_vec(), then, catch
+            callee: llfn, args: args.to_vec(), then, catch
         })
     }
 
@@ -1075,7 +1079,19 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         on_val: Value,
         dest: BasicBlock
     ) {
-        unimplemented!("add_case(");
+        match s {
+            Value::Instruction(fn_idx, bb_idx, idx) => {
+                let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
+                    basic_blocks[bb_idx].instrs[idx];
+                match inst {
+                    Instruction::Switch { ref mut cases, .. } => {
+                        cases.push((on_val, dest));
+                    },
+                    _ => bug!("Expected Instruction::Switch, found {:?}", inst),
+                }
+            },
+            _ => bug!("Expected Value::Instruction, found {:?}", s)
+        }
     }
 
     fn add_incoming_to_phi(
@@ -1158,13 +1174,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let mut memcpy_start = self.build_sibling_block("memcpy_start");
         let mut memcpy_end = self.build_sibling_block("memcpy_end");
         let i8p = self.type_i8p();
+        let i8_ty = self.type_i8();
         let size_align = Align::from_bytes(8).unwrap();
-        let dst = memcpy_start.pointercast(dst, i8p);
-        let src = memcpy_start.pointercast(src, i8p);
+        let dst = self.pointercast(dst, i8p);
+        let src = self.pointercast(src, i8p);
         // Store the source and destination pointers to the stack.
-        let src_loc = self.alloca(i8p, "memcpy_src", src_align);
-        let dst_loc = self.alloca(i8p, "memcpy_dst", dst_align);
-        let size_loc = self.alloca(i8p, "memcpy_size", size_align);
+        let src_loc = self.alloca(i8_ty, "memcpy_src", src_align);
+        let dst_loc = self.alloca(i8_ty, "memcpy_dst", dst_align);
+        let size_loc = self.alloca(i8_ty, "memcpy_size", size_align);
         self.store(src, src_loc, src_align);
         self.store(dst, dst_loc, dst_align);
         self.store(size, size_loc, size_align);
@@ -1175,11 +1192,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let dst = memcpy_start.load(dst_loc, dst_align);
         let size = memcpy_start.load(size_loc, size_align);
         // Load the first byte pointed to by src.
-        let src_val = memcpy_start.load(src, src_align);
-        memcpy_start.store(src_val, dst, dst_align);
+        memcpy_start.store(src, dst, dst_align);
 
         let const_one = memcpy_start.cx.const_uint(
-            memcpy_start.cx.type_i64(), 1);
+            memcpy_start.cx.type_i8(), 1);
         let const_zero = memcpy_start.cx.const_uint(
             memcpy_start.cx.type_i64(), 0);
 

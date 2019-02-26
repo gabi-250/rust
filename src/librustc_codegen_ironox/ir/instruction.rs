@@ -51,8 +51,9 @@ pub enum Instruction {
     /// (type, pers_fn, num_clauses)
     LandingPad(Type, Value, usize),
     Resume(Value),
+    Switch { value: Value, default: BasicBlock, cases: Vec<(Value, BasicBlock)>},
     // FIXME: add the funclet?
-    Invoke { llfn: Value, args: Vec<Value>, then: BasicBlock, catch: BasicBlock },
+    Invoke { callee: Value, args: Vec<Value>, then: BasicBlock, catch: BasicBlock },
     Unreachable,
 }
 
@@ -82,6 +83,10 @@ impl Instruction {
                         OxType::PtrTo { pointee } => pointee,
                         _ => unimplemented!("Load from non-pointer ty {:?}", ty),
                     }
+                },
+                Instruction::Load(ptr, _) => {
+                    let ty = Instruction::load_ty(*ptr, cx);
+                    ty.pointee_ty(&cx.types.borrow())
                 },
                 _ => unimplemented!("Load from instruction {:?}", inst)
             }
@@ -152,7 +157,7 @@ impl Instruction {
             // FIXME: is that right?
             Instruction::LandingPad(ty, _, _) => ty,
             // FIXME: is that right?
-            Instruction::Invoke { llfn, .. } => cx.val_ty(llfn),
+            Instruction::Invoke { callee, .. } => cx.val_ty(callee),
             Instruction::Not(v) => cx.val_ty(v),
             Instruction::InsertValue(agg, v, idx) => cx.val_ty(agg),
             _ => unimplemented!("instruction {:?}", *self),
