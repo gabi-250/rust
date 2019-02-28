@@ -5,7 +5,7 @@ use ir::value::Value;
 use super::super::ModuleIronOx;
 
 use rustc::ty::layout::Align;
-use rustc_codegen_ssa::traits::BaseTypeMethods;
+use rustc_codegen_ssa::traits::{BaseTypeMethods, DerivedTypeMethods};
 
 /// An IronOx instruction.
 #[derive(PartialEq, Clone, Debug, Eq, Hash)]
@@ -32,12 +32,9 @@ pub enum Instruction {
     /// Add two values and return the result.
     Add(Value, Value),
     /// Multiply two values and return the result.
-    Mul(Value, Value),
+    Mul(Value, Value, bool),
     Sub(Value, Value),
-    Eq(Value, Value),
-    Ne(Value, Value),
-    Lt(Value, Value),
-    Gt(Value, Value),
+    Icmp(Value, Value, CompOp),
     Not(Value),
     /// Check overflow: (instruction, type, signed).
     CheckOverflow(Value, Type, bool),
@@ -45,16 +42,30 @@ pub enum Instruction {
     InsertValue(Value, Value, u64),
     ExtractValue(Value, u64),
     /// Get an element from an aggregate value, as indicated by the indices:
-    /// (agg_val, [indices]).
-    Gep(Value, Vec<Value>),
+    /// (agg_val, [indices], inbounds).
+    Gep(Value, Vec<Value>, bool),
     StructGep(Value, u64),
     /// (type, pers_fn, num_clauses)
-    LandingPad(Type, Value, usize),
+    LandingPad { ty: Type, pers_fn: Value, num_clauses: usize, cleanup: bool },
     Resume(Value),
     Switch { value: Value, default: BasicBlock, cases: Vec<(Value, BasicBlock)>},
     // FIXME: add the funclet?
     Invoke { callee: Value, args: Vec<Value>, then: BasicBlock, catch: BasicBlock },
     Unreachable,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug, Eq, Hash)]
+pub enum CompOp {
+    Eq,
+    Ne,
+    Ugt,
+    Sgt,
+    Uge,
+    Sge,
+    Ult,
+    Slt,
+    Ule,
+    Sle,
 }
 
 #[derive(PartialEq, Clone, Debug, Eq, Hash)]
@@ -108,7 +119,8 @@ impl Instruction {
             Instruction::Alloca(_, ty, _) => ty,
             Instruction::Cast(_, ty) => ty,
             Instruction::Ret(Some(v)) => cx.val_ty(v),
-            Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) => {
+            Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) |
+            Instruction::Mul(v1, v2, _) => {
                 let ty1 = cx.val_ty(v1);
                 let ty2 = cx.val_ty(v2);
                 assert_eq!(ty1, ty2);
@@ -155,11 +167,31 @@ impl Instruction {
                 agg_ty.ty_at_idx(idx, &cx.types.borrow())
             },
             // FIXME: is that right?
-            Instruction::LandingPad(ty, _, _) => ty,
+            Instruction::LandingPad { ty, .. } => ty,
             // FIXME: is that right?
-            Instruction::Invoke { callee, .. } => cx.val_ty(callee),
+            Instruction::Invoke { callee, .. } => {
+                match cx.types.borrow()[*cx.val_ty(callee)] {
+                    OxType::FnType { ref ret, .. } => *ret,
+                    OxType::PtrTo { ref pointee } => {
+                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[**pointee] {
+                            *ret
+                        } else {
+                            bug!("Cannot call value {:?}", callee);
+                        }
+                    },
+                    _ => {
+                        unimplemented!("val_ty({:?})\n{:?}", callee, cx.types.borrow());
+                    }
+                }
+            },
             Instruction::Not(v) => cx.val_ty(v),
             Instruction::InsertValue(agg, v, idx) => cx.val_ty(agg),
+            Instruction::Select(_, v1, v2) => {
+                let ty = cx.val_ty(v1);
+                assert_eq!(ty, cx.val_ty(v2));
+                ty
+            },
+            Instruction::Icmp(..) => cx.type_bool(),
             _ => unimplemented!("instruction {:?}", *self),
         }
     }

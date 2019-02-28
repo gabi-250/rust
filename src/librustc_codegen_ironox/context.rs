@@ -45,8 +45,9 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
 
 pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
-    pub stats: RefCell<Stats>,
     pub codegen_unit: Option<Arc<CodegenUnit<'tcx>>>,
+    pub check_overflow: bool,
+    pub stats: RefCell<Stats>,
     pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
     pub module: RefCell<&'ll mut ModuleIronOx>,
     pub vtables: RefCell<
@@ -85,6 +86,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
         CodegenCx {
             tcx,
             codegen_unit,
+            check_overflow: tcx.sess.overflow_checks(),
             stats: RefCell::new(Stats::default()),
             instances: Default::default(),
             module: RefCell::new(module),
@@ -241,7 +243,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn check_overflow(&self) -> bool {
-        true
+        self.check_overflow
     }
 
     fn stats(&self) -> &RefCell<Stats> {
@@ -449,7 +451,10 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn is_const_integral(&self, v: Value) -> bool {
-        unimplemented!("is_const_integral");
+        match v {
+            Value::ConstUint(_) | Value::ConstInt(_) => true,
+            _ => false,
+        }
     }
 
     fn is_const_real(&self, v: Value) -> bool {

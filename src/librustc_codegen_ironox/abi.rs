@@ -46,6 +46,30 @@ fn store(
     }
 }
 
+// FIXME: copied from LLVM:
+pub trait IronOxType {
+    fn ironox_type(&self, cx: &CodegenCx<'ll, '_>) -> Type;
+}
+
+impl IronOxType for Reg {
+    fn ironox_type(&self, cx: &CodegenCx<'ll, '_>) -> Type {
+        match self.kind {
+            RegKind::Integer => cx.type_ix(self.size.bits()),
+            RegKind::Float => {
+                match self.size.bits() {
+                    32 => cx.type_f32(),
+                    64 => cx.type_f64(),
+                    _ => bug!("unsupported float: {:?}", self)
+                }
+            }
+            RegKind::Vector => {
+                cx.type_vector(cx.type_i8(), self.size.bytes())
+            }
+        }
+    }
+}
+
+
 impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn store_fn_arg(
         &mut self,
@@ -278,6 +302,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
                     arg_tys.push(arg.layout.scalar_pair_element_ironox_type(cx, 1, true));
                     continue;
                 }
+                PassMode::Indirect(_, None) => cx.type_ptr_to(arg.layout.ironox_type(cx)),
                 mode => unimplemented!("{:?}", mode),
             };
             arg_tys.push(arg_ty);

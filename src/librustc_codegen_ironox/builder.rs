@@ -18,7 +18,7 @@ use syntax;
 
 use context::CodegenCx;
 use ir::basic_block::BasicBlock;
-use ir::instruction::Instruction;
+use ir::instruction::{CompOp, Instruction};
 use ir::type_::Type;
 use ir::value::Value;
 use type_of::LayoutIronOxExt;
@@ -148,6 +148,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let inst = match oop {
             OverflowOp::Add => Instruction::Add(lhs, rhs),
             OverflowOp::Sub => Instruction::Sub(lhs, rhs),
+            OverflowOp::Mul => Instruction::Mul(lhs, rhs, signed),
             _ => unimplemented!("overflow op"),
         };
         let inst = self.emit_instr(inst);
@@ -275,9 +276,17 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         catch: BasicBlock,
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        self.emit_instr(Instruction::Invoke {
+        let invoke = self.emit_instr(Instruction::Invoke {
             callee: llfn, args: args.to_vec(), then, catch
-        })
+        });
+        // Branch to 'then' if the invoke returns
+        let mut label;
+        {
+            let module = self.cx.module.borrow();
+            label = module.functions[then.0].basic_blocks[then.1].label.clone();
+        }
+        let _ = self.emit_instr(Instruction::Br(label));
+        invoke
     }
 
     fn unreachable(&mut self) {
@@ -337,7 +346,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        self.emit_instr(Instruction::Mul(lhs, rhs))
+        // Unsigned mul.
+        self.emit_instr(Instruction::Mul(lhs, rhs, false))
     }
 
     fn fmul(
@@ -602,7 +612,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         indices: &[Value]
     )-> Value {
-        self.emit_instr(Instruction::Gep(ptr, indices.to_vec()))
+        self.emit_instr(Instruction::Gep(ptr, indices.to_vec(), false))
     }
 
     fn inbounds_gep(
@@ -610,7 +620,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         indices: &[Value]
     )-> Value {
-        unimplemented!("inbounds_gep");
+        self.emit_instr(Instruction::Gep(ptr, indices.to_vec(), true))
     }
 
     fn struct_gep(
@@ -731,25 +741,22 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         op: IntPredicate,
         lhs: Value, rhs: Value
     )-> Value {
-        match op {
-            IntPredicate::IntEQ => self.emit_instr(Instruction::Eq(lhs, rhs)),
-            IntPredicate::IntNE => self.emit_instr(Instruction::Ne(lhs, rhs)),
-            IntPredicate::IntUGT | IntPredicate::IntSGT => {
-                self.emit_instr(Instruction::Gt(lhs, rhs))
-            },
-            IntPredicate::IntUGE | IntPredicate::IntSGE => {
-                unimplemented!("IntUGE | IntSGE");
-            },
-            IntPredicate::IntULT | IntPredicate::IntSLT => {
-                self.emit_instr(Instruction::Lt(lhs, rhs))
-            },
-            IntPredicate::IntULE | IntPredicate::IntSLE => {
-                unimplemented!("IntULE | IntSLE");
-            },
+        let op = match op {
+            IntPredicate::IntEQ => CompOp::Eq,
+            IntPredicate::IntNE => CompOp::Ne,
+            IntPredicate::IntUGT => CompOp::Ugt,
+            IntPredicate::IntSGT => CompOp::Sgt,
+            IntPredicate::IntUGE => CompOp::Uge,
+            IntPredicate::IntSGE => CompOp::Sge,
+            IntPredicate::IntULT => CompOp::Ult,
+            IntPredicate::IntSLT => CompOp::Slt,
+            IntPredicate::IntULE => CompOp::Ule,
+            IntPredicate::IntSLE => CompOp::Sle,
             _ => {
                 unimplemented!("icmp");
             }
-        }
+        };
+        self.emit_instr(Instruction::Icmp(lhs, rhs, op))
     }
 
     fn fcmp(
@@ -949,6 +956,13 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         agg_val: Value,
         idx: u64
     )-> Value {
+        match agg_val {
+            Value::Instruction(fn_idx, bb_idx, idx) => {
+                let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
+                    basic_blocks[bb_idx].instrs[idx];
+            },
+            _ => {}
+        }
         // Extract the value at position `idx` in aggregate `agg_val`.
         self.emit_instr(Instruction::ExtractValue(agg_val, idx))
     }
@@ -969,7 +983,12 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         pers_fn: Value,
         num_clauses: usize
     )-> Value {
-        self.emit_instr(Instruction::LandingPad(ty, pers_fn, num_clauses))
+        self.emit_instr(Instruction::LandingPad {
+            ty,
+            pers_fn,
+            num_clauses,
+            cleanup: false,
+        })
     }
 
     fn add_clause(
@@ -984,7 +1003,20 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         landing_pad: Value
     ) {
-        // FIXME: set_cleanup
+        eprintln!("landing pad: {:?} = cleanup", landing_pad);
+        match landing_pad {
+            Value::Instruction(fn_idx, bb_idx, idx) => {
+                let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
+                    basic_blocks[bb_idx].instrs[idx];
+                match inst {
+                    Instruction::LandingPad{ ref mut cleanup, .. } => {
+                        *cleanup = true;
+                    },
+                    _ => bug!("Expected Instruction::LandingPad, found {:?}", inst),
+                }
+            },
+            _ => bug!("Expected Value::Instruction, found {:?}", landing_pad),
+        }
     }
 
     fn resume(
@@ -1174,14 +1206,20 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let mut memcpy_start = self.build_sibling_block("memcpy_start");
         let mut memcpy_end = self.build_sibling_block("memcpy_end");
         let i8p = self.type_i8p();
-        let i8_ty = self.type_i8();
+        // Enough space for a pointer
+        let i64_ty = self.type_i64();
+        let const_one = memcpy_start.cx.const_uint(
+            memcpy_start.cx.type_i64(), 1);
+        let const_zero = memcpy_start.cx.const_uint(
+            memcpy_start.cx.type_i64(), 0);
         let size_align = Align::from_bytes(8).unwrap();
+
         let dst = self.pointercast(dst, i8p);
         let src = self.pointercast(src, i8p);
         // Store the source and destination pointers to the stack.
-        let src_loc = self.alloca(i8_ty, "memcpy_src", src_align);
-        let dst_loc = self.alloca(i8_ty, "memcpy_dst", dst_align);
-        let size_loc = self.alloca(i8_ty, "memcpy_size", size_align);
+        let src_loc = self.alloca(i8p, "memcpy_src", src_align);
+        let dst_loc = self.alloca(i8p, "memcpy_dst", dst_align);
+        let size_loc = self.alloca(i8p, "memcpy_size", size_align);
         self.store(src, src_loc, src_align);
         self.store(dst, dst_loc, dst_align);
         self.store(size, size_loc, size_align);
@@ -1192,14 +1230,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let dst = memcpy_start.load(dst_loc, dst_align);
         let size = memcpy_start.load(size_loc, size_align);
         // Load the first byte pointed to by src.
-        memcpy_start.store(src, dst, dst_align);
-
-        let const_one = memcpy_start.cx.const_uint(
-            memcpy_start.cx.type_i8(), 1);
-        let const_zero = memcpy_start.cx.const_uint(
-            memcpy_start.cx.type_i64(), 0);
+        let src_val = memcpy_start.load(src, src_align);
+        memcpy_start.store(src_val, dst, dst_align);
 
         // src += 1; dst += 1;
+        let src = memcpy_start.pointercast(src, i64_ty);
+        let dst = memcpy_start.pointercast(dst, i64_ty);
+        let size = memcpy_start.pointercast(size, i64_ty);
+
         let new_src = memcpy_start.add(src, const_one);
         let new_dst = memcpy_start.add(dst, const_one);
         let new_size = memcpy_start.sub(size, const_one);

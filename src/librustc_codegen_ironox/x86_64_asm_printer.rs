@@ -1,7 +1,7 @@
 use super::ModuleIronOx;
 
 use context::CodegenCx;
-use ir::instruction::Instruction;
+use ir::instruction::{CompOp, Instruction};
 use ir::value::Value;
 
 use ir::basic_block::OxBasicBlock;
@@ -170,14 +170,16 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm2.asm);
             // the size in bits
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
-            let reg = Register::direct(SubRegister::reg(RAX, access_mode(size)));
+            let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
+            let reg2 = Register::direct(SubRegister::reg(RCX, access_mode(size)));
             asm.extend(vec![
-                MachineInst::mov(instr_asm1.result.unwrap(), reg),
-                MachineInst::add(instr_asm2.result.unwrap(), reg),
+                MachineInst::mov(instr_asm1.result.unwrap(), reg1),
+                MachineInst::mov(instr_asm2.result.unwrap(), reg2),
+                MachineInst::add(reg2, reg1),
             ]);
             // FIXME:
             let result = self.precompiled_result(inst);
-            asm.push(MachineInst::mov(reg, result.clone()));
+            asm.push(MachineInst::mov(reg1, result.clone()));
             CompiledInst::new(asm, result)
         } else {
             bug!("expected Instruction::Add, found {:?}", inst);
@@ -192,14 +194,16 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let mut instr_asm2 = self.compile_value(*rhs);
             asm.append(&mut instr_asm2.asm);
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
-            let reg = Register::direct(SubRegister::reg(RAX, access_mode(size)));
+            let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
+            let reg2 = Register::direct(SubRegister::reg(RCX, access_mode(size)));
             asm.extend(vec![
-                MachineInst::mov(instr_asm1.result.unwrap(), reg),
-                MachineInst::sub(instr_asm2.result.unwrap(), reg),
+                MachineInst::mov(instr_asm1.result.unwrap(), reg1),
+                MachineInst::mov(instr_asm2.result.unwrap(), reg2),
+                MachineInst::sub(reg2, reg1),
             ]);
             // FIXME:
             let result = self.precompiled_result(inst);
-            asm.push(MachineInst::mov(reg, result.clone()));
+            asm.push(MachineInst::mov(reg1, result.clone()));
             CompiledInst::new(asm, result)
         } else {
             bug!("expected Instruction::Sub, found {:?}", inst);
@@ -310,10 +314,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_cmp(&self, inst: &Instruction) -> CompiledInst {
+    fn compile_icmp(&self, inst: &Instruction) -> CompiledInst {
         match *inst {
-            Instruction::Eq(v1, v2) | Instruction::Lt(v1, v2) |
-            Instruction::Ne(v1, v2) => {
+            Instruction::Icmp(v1, v2, op) => {
+                // These instructions have a boolean result.
+                let cmp_res = self.precompiled_result(inst);
                 let mut asm = vec![];
                 let mut instr_asm1 = self.compile_value(v1);
                 asm.append(&mut instr_asm1.asm);
@@ -324,11 +329,34 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 // mov the value into a register an compare it with the second value
                 let reg = Register::direct(
                     SubRegister::reg(RAX, operand_access_mode(&result1, &result2)));
+                let res_res = Register::direct(
+                    SubRegister::reg(RCX, AccessMode::Low8));
+                // FIXME: check the instruction and set RCX to cmp result.
+                // mov cmp result to cmp_res
                 asm.extend(vec![
-                    MachineInst::mov(result2, reg),
-                    MachineInst::cmp(reg, result1),
+                    MachineInst::mov(result1, reg),
+                    MachineInst::cmp(result2, reg),
                 ]);
-                CompiledInst::with_instructions(asm)
+
+                let reg = Register::direct(SubRegister::reg(RAX, AccessMode::Low8));
+                let set = match op {
+                    CompOp::Eq => MachineInst::sete(reg),
+                    CompOp::Ne => MachineInst::setne(reg),
+                    CompOp::Ugt => MachineInst::seta(reg),
+                    CompOp::Sgt => MachineInst::setg(reg),
+                    CompOp::Uge => MachineInst::setae(reg),
+                    CompOp::Sge => MachineInst::setge(reg),
+                    CompOp::Ult => MachineInst::setb(reg),
+                    CompOp::Slt => MachineInst::setl(reg),
+                    CompOp::Ult => MachineInst::setbe(reg),
+                    CompOp::Sle => MachineInst::setle(reg),
+                    _ => unimplemented!("Operator: {:?}", op),
+                };
+                asm.extend(vec![
+                    set,
+                    MachineInst::mov(reg, cmp_res.clone()),
+                ]);
+                CompiledInst::new(asm, cmp_res)
             },
             _ => bug!("expected a comparison instruction, found {:?}", inst),
         }
@@ -342,17 +370,22 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let module = self.cx.module.borrow();
                     let cond_inst =
                         &module.functions[*fn_idx].basic_blocks[*bb_idx].instrs[*idx];
-                    let _ = self.compile_instruction(*cond);
-                    let true_branch_jmp = match cond_inst {
-                        Instruction::Eq(_, _) => MachineInst::je(bb1.to_string()),
-                        Instruction::Lt(_, _) => MachineInst::jl(bb1.to_string()),
-                        _ => MachineInst::je(bb1.to_string()),
-                        _ => unimplemented!("cond br: {:?}", cond),
-                    };
+                    let cond_val = self.compile_instruction(*cond).result.unwrap();
+                    let true_reg = Register::direct(
+                        SubRegister::reg(RCX, AccessMode::Low8));
+                    let cond_reg = Register::direct(
+                        SubRegister::reg(RDI, AccessMode::Low8));
                     asm.extend(vec![
-                        true_branch_jmp,
-                        MachineInst::jmp(bb2.to_string()),
+                        // Check if the condition is true
+                        MachineInst::mov(
+                            Operand::Immediate(1, AccessMode::Low8), true_reg),
+                        MachineInst::mov(cond_val, cond_reg),
+                        // Compile the result of evaluating the condition with 1.
+                        MachineInst::cmp(cond_reg, true_reg),
+                        // If the condition is true.
+                        MachineInst::je(bb1.to_string()),
                     ]);
+                    asm.push(MachineInst::jmp(bb2.to_string()));
                     CompiledInst::with_instructions(asm)
                 }
                 _ => {
@@ -420,10 +453,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     unimplemented!("AccessMode::Large({})", bytes)
                 },
                 _ => {
+                    let access_mode = src_result.access_mode();
                     let reg =
-                        Register::direct(SubRegister::reg(RCX,
-                                                          src_result.access_mode()));
+                        Register::direct(SubRegister::reg(RCX, access_mode));
                     asm.extend(vec![
+                        MachineInst::NOP,
+                        MachineInst::NOP,
                         MachineInst::NOP,
                         MachineInst::mov(dest_result, Register::direct(RAX)),
                         MachineInst::mov(src_result, reg),
@@ -463,8 +498,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_checkoverflow(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::CheckOverflow(inst, ty, signed) = inst {
-            let instr_asm = self.compile_instruction(*inst);
+        if let Instruction::CheckOverflow(check_inst, _, signed) = inst {
+            let result = self.precompiled_result(inst);
+            let instr_asm = self.compile_instruction(*check_inst);
             // Get register %dl.
             let reg = Register::direct(SubRegister::reg(RDX, AccessMode::Low8));
             let set_inst = if *signed {
@@ -472,7 +508,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             } else {
                 MachineInst::setb(reg)
             };
-            CompiledInst::new(vec![set_inst], Operand::from(reg))
+            let asm = vec![
+                set_inst,
+                MachineInst::mov(reg, result.clone()),
+            ];
+            CompiledInst::new(asm, result)
         } else {
             bug!("expected Instruction::CheckOverflow, found {:?}", inst);
         }
@@ -630,6 +670,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let asm = vec![
                     MachineInst::mov(compiled_v, reg),
                     MachineInst::lea(member_rbp_offset,
+                    // Store the result on the stack.
                                      Register::direct(RAX)),
                     MachineInst::mov(reg, Register::indirect(RAX)),
                 ];
@@ -679,18 +720,25 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_structgep(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::StructGep(agg, idx)= inst {
+        if let Instruction::StructGep(agg, idx) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
+            eprintln!("gep {:?} {:?} {}", agg_ty, types[*agg_ty.pointee_ty(&types)],
+                      idx);
+            // Agg is a pointer to a struct. To get its members, we must get the
+            // pointee of the pointer (the pointee is the struct itself).
             let offset = types[*agg_ty.pointee_ty(&types)].offset(*idx, &types);
             let agg_val = self.compile_value(*agg).result.unwrap();
             let stack_loc = self.precompiled_result(inst);
             // FIXME:
             let asm = vec![
-                MachineInst::lea(agg_val, Register::direct(RAX)),
+                // Move the pointer from agg_val to %rax.
+                MachineInst::mov(agg_val, Register::direct(RAX)),
+                // Find the offset of the field to get.
                 MachineInst::add(Operand::Immediate(offset as isize,
                                                     AccessMode::Full),
                                  Register::direct(RAX)),
+                // Store the result on the stack.
                 MachineInst::mov(Register::direct(RAX),
                                  stack_loc.clone()),
             ];
@@ -702,7 +750,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn compile_invoke(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Invoke { callee, args, then, catch } = inst {
-            unimplemented!("Invoke");
+            // Emit the call
+            self.compile_call(inst)
+            // FIXME: skip the resume for now
+            //unimplemented!("Invoke {:?}, {:?}", then, catch);
         } else {
             bug!("expected Instruction::Invoke, found {:?}", inst);
         }
@@ -710,32 +761,138 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn compile_resume(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Resume(v) = inst {
-            // FIXME: do nothing for now.
-            CompiledInst::with_instructions(vec![])
+            // FIXME: crash for now.
+            CompiledInst::with_instructions(vec![MachineInst::UD2])
         } else {
             bug!("expected Instruction::Resume, found {:?}", inst);
         }
     }
 
     fn compile_landingpad(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::LandingPad(ty, llfn, idx) = inst {
-            unimplemented!("LandingPad");
+        if let Instruction::LandingPad { ty, pers_fn, num_clauses, cleanup } = inst {
+            // FIXME: crash for now.
+            let landing_pad = self.precompiled_result(inst);
+            CompiledInst::new(vec![MachineInst::UD2], landing_pad)
         } else {
             bug!("expected Instruction::LandingPad, found {:?}", inst);
         }
     }
 
     fn compile_mul(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::Mul(lhs, rhs) = inst {
-            unimplemented!("Mul");
+        if let Instruction::Mul(lhs, rhs, signed) = inst {
+            let mut asm = vec![];
+            let mut instr_asm1 = self.compile_value(*lhs);
+            asm.append(&mut instr_asm1.asm);
+            let mut instr_asm2 = self.compile_value(*rhs);
+            asm.append(&mut instr_asm2.asm);
+            // The size in bits.
+            let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
+            let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
+            let reg2 = Register::direct(SubRegister::reg(RCX, access_mode(size)));
+            // The result of mul is actually in RDX:RAX. However, we only care
+            // about the low order bits from %rax, because multiplying two
+            // values of a particular bit width (type) always results in a value
+            // of that bit width (type).
+            let mul_inst = if *signed {
+                MachineInst::imul(reg2)
+            } else {
+                MachineInst::mul(reg2)
+            };
+            // FIXME:
+            let result = self.precompiled_result(inst);
+            asm.extend(vec![
+                MachineInst::mov(instr_asm1.result.unwrap(), reg1),
+                MachineInst::mov(instr_asm2.result.unwrap(), reg2),
+                mul_inst,
+                MachineInst::mov(reg1, result.clone()),
+            ]);
+            CompiledInst::new(asm, result)
+
         } else {
             bug!("expected Instruction::Mul, found {:?}", inst);
         }
     }
 
+    fn compile_switch(&self, inst: &Instruction) -> CompiledInst {
+        if let Instruction::Switch { value, default, cases } = inst {
+            let compiled_v = self.compile_value(*value);
+            let v_stack_loc = compiled_v.result.clone().unwrap();
+            // Load the value and compare it with each of the cases
+            let acc_mode = access_mode(
+                self.cx.val_ty(*value).size(&self.cx.types.borrow()));
+            let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
+            let mut asm = vec![MachineInst::mov(v_stack_loc, reg)];
+            let module = &self.cx.module.borrow();
+            for (v, bb) in cases {
+                let compiled_v = self.compile_value(*v);
+                asm.extend(compiled_v.asm);
+                let compiled_v = compiled_v.result.clone().unwrap();
+                let acc_mode = access_mode(
+                    self.cx.val_ty(*v).size(&self.cx.types.borrow()));
+                let v_reg = Register::direct(SubRegister::reg(RCX, acc_mode));
+                let bb = &module.functions[bb.0].basic_blocks[bb.1];
+                asm.extend(vec![
+                    MachineInst::mov(compiled_v, v_reg),
+                    MachineInst::cmp(reg, v_reg),
+                    MachineInst::je(bb.label.clone()),
+                ]);
+            }
+            let default = &module.functions[default.0].basic_blocks[default.1];
+            asm.push(MachineInst::jmp(default.label.clone()));
+            CompiledInst::with_instructions(asm)
+        } else {
+            bug!("expected Instruction::Switch, found {:?}", inst);
+        }
+    }
+
     fn compile_select(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Select(cond, then_val, else_val) = inst {
-            unimplemented!("Select");
+            match cond {
+                Value::Instruction(fn_idx, bb_idx, idx) => {
+                    let module = self.cx.module.borrow();
+                    let cond_inst =
+                        &module.functions[*fn_idx].basic_blocks[*bb_idx].instrs[*idx];
+                    let mut asm = Vec::new();
+                    let compiled_cond = self.compile_instruction(*cond).result.unwrap();
+                    let true_lbl = self.cx.get_sym_name("select_true");
+                    let done_lbl = self.cx.get_sym_name("select_done");
+                    let mut add_asm_and_get_result =
+                        |v: Value, asm: &mut Vec<MachineInst>| {
+                            let v = self.compile_value(v);
+                            asm.extend(v.asm);
+                            v.result.unwrap()
+                        };
+                    // then_val and else_val have the same type/access mode.
+                    let acc_mode = access_mode(
+                        self.cx.val_ty(*then_val).size(&self.cx.types.borrow()));
+                    let then_val = add_asm_and_get_result(*then_val, &mut asm);
+                    let else_val = add_asm_and_get_result(*else_val, &mut asm);
+                    let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
+                    // The stack location where the result of this instruction
+                    // will be stored.
+                    let stack_loc = self.precompiled_result(inst);
+                    let cond_reg = Register::direct(
+                        SubRegister::reg(RCX, AccessMode::Low8));
+                    asm.extend(vec![
+                        // Check if the condition is true
+                        MachineInst::mov(
+                            Operand::Immediate(1, AccessMode::Low8), cond_reg),
+                        MachineInst::cmp(compiled_cond, reg),
+                        MachineInst::je(true_lbl.clone()),
+                        MachineInst::mov(else_val, reg),
+                        MachineInst::mov(reg, stack_loc.clone()),
+                        MachineInst::jmp(done_lbl.clone()),
+                        MachineInst::Label(true_lbl),
+                        MachineInst::mov(then_val, reg),
+                        MachineInst::mov(reg, stack_loc.clone()),
+                        MachineInst::Label(done_lbl),
+                    ]);
+                    CompiledInst::new(asm, stack_loc)
+                }
+                _ => {
+                    bug!("cond must be a Value::Instruction, not {:?}", cond);
+                }
+            }
         } else {
             bug!("expected Instruction::Select, found {:?}", inst);
         }
@@ -760,8 +917,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             Instruction::Mul(..) => self.compile_mul(inst),
             Instruction::Call(..) => self.compile_call(inst),
             Instruction::Alloca(..) => self.compile_alloca(inst),
-            Instruction::Eq(..) | Instruction::Lt(..) |
-            Instruction::Ne(..) => self.compile_cmp(inst),
+            Instruction::Icmp(..) => self.compile_icmp(inst),
             Instruction::CondBr(..) => self.compile_condbr(inst),
             Instruction::Load(..) => self.compile_load(inst),
             Instruction::CheckOverflow(..) => self.compile_checkoverflow(inst),
@@ -773,8 +929,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             Instruction::Not(..) => self.compile_not(inst),
             Instruction::Invoke {..} => self.compile_invoke(inst),
             Instruction::Resume(..)=> self.compile_resume(inst),
-            Instruction::LandingPad(..)=> self.compile_landingpad(inst),
+            Instruction::LandingPad { .. } => self.compile_landingpad(inst),
             Instruction::Select(..)=> self.compile_select(inst),
+            Instruction::Switch { .. } => self.compile_switch(inst),
             _ => unimplemented!("instruction {:?}\n{:?}", inst, self.cx.types),
         };
         let compiled_inst = if let Some(ref result) = instr_asm.result {
@@ -862,7 +1019,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let result = Location::RbpOffset(-size, acc_mode);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    Instruction::Call(_, _) => {
+                    Instruction::Call(_, _) | Instruction::Invoke { .. } => {
                         let ret_ty = inst.val_ty(self.cx);
                         // If the function doesn't return anything, carry on.
                         if let OxType::Void = self.cx.types.borrow()[*ret_ty] {
@@ -904,8 +1061,22 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         param_movs.extend(asm.clone());
                         CompiledInst::new(asm.clone(), Operand::from(result_addr))
                     }
-                    Instruction::ExtractValue(..) |
+                    Instruction::ExtractValue(agg, idx) => {
+                        let types = self.cx.types.borrow();
+                        let agg_ty = self.cx.val_ty(*agg);
+                        let elt_size = match types[*agg_ty] {
+                            OxType::StructType { ref members, ref name } => {
+                                members[*idx as usize].size(&types)
+                            },
+                            ref ty => unimplemented!("ExtractValue({:?})", ty),
+                        };
+                        size += elt_size as isize / 8;
+                        let acc_mode = access_mode(elt_size);
+                        let result = Location::RbpOffset(-size, acc_mode);
+                        CompiledInst::with_result(Operand::from(result))
+                    }
                     Instruction::StructGep(..) => {
+                        // The size of a pointer
                         size += 8;
                         let result = Location::RbpOffset(-size, AccessMode::Full);
                         CompiledInst::with_result(Operand::from(result))
@@ -923,6 +1094,33 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         size += agg_size / 8;
                         let result =
                             Location::RbpOffset(-size, AccessMode::Full);
+                        CompiledInst::with_result(Operand::from(result))
+                    }
+                    Instruction::Select(_, v1, v2) => {
+                        let ty = self.cx.val_ty(*v1);
+                        assert_eq!(ty, self.cx.val_ty(*v2));
+                        let val_size = ty.size(&self.cx.types.borrow()) as isize;
+                        let acc_mode = access_mode(val_size as u64);
+                        size += val_size / 8;
+                        let result =
+                            Location::RbpOffset(-size, acc_mode);
+                        CompiledInst::with_result(Operand::from(result))
+                    }
+                    Instruction::LandingPad {ty, .. } => {
+                        let pad_size = ty.size(&self.cx.types.borrow()) as isize;
+                        let acc_mode = access_mode(pad_size as u64);
+                        size += pad_size / 8;
+                        let result =
+                            Location::RbpOffset(-size, acc_mode);
+                        CompiledInst::with_result(Operand::from(result))
+                    }
+                    Instruction::Icmp(..) | Instruction::CheckOverflow(..) => {
+                        // allocate a bool:
+                        let inst_size = 8;
+                        let acc_mode = access_mode(inst_size);
+                        size += inst_size as isize / 8;
+                        let result =
+                            Location::RbpOffset(-size, acc_mode);
                         CompiledInst::with_result(Operand::from(result))
                     }
                     _ => continue,

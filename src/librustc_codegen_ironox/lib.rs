@@ -22,8 +22,6 @@ extern crate syntax;
 extern crate tempfile;
 extern crate rustc_demangle;
 
-
-
 use std::sync::{mpsc, Arc};
 use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::dep_graph::DepGraph;

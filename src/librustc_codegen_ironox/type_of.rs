@@ -140,12 +140,12 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                 }
                 _ => None
             };
-            // FIXME: Packed is always false. Structs are never packed.
-            let packed = false;
+            // FIXME: Packed is always true. Structs are always packed.
+            let packed = true;
             match self.fields {
                 layout::FieldPlacement::Union(_) => {
                     //let fill = cx.type_padding_filler(layout.size, layout.align.abi);
-                    let packed = false;
+                    let packed = true;
                     match name {
                         None => {
                             cx.type_struct(&[], packed)
@@ -197,7 +197,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
     }
 
     fn scalar_ironox_type_at(&self, cx: &CodegenCx<'_, 'tcx>,
-                             scalar: &layout::Scalar) -> Type {
+                             scalar: &layout::Scalar,
+                             offset: Size) -> Type {
         match scalar.value {
             layout::Int(i, _) => cx.type_from_integer(i),
             layout::Float(FloatTy::F32) => cx.type_f32(),
@@ -266,7 +267,8 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                 index as u64
             }
             layout::FieldPlacement::Arbitrary { .. } => {
-                1 + (self.fields.memory_index(index) as u64) * 2
+                // FIXME:
+                self.fields.memory_index(index) as u64
             }
         }
     }
