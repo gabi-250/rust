@@ -1,4 +1,4 @@
-use abi::FnTypeExt;
+use abi::{FnTypeExt, IronOxType};
 use context::CodegenCx;
 use ir::instruction::Instruction;
 use type_of::LayoutIronOxExt;
@@ -123,12 +123,11 @@ impl Type {
                 let mut struct_size = 0;
                 for mem in members {
                     let size = mem.size(types);
-                    eprintln!("mem {:?} has size {:?}", mem, size);
                     struct_size += size;
                 }
-                eprintln!("struct {:?} has size {}", *self, struct_size);
                 struct_size
             },
+            OxType::Array { len, ty } => len * ty.size(types),
             ref ty => unimplemented!("size of {:?}", ty),
         }
     }
@@ -424,7 +423,7 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn cast_backend_type(&self, ty: &CastTarget) -> Type {
-        unimplemented!("cast_backend_type");
+        ty.ironox_type(self)
     }
 
     fn fn_backend_type(&self, ty: &FnType<'tcx, Ty<'tcx>>) -> Type {

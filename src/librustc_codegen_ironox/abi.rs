@@ -40,7 +40,13 @@ fn store(
     } else if ty.is_unsized_indirect() {
         bug!("unsized ArgType must be handled through store_fn_arg");
     } else if let PassMode::Cast(cast) = ty.mode {
-        unimplemented!("PassMode::Cast");
+        // Create a pointer type (points to a value which has the same type
+        // as the cast). In other words, make sure the destination is a pointer
+        // to the type of `val`.
+        let cast_ptr_ty = bx.type_ptr_to(cast.ironox_type(bx));
+        // Cast the destination to the pointer type.
+        let cast_dst = bx.pointercast(dst.llval, cast_ptr_ty);
+        bx.store(val, cast_dst, ty.layout.align.abi);
     } else {
         OperandValue::Immediate(val).store(bx, dst);
     }
@@ -109,6 +115,47 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 }
 
+// FIXME: copied from the llvm backend.
+impl IronOxType for CastTarget {
+    fn ironox_type(&self, cx: &CodegenCx<'ll, '_>) -> Type {
+        let rest_ll_unit = self.rest.unit.ironox_type(cx);
+        let (rest_count, rem_bytes) = if self.rest.unit.size.bytes() == 0 {
+            (0, 0)
+        } else {
+            (self.rest.total.bytes() / self.rest.unit.size.bytes(),
+            self.rest.total.bytes() % self.rest.unit.size.bytes())
+        };
+
+        if self.prefix.iter().all(|x| x.is_none()) {
+            // Simplify to a single unit when there is no prefix and size <= unit size
+            if self.rest.total <= self.rest.unit.size {
+                return rest_ll_unit;
+            }
+
+            // Simplify to array when all chunks are the same size and type
+            if rem_bytes == 0 {
+                return cx.type_array(rest_ll_unit, rest_count);
+            }
+        }
+
+        // Create list of fields in the main structure
+        let mut args: Vec<_> =
+            self.prefix.iter().flat_map(|option_kind| option_kind.map(
+                |kind| Reg { kind: kind, size: self.prefix_chunk }.ironox_type(cx)))
+            .chain((0..rest_count).map(|_| rest_ll_unit))
+            .collect();
+
+        // Append final integer
+        if rem_bytes != 0 {
+            // Only integers can be really split further.
+            assert_eq!(self.rest.unit.kind, RegKind::Integer);
+            args.push(cx.type_ix(rem_bytes * 8));
+        }
+
+        cx.type_struct(&args, false)
+    }
+}
+
 pub trait FnTypeExt<'tcx> {
     fn of_instance(cx: &CodegenCx<'ll, 'tcx>, instance: &ty::Instance<'tcx>) -> Self;
     fn new(cx: &CodegenCx<'_, 'tcx>, sig: ty::FnSig<'tcx>,
@@ -166,6 +213,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             let is_return = arg_idx.is_none();
             // The ArgType of the specified ty.
             let mut arg = ArgType::new(cx.layout_of(ty));
+
             if let layout::Abi::ScalarPair(ref a, ref b) = arg.layout.abi {
                 let mut a_attrs = ArgAttributes::new();
                 let mut b_attrs = ArgAttributes::new();
@@ -237,6 +285,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
 
                     _ => return
                 }
+
                 let size = arg.layout.size;
                 if arg.layout.is_unsized() || size > layout::Pointer.size(cx) {
                     arg.make_indirect();
@@ -286,7 +335,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
                 // it modifies
                 cx.type_void()
             },
-            _ => unimplemented!("mode: {:?}", self.ret.mode),
+            PassMode::Cast(cast) => cast.ironox_type(cx),
         };
 
         let mut idx = 0;

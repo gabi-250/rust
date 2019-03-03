@@ -375,8 +375,8 @@ impl CodegenBackend for IronOxCodegenBackend {
         if sess.opts.debugging_opts.incremental_info {
             bug!("IronOx does not support incremental compilation");
         }
+
         sess.compile_status()?;
-        //eprintln!("output type is {:?}", sess.opts.output_types);
         // No need to link unless this is an executable
         if !sess.opts.output_types.keys().any(|&i| i == OutputType::Exe ||
                                                    i == OutputType::Metadata) {

@@ -26,13 +26,54 @@ pub trait LayoutIronOxExt<'tcx> {
 fn struct_field_types(
     cx: &CodegenCx<'_, 'tcx>,
     layout: TyLayout<'tcx>) -> Vec<Type> {
-    let mut fields = vec![];
+    let field_count = layout.fields.count();
+
+    let mut packed = false;
+    let mut offset = Size::ZERO;
+    let mut prev_effective_align = layout.align.abi;
+    let mut result: Vec<_> = Vec::with_capacity(1 + field_count * 2);
     for i in layout.fields.index_by_increasing_offset() {
+        let target_offset = layout.fields.offset(i as usize);
         let field = layout.field(cx, i);
-        // FIXME: handle field alignment
-        fields.push(field.ironox_type(cx));
+        let effective_field_align = layout.align.abi
+            .min(field.align.abi)
+            .restrict_for_offset(target_offset);
+        packed |= effective_field_align < field.align.abi;
+
+        assert!(target_offset >= offset);
+        let padding = target_offset - offset;
+        let padding_align = prev_effective_align.min(effective_field_align);
+        assert_eq!(offset.align_to(padding_align) + padding, target_offset);
+        result.push(cx.type_padding_filler( padding, padding_align));
+
+        result.push(field.ironox_type(cx));
+        offset = target_offset + field.size;
+        prev_effective_align = effective_field_align;
     }
-    fields
+    if !layout.is_unsized() && field_count > 0 {
+        if offset > layout.size {
+            bug!("layout: {:#?} stride: {:?} offset: {:?}",
+                 layout, layout.size, offset);
+        }
+        let padding = layout.size - offset;
+        let padding_align = prev_effective_align;
+        assert_eq!(offset.align_to(padding_align) + padding, layout.size);
+        result.push(cx.type_padding_filler(padding, padding_align));
+        assert_eq!(result.len(), 1 + field_count * 2);
+    }
+
+    result
+
+    //let mut fields = vec![];
+    //eprintln!("Struct layout is {:?}", layout);
+    //for i in layout.fields.index_by_increasing_offset() {
+        //let target_offset = layout.fields.offset(i as usize);
+        //eprintln!("target offset is {:?}", target_offset);
+        //let field = layout.field(cx, i);
+        //// FIXME: handle field alignment
+        //fields.push(field.ironox_type(cx));
+    //}
+    //fields
 }
 
 impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
@@ -178,7 +219,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
         };
         cx.lltypes.borrow_mut().insert((self.ty, variant_index), llty);
         if let Some((llty, layout)) = defer {
-            let (llfields, packed) = (struct_field_types(cx, layout), false);
+            let (llfields, packed) = (struct_field_types(cx, layout), true);
             cx.set_struct_body(llty, &llfields, packed)
         }
         return llty;
@@ -268,7 +309,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             }
             layout::FieldPlacement::Arbitrary { .. } => {
                 // FIXME:
-                self.fields.memory_index(index) as u64
+                1 + (self.fields.memory_index(index) as u64) * 2
             }
         }
     }

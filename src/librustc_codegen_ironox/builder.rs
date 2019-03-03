@@ -252,6 +252,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             (module.functions[then_llbb.0].basic_blocks[then_llbb.1].label.clone(),
              module.functions[else_llbb.0].basic_blocks[else_llbb.1].label.clone())
         };
+        // FIXME: pass basic blocks not labels
         self.emit_instr(Instruction::CondBr(cond, true_label, false_label));
     }
 
@@ -1003,7 +1004,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         landing_pad: Value
     ) {
-        eprintln!("landing pad: {:?} = cleanup", landing_pad);
         match landing_pad {
             Value::Instruction(fn_idx, bb_idx, idx) => {
                 let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
@@ -1208,7 +1208,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let i8p = self.type_i8p();
         // Enough space for a pointer
         let i64_ty = self.type_i64();
+        let i64p = self.type_ptr_to(i64_ty);
         let const_one = memcpy_start.cx.const_uint(
+            memcpy_start.cx.type_i64(), 1);
+        let const_one_i64 = memcpy_start.cx.const_uint(
             memcpy_start.cx.type_i64(), 1);
         let const_zero = memcpy_start.cx.const_uint(
             memcpy_start.cx.type_i64(), 0);
@@ -1216,10 +1219,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
         let dst = self.pointercast(dst, i8p);
         let src = self.pointercast(src, i8p);
+        // FIXME: cast size to i64
         // Store the source and destination pointers to the stack.
         let src_loc = self.alloca(i8p, "memcpy_src", src_align);
         let dst_loc = self.alloca(i8p, "memcpy_dst", dst_align);
-        let size_loc = self.alloca(i8p, "memcpy_size", size_align);
+        let size_loc = self.alloca(i64_ty, "memcpy_size", size_align);
         self.store(src, src_loc, src_align);
         self.store(dst, dst_loc, dst_align);
         self.store(size, size_loc, size_align);
@@ -1234,9 +1238,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         memcpy_start.store(src_val, dst, dst_align);
 
         // src += 1; dst += 1;
-        let src = memcpy_start.pointercast(src, i64_ty);
-        let dst = memcpy_start.pointercast(dst, i64_ty);
-        let size = memcpy_start.pointercast(size, i64_ty);
+        let src = memcpy_start.pointercast(src, self.cx.type_i64());
+        let dst = memcpy_start.pointercast(dst, self.cx.type_i64());
 
         let new_src = memcpy_start.add(src, const_one);
         let new_dst = memcpy_start.add(dst, const_one);
@@ -1245,7 +1248,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // Store the pointers and the size back to the stack.
         memcpy_start.store(new_src, src_loc, src_align);
         memcpy_start.store(new_dst, dst_loc, dst_align);
-        memcpy_start.store(new_size, size_loc, dst_align);
+        memcpy_start.store(new_size, size_loc, size_align);
 
         let cond = memcpy_start.icmp(IntPredicate::IntUGT, new_size, const_zero);
         let memcpy_start_bb = memcpy_start.llbb();
@@ -1297,9 +1300,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             let a = self.load(a_ptr, place.align);
             let b_ptr = self.struct_gep(place.llval, 1);
             let b = self.load(b_ptr, place.align.restrict_for_offset(b_offset));
-            eprintln!("scalar pair {:?}", place);
-            eprintln!("a ptr {:?}", a_ptr);
-            eprintln!("b ptr {:?}", b_ptr);
             OperandValue::Pair(a, b)
         } else {
             OperandValue::Ref(place.llval, None, place.align)

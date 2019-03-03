@@ -151,7 +151,6 @@ impl Instruction {
                     if let OxType::PtrTo { pointee } = struct_ptr {
                         let struct_ty = &types[**pointee];
                         if let OxType::StructType { ref members, .. } = struct_ty {
-                            eprintln!("ptr to {:?}", members[idx as usize]);
                             members[idx as usize]
                         } else {
                             bug!("expected OxType::StructType, found {:?}", struct_ty);

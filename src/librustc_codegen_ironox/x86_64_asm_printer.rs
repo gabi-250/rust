@@ -268,10 +268,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 } else {
                     let result = self.precompiled_result(inst);
                     let acc_mode = result.access_mode();
-                    let offset = result.rbp_offset();
                     match acc_mode {
                         AccessMode::Large(16) => {
                             let am_full = AccessMode::Full;
+                            let offset = result.rbp_offset();
                             let result1 = Location::RbpOffset(offset, am_full);
                             let result2 = Location::RbpOffset(offset + 8, am_full);
                             asm.extend(vec![
@@ -279,7 +279,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                                     Register::direct(
                                         SubRegister::reg(RAX, AccessMode::Full)),
                                     result1),
-                                // FIXME: load RDX at result - 8
+                                // Load RDX at result + 8
                                 MachineInst::mov(
                                     Register::direct(
                                         SubRegister::reg(RDX, AccessMode::Full)),
@@ -558,9 +558,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 asm.append(&mut instr_asm.asm);
                 let result = instr_asm.result.unwrap();
                 let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
-                if (size > 64) {
-                    //panic!("size too large {:?}", size);
-                } else {
+                if size <= 64 {
                     let reg_full =
                         Register::direct(SubRegister::reg(RAX, AccessMode::Full));
                     let reg =
@@ -571,8 +569,24 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         MachineInst::xor(reg_full, reg_full),
                         MachineInst::mov(result, reg),
                     ]);
-                    asm.append(&mut FunctionPrinter::emit_epilogue());
+                } else if size == 128 {
+                    // The return value is placed in RAX:RDX
+                    let rax = Register::direct(RAX);
+                    let rdx = Register::direct(RDX);
+
+                    let offset = result.rbp_offset();
+                    let am_full = AccessMode::Full;
+                    let result_lo = Location::RbpOffset(offset, am_full);
+                    let result_hi = Location::RbpOffset(offset + 8, am_full);
+                    asm.extend(vec![
+                        MachineInst::mov(result_lo, rax),
+                        MachineInst::mov(result_hi, rdx),
+                    ]);
+
+                } else {
+                    bug!("Unsupported return value size: {:?}", size);
                 }
+                asm.append(&mut FunctionPrinter::emit_epilogue());
                 CompiledInst::with_instructions(asm)
             } else {
                 asm.append(&mut FunctionPrinter::emit_epilogue());
@@ -728,10 +742,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // Agg is a pointer to a struct. To get its members, we must get the
             // pointee of the pointer (the pointee is the struct itself).
             let offset = types[*agg_ty.pointee_ty(&types)].offset(*idx, &types);
+
+            assert!(offset % 8 == 0);
+            let offset = offset / 8;
             let agg_val = self.compile_value(*agg).result.unwrap();
             let stack_loc = self.precompiled_result(inst);
             // FIXME:
             let asm = vec![
+                MachineInst::NOP,
                 // Move the pointer from agg_val to %rax.
                 MachineInst::mov(agg_val, Register::direct(RAX)),
                 // Find the offset of the field to get.
@@ -1011,6 +1029,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let instr_asm = match inst {
                     Instruction::Add(..) |
                     Instruction::Sub(..) |
+                    Instruction::Mul(..) |
                     Instruction::Load(..) => {
                         let inst_size =
                             inst.val_ty(self.cx).size(&self.cx.types.borrow());

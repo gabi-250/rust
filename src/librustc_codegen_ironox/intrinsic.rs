@@ -18,7 +18,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         llresult: Value,
         span: Span,
     ) {
-        eprintln!("Ignoring intrinsic call {:?}", callee_ty);
+        // Do nothing.
     }
 
     fn abort(&mut self) {
@@ -26,7 +26,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn assume(&mut self, val: Value) {
-        unimplemented!("assume");
+        // Do nothing.
     }
 
     fn expect(&mut self, cond: Value, expected: bool) -> Value {

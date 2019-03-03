@@ -38,9 +38,9 @@ pub unsafe fn codegen(
     if config.obj_is_bitcode || config.emit_bc {
         unimplemented!("IronOx can't emit bitcode!");
     }
+
     let module_name = module.name.clone();
     let module_name = Some(&module_name[..]);
-
     let obj_path =
         cgcx.output_filenames.temp_path(OutputType::Object, module_name);
     match module.kind {
