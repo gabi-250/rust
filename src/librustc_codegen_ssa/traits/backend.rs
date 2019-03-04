@@ -38,7 +38,12 @@ pub trait ExtraBackendMethods: CodegenBackend + WriteBackendMethods + Sized + Se
         tcx: TyCtxt<'b, 'gcx, 'gcx>,
         metadata: &Self::Module,
     ) -> EncodedMetadata;
-    fn codegen_allocator(&self, tcx: TyCtxt, mods: &Self::Module, kind: AllocatorKind);
+    fn codegen_allocator<'b, 'gcx>(
+        &self,
+        tcx: TyCtxt<'b, 'gcx, 'gcx>,
+        mods: &Self::Module,
+        kind: AllocatorKind
+    );
     fn compile_codegen_unit<'a, 'tcx: 'a>(
         &self,
         tcx: TyCtxt<'a, 'tcx, 'tcx>,
