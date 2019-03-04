@@ -109,7 +109,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let result = Operand::Immediate(value as isize, acc_mode);
                 CompiledInst::with_result(result)
             }
-            Value::Param(_, _) => {
+            Value::Param(..) => {
                 if let Some(instr_asm) = self.compiled_params.borrow().get(&value) {
                     let result = instr_asm.result.clone();
                     CompiledInst::with_result(result.unwrap())
@@ -621,6 +621,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             match types[*agg_ty] {
                 OxType::StructType { ref members, ref name } => {
                     let offset = types[*agg_ty].offset(*idx, &types);
+                    assert!(offset % 8 == 0);
+                    let offset = offset / 8;
                     let agg_val = self.compile_value(*agg).result.unwrap();
                     let stack_loc = self.precompiled_result(inst);
                     let asm = vec![
@@ -628,8 +630,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         MachineInst::add(Operand::Immediate(offset as isize,
                                                             AccessMode::Full),
                                          Register::direct(RAX)),
-                        MachineInst::mov(Register::direct(RAX),
-                                         Register::indirect(RAX)),
+                        MachineInst::mov(Register::indirect(RAX),
+                                         Register::direct(RAX)),
                         MachineInst::mov(Register::direct(RAX),
                                          stack_loc.clone()),
                     ];
@@ -663,6 +665,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         // The offset within the aggregated of the member at
         // position `idx`.
         let offset = types[*agg_ty].offset(idx, &types) as isize;
+        assert!(offset % 8 == 0);
+        let offset = offset / 8;
+
         //let agg_val = self.compile_value(*agg);
         let compiled_v = self.compile_value(v).result.unwrap();
         let member_rbp_offset = agg_dst.rbp_offset() + offset;
@@ -766,6 +771,54 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
+    fn compile_gep(&self, inst: &Instruction) -> CompiledInst {
+        if let Instruction::Gep(agg, indices, inbounds) = inst {
+            let types = self.cx.types.borrow();
+            let agg_ty = self.cx.val_ty(*agg);
+            // FIXME: normally, the indices of a GEP must be constants (they need
+            // to be known at compile-time). However if an index is used to
+            // index into an array, it doesn't have to be a constants (because
+            // the type of the resulting GEP can be known statically anyway).
+
+            // Get a pointer to the aggregate.
+            let agg_ptr = self.compile_value(*agg).result.unwrap();
+            // The first index indexes through the struct ptrs.
+            let index_val = self.compile_value(indices[0]).result.unwrap();
+            // Find out how many bytes to add to the base address to get to the
+            // desired index.
+            //
+            // First, find out the type of the struct:
+            let agg_pointee = agg_ty.pointee_ty(&types);
+            // Find out the size of the struct:
+            let offset = agg_pointee.size(&types);
+            assert!(offset % 8 == 0);
+            let offset = offset / 8;
+            // The address where the result of this instruction will be stored.
+            let stack_loc = self.precompiled_result(inst);
+            let asm = vec![
+                MachineInst::NOP,
+                MachineInst::NOP,
+                // Find the offset of the field to get.
+                MachineInst::mov(Operand::Immediate(offset as isize, AccessMode::Full),
+                                 Register::direct(RAX)),
+                MachineInst::mov(index_val, Register::direct(RCX)),
+                MachineInst::mul(Register::direct(RCX)),
+                // Move the pointer from agg_val to %rax.
+                MachineInst::add(agg_ptr.clone(), Register::direct(RAX)),
+                // Store the result on the stack.
+                MachineInst::mov(Register::direct(RAX), stack_loc.clone()),
+            ];
+            for index in indices.iter().skip(1) {
+                unimplemented!("instruction gep {:?} {:?} {:?}", agg_ptr,
+                               index, types);
+            }
+            CompiledInst::new(asm, stack_loc)
+        } else {
+            bug!("expected Instruction::Gep, found {:?}", inst);
+        }
+    }
+
+
     fn compile_invoke(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Invoke { callee, args, then, catch } = inst {
             // Emit the call
@@ -816,7 +869,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             } else {
                 MachineInst::mul(reg2)
             };
-            // FIXME:
             let result = self.precompiled_result(inst);
             asm.extend(vec![
                 MachineInst::mov(instr_asm1.result.unwrap(), reg1),
@@ -950,6 +1002,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             Instruction::LandingPad { .. } => self.compile_landingpad(inst),
             Instruction::Select(..)=> self.compile_select(inst),
             Instruction::Switch { .. } => self.compile_switch(inst),
+            Instruction::Gep(..) => self.compile_gep(inst),
             _ => unimplemented!("instruction {:?}\n{:?}", inst, self.cx.types),
         };
         let compiled_inst = if let Some(ref result) = instr_asm.result {
@@ -1094,7 +1147,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let result = Location::RbpOffset(-size, acc_mode);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    Instruction::StructGep(..) => {
+                    Instruction::StructGep(..) | Instruction::Gep(..) => {
                         // The size of a pointer
                         size += 8;
                         let result = Location::RbpOffset(-size, AccessMode::Full);

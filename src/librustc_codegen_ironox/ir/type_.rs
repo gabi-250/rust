@@ -353,7 +353,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         match v {
             Value::ConstUint(const_idx) => self.u_consts.borrow()[const_idx].ty,
             Value::ConstInt(const_idx) => self.i_consts.borrow()[const_idx].ty,
-            Value::Param(_, ty) => ty,
+            Value::Param(_, _, ty) => ty,
             Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
             Value::Instruction(fn_idx, bb_idx, inst_idx) => {
                 let inst = &module

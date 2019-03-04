@@ -185,15 +185,14 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
             let packed = true;
             match self.fields {
                 layout::FieldPlacement::Union(_) => {
-                    //let fill = cx.type_padding_filler(layout.size, layout.align.abi);
+                    let fill = cx.type_padding_filler(self.size, self.align.abi);
                     let packed = true;
                     match name {
                         None => {
-                            cx.type_struct(&[], packed)
+                            cx.type_struct(&[fill], packed)
                         }
                         Some(ref name) => {
-                            // FIXME &[]
-                            let llty = cx.type_named_struct(name, &[], packed);
+                            let llty = cx.type_named_struct(name, &[fill], packed);
                             llty
                         }
                     }

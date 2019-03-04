@@ -101,7 +101,7 @@ impl Instruction {
                 },
                 _ => unimplemented!("Load from instruction {:?}", inst)
             }
-        } else if let Value::Param(_, ty) = val {
+        } else if let Value::Param(_, _, ty) = val {
             if let OxType::PtrTo { ref pointee } = cx.types.borrow()[*ty] {
                 *pointee
             } else {
@@ -191,6 +191,15 @@ impl Instruction {
                 ty
             },
             Instruction::Icmp(..) => cx.type_bool(),
+            Instruction::Gep(agg, ref offsets, inbounds) => {
+                let ty = cx.val_ty(agg);
+                let ty = ty.pointee_ty(&cx.types.borrow());
+                for offset in offsets.iter().skip(1) {
+                    unimplemented!("instruction gep {:?} {:?} {:?}", agg,
+                                   offset, cx.types.borrow());
+                }
+                ty
+            },
             _ => unimplemented!("instruction {:?}", *self),
         }
     }
