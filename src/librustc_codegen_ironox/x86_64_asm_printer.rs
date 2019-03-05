@@ -630,8 +630,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         MachineInst::add(Operand::Immediate(offset as isize,
                                                             AccessMode::Full),
                                          Register::direct(RAX)),
-                        MachineInst::mov(Register::indirect(RAX),
-                                         Register::direct(RAX)),
                         MachineInst::mov(Register::direct(RAX),
                                          stack_loc.clone()),
                     ];
@@ -918,6 +916,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     fn compile_select(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Select(cond, then_val, else_val) = inst {
             match cond {
+                // FIXME: assert that the condition is either an i1 or a vector
+                // of i1.
                 Value::Instruction(fn_idx, bb_idx, idx) => {
                     let module = self.cx.module.borrow();
                     let cond_inst =
@@ -945,9 +945,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         SubRegister::reg(RCX, AccessMode::Low8));
                     asm.extend(vec![
                         // Check if the condition is true
-                        MachineInst::mov(
-                            Operand::Immediate(1, AccessMode::Low8), cond_reg),
-                        MachineInst::cmp(compiled_cond, reg),
+                        MachineInst::mov(then_val.clone(), cond_reg),
+                        MachineInst::cmp(compiled_cond, cond_reg),
                         MachineInst::je(true_lbl.clone()),
                         MachineInst::mov(else_val, reg),
                         MachineInst::mov(reg, stack_loc.clone()),

@@ -15,6 +15,29 @@ use rustc_codegen_ssa::MemFlags;
 use rustc_target::abi::call::FnType;
 use syntax_pos::Span;
 
+
+fn memset_intrinsic(
+    bx: &mut Builder<'a, 'll, 'tcx>,
+    volatile: bool,
+    ty: Ty<'tcx>,
+    dst: Value,
+    val: Value,
+    count: Value
+) {
+    let layout = bx.layout_of(ty);
+    let (size, align) = (layout.size, layout.align.abi);
+    let size_bytes = {
+        bx.const_usize(size.bytes())
+    };
+    let size = bx.mul(size_bytes, count);
+    let flags = if volatile {
+        MemFlags::VOLATILE
+    } else {
+        MemFlags::empty()
+    };
+    bx.memset(dst, val, size, align, flags);
+}
+
 impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn codegen_intrinsic_call(
         &mut self,
@@ -74,6 +97,36 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
                 let size = self.mul(size_bytes, count);
                 let flags = MemFlags::empty();
                 self.memcpy(dst, align, src, align, size, flags);
+                None
+            }
+            "min_align_of" => {
+                let tp_ty = substs.type_at(0);
+                let layout = self.layout_of(tp_ty);
+                let align = layout.align.abi;
+                Some(self.const_usize(align.bytes()))
+            }
+            "init" => {
+                let ty = substs.type_at(0);
+                if !self.layout_of(ty).is_zst() {
+                    // Just zero out the stack slot.
+                    // If we store a zero constant, LLVM will drown in vreg allocation for large
+                    // data structures, and the generated code will be awful. (A telltale sign of
+                    // this is large quantities of `mov [byte ptr foo],0` in the generated code.)
+                    let const_u8 = {
+                        self.const_u8(0)
+                    };
+                    let const_usize = {
+                        self.const_usize(1)
+                    };
+                    memset_intrinsic(
+                        self,
+                        false,
+                        ty,
+                        llresult,
+                        const_u8,
+                        const_usize
+                    );
+                }
                 None
             }
 

@@ -1208,17 +1208,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let i8p = self.type_i8p();
         // Enough space for a pointer
         let i64_ty = self.type_i64();
-        let i64p = self.type_ptr_to(i64_ty);
         let const_one = memcpy_start.cx.const_uint(
-            memcpy_start.cx.type_i64(), 1);
-        let const_one_i64 = memcpy_start.cx.const_uint(
             memcpy_start.cx.type_i64(), 1);
         let const_zero = memcpy_start.cx.const_uint(
             memcpy_start.cx.type_i64(), 0);
         let size_align = Align::from_bytes(8).unwrap();
-
-        let dst = self.pointercast(dst, i8p);
+        // FIXME: check if size is 0.
         let src = self.pointercast(src, i8p);
+        let dst = self.pointercast(dst, i8p);
         // FIXME: cast size to i64
         // Store the source and destination pointers to the stack.
         let src_loc = self.alloca(i8p, "memcpy_src", src_align);
@@ -1271,13 +1268,51 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn memset(
         &mut self,
-        ptr: Self::Value,
-        fill_byte: Self::Value,
-        size: Self::Value,
+        ptr: Value,
+        fill_byte: Value,
+        size: Value,
         align: Align,
         flags: MemFlags,
     ) {
-        unimplemented!("memset");
+
+        let mut memset_start = self.build_sibling_block("memset_start");
+        let mut memset_end = self.build_sibling_block("memset_end");
+        let i8p = self.type_i8p();
+        // Enough space for a pointer
+        let i64_ty = self.type_i64();
+        let const_one = memset_start.cx.const_uint(
+            memset_start.cx.type_i64(), 1);
+        let const_zero = memset_start.cx.const_uint(
+            memset_start.cx.type_i64(), 0);
+        let size_align = Align::from_bytes(8).unwrap();
+
+        let ptr = self.pointercast(ptr, i8p);
+        let ptr_loc = self.alloca(i8p, "memset_ptr", align);
+        let size_loc = self.alloca(i64_ty, "memset_size", size_align);
+        self.store(ptr, ptr_loc, align);
+        self.store(size, size_loc, size_align);
+        // Branch to memset_start.
+        self.br(memset_start.llbb());
+        // Load the pointer from the stack.
+        let ptr = memset_start.load(ptr_loc, align);
+        let size = memset_start.load(size_loc, size_align);
+        memset_start.store(fill_byte, ptr, align);
+
+        // ptr += 1
+        let ptr = memset_start.pointercast(ptr, self.cx.type_i64());
+
+        let new_ptr = memset_start.add(ptr, const_one);
+        let new_size = memset_start.sub(size, const_one);
+
+        // Store the pointers and the size back to the stack.
+        memset_start.store(ptr, ptr_loc, align);
+        memset_start.store(new_size, size_loc, size_align);
+
+        let cond = memset_start.icmp(IntPredicate::IntUGT, new_size, const_zero);
+        let memset_start_bb = memset_start.llbb();
+        let memset_end_bb = memset_end.llbb();
+        memset_start.cond_br(cond, memset_start_bb, memset_end_bb);
+        *self = memset_end;
     }
 
     fn load_operand(&mut self, place: PlaceRef<'tcx, Value>)

@@ -317,7 +317,6 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             if let PassMode::Indirect(..) = self.ret.mode { 1 } else { 0 }
         };
         let args_capacity: usize = self.args.iter().map(|arg|
-            //if arg.pad.is_some() { 1 } else { 0 } +
             if let PassMode::Pair(_, _) = arg.mode { 2 } else { 1 }
         ).sum();
         let mut arg_tys = Vec::with_capacity(return_val_as_param + args_capacity);
@@ -338,9 +337,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             PassMode::Cast(cast) => cast.ironox_type(cx),
         };
 
-        let mut idx = 0;
         for arg in &self.args {
-            idx += 1;
             let arg_ty = match arg.mode {
                 PassMode::Ignore => continue,
                 PassMode::Direct(_) => {

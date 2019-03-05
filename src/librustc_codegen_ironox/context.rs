@@ -356,7 +356,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_u8(&self, i: u8) -> Value {
-        unimplemented!("const_u8");
+        self.const_unsigned(self.type_i8(), i as u128)
     }
 
     fn const_cstr(
