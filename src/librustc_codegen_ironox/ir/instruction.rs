@@ -107,6 +107,12 @@ impl Instruction {
                         unimplemented!("Call to {:?}", llfn);
                     }
                 },
+                Instruction::Gep(..) => {
+                    let ty = cx.val_ty(val);
+                    let ty = ty.pointee_ty(&cx.types.borrow());
+                    eprintln!("The load ty of this gep is {:?}", ty);
+                    ty
+                }
                 _ => unimplemented!("Load from instruction {:?}", inst)
             }
         } else if let Value::Param(_, _, ty) = val {
@@ -199,15 +205,23 @@ impl Instruction {
                 ty
             },
             Instruction::Icmp(..) => cx.type_bool(),
-            Instruction::Gep(agg, ref offsets, inbounds) => {
+            Instruction::Gep(agg, ref indices, inbounds) => {
                 let ty = cx.val_ty(agg);
                 let ty = ty.pointee_ty(&cx.types.borrow());
                 let arr_ty = match cx.types.borrow()[*ty] {
                     OxType::Array { len, ty } => {
-                        assert_eq!(offsets.len(), 2);
+                        assert_eq!(indices.len(), 2);
                         ty
                     },
-                    _ => unimplemented!("GEP({:?})", ty),
+                    OxType::Scalar(..) => ty,
+                    OxType::StructType { .. } => {
+                        // The type of a getelementptr on a struct* is a struct*
+                        // if the getelementptr uses a single index.
+                        // FIXME: explain this better.
+                        assert_eq!(indices.len(), 1);
+                        ty
+                    }
+                    _ => unimplemented!("GEP({:?}) {:?}", ty, cx.types.borrow()),
                 };
                 cx.type_ptr_to(ty)
             },

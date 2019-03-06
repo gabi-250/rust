@@ -279,8 +279,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             let offset = result.rbp_offset();
                             let result1 = Location::RbpOffset(offset, am_full);
                             let result2 = Location::RbpOffset(offset + 8, am_full);
-                            eprintln!("result 1 {:?}", result1);
-                            eprintln!("result 2 {:?}", result2);
                             asm.extend(vec![
                                 MachineInst::mov(
                                     Register::direct(
@@ -322,7 +320,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_icmp(&self, inst: &Instruction) -> CompiledInst {
-        eprintln!("ICMP is {:?}", inst);
         match *inst {
             Instruction::Icmp(v1, v2, op) => {
                 // These instructions have a boolean result.
@@ -356,7 +353,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     CompOp::Sge => MachineInst::setge(reg),
                     CompOp::Ult => MachineInst::setb(reg),
                     CompOp::Slt => MachineInst::setl(reg),
-                    CompOp::Ult => MachineInst::setbe(reg),
+                    CompOp::Ule => MachineInst::setbe(reg),
                     CompOp::Sle => MachineInst::setle(reg),
                     _ => unimplemented!("Operator: {:?}", op),
                 };
@@ -415,7 +412,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_store(&self, inst: &Instruction) -> CompiledInst {
-        eprintln!("\t\tstore: {:?}", inst);
         if let Instruction::Store(dest, src) = inst {
             let mut asm = vec![];
             let mut instr_asm1 = self.compile_value(*dest);
@@ -424,15 +420,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm2.asm);
             let dest_result = instr_asm1.result.clone().unwrap();
             let src_result = instr_asm2.result.unwrap();
-            eprintln!("instr_asm1: {:?}", instr_asm1);
-            eprintln!("src: {:?}", src_result);
-            eprintln!("dst: {:?}", dest_result);
             let src_am = src_result.access_mode();
+            eprintln!("Move from {:?} -> {:?}", src_result, dest_result);
             match src_am {
                 AccessMode::Large(16) => {
                     match (&src_result, &dest_result) {
-                        (Operand::Loc(Location::RbpOffset(src_offset, _)),
-                         Operand::Loc(Location::RbpOffset(dst_offset, _))) => {
+                        (Operand::Loc(Location::RbpOffset(src_offset, sam)),
+                         Operand::Loc(Location::RbpOffset(dst_offset, dam))) => {
                             let am_full = AccessMode::Full;
                             // Move two quad words from src to dst.
                             let reg =
@@ -447,13 +441,17 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                                 MachineInst::mov(dest_result.clone(),
                                                  Register::direct(RAX)),
                                 MachineInst::mov(src_word1, reg),
-                                MachineInst::mov(reg, Register::indirect(RAX)),
-                                // Move the second word.
-                                MachineInst::add(Operand::Immediate(8, am_full),
-                                                 Register::direct(RAX)),
-                                MachineInst::mov(src_word2, reg),
-                                MachineInst::mov(reg, Register::indirect(RAX)),
+                                MachineInst::mov(reg, Register::indirect(RAX))
                             ]);
+                            if let AccessMode::Large(16) = dam {
+                                asm.extend(vec![
+                                    // Move the second word.
+                                    MachineInst::add(Operand::Immediate(8, am_full),
+                                                     Register::direct(RAX)),
+                                    MachineInst::mov(src_word2, reg),
+                                    MachineInst::mov(reg, Register::indirect(RAX)),
+                                ]);
+                            }
                          },
                          _ => {
                             bug!("Invalid src-dst pair: ({:?}, {:?})",
@@ -495,14 +493,46 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let acc_mode = access_mode(inst_size as u64);
             let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
             let result = self.precompiled_result(inst);
-            asm.extend(vec![
-                // This assumes instr_asm.result is a stack location.
-                MachineInst::mov(instr_asm.result.unwrap(), Register::direct(RAX)),
-                MachineInst::mov(Register::indirect(RAX),
-                                 Register::direct(SubRegister::reg(RAX, acc_mode))),
-                MachineInst::mov(Register::direct(SubRegister::reg(RAX, acc_mode)),
-                                 result.clone()),
-            ]);
+            match acc_mode {
+                AccessMode::Large(16) => {
+                    asm.extend(vec![
+                        MachineInst::mov(instr_asm.result.unwrap(),
+                                         Register::direct(RAX)),
+                        // Copy the first quad-word.
+                        MachineInst::mov(Register::indirect(RAX),
+                                         Register::direct(RDI)),
+                        // Copy the second quad-word.
+                        MachineInst::add(Operand::Immediate(8, AccessMode::Full),
+                                         Register::direct(RAX)),
+                        MachineInst::mov(Register::indirect(RAX),
+                                         Register::direct(RSI)),
+
+                        MachineInst::lea(result.clone(),
+                                         Register::direct(RAX)),
+                        MachineInst::mov(Register::direct(RDI),
+                                         Register::indirect(RAX)),
+                        // Move the second word...
+                        MachineInst::add(Operand::Immediate(8, AccessMode::Full),
+                                         Register::direct(RAX)),
+                        MachineInst::mov(Register::direct(RSI),
+                                         Register::indirect(RAX)),
+                    ]);
+
+                },
+                AccessMode::Large(bytes) => bug!("Unsupported mode: {:?}", acc_mode),
+                _ => {
+                    asm.extend(vec![
+                        MachineInst::mov(instr_asm.result.unwrap(),
+                                         Register::direct(RAX)),
+                        MachineInst::mov(Register::indirect(RAX),
+                                         Register::direct(SubRegister::reg(RAX,
+                                                                           acc_mode))),
+                        MachineInst::mov(Register::direct(SubRegister::reg(RAX,
+                                                                           acc_mode)),
+                                         result.clone()),
+                    ]);
+                }
+            }
             CompiledInst::new(asm, result)
         } else {
             bug!("expected Instruction::Load, found {:?}", inst);
@@ -531,13 +561,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_cast(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::Cast(inst, ty) = inst {
-            let mut v = self.compile_value(*inst);
+        if let Instruction::Cast(cast, ty) = inst {
+            let stack_loc = self.precompiled_result(inst);
+            let mut v = self.compile_value(*cast);
             if let Some(mut op) = v.result {
                 let old_acc_mode = op.access_mode();
                 let val_size = ty.size(&self.cx.types.borrow());
                 let new_acc_mode = access_mode(val_size);
-                let op_new = op.with_acc_mode(new_acc_mode);
                 if old_acc_mode < new_acc_mode {
                     // This is a widening cast. When switching to a larger
                     // subregister for example (%ax -> %rax), make sure there
@@ -549,10 +579,17 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     v.asm.extend(vec![
                         MachineInst::xor(reg_new, reg_new),
                         MachineInst::mov(op, reg_old),
-                        MachineInst::mov(reg_new, op_new.clone()),
+                        MachineInst::mov(reg_new, stack_loc.clone()),
+                    ]);
+                } else {
+                    let old_acc_mode = op.access_mode();
+                    let rax = Register::direct(SubRegister::reg(RAX, old_acc_mode));
+                    v.asm.extend(vec![
+                        MachineInst::mov(op, rax),
+                        MachineInst::mov(rax, stack_loc.clone())
                     ]);
                 }
-                v.result = Some(op_new);
+                v.result = Some(stack_loc);
             }
             v
         } else {
@@ -840,7 +877,33 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         ]);
                     }
                 },
-                ref ty => unimplemented!("Gep of ty {:?}", ty)
+                OxType::StructType { .. } if indices.len() > 1 => {
+                    unimplemented!("gep({:?}) with indices {:?}", agg_ty, indices);
+                }
+                _ => {
+                    // An i8*, struct* etc
+                    assert_eq!(indices.len(), 1);
+                    let (ty, ref index_val) = indices[0];
+                    let ty_size = ty.size(&types);
+                    assert!(ty_size % 8 == 0);
+                    let ty_size = ty_size as u64 / 8;
+                    // %rcx initially contains the base address of the array.
+                    let rcx = Register::direct(RCX);
+                    // %rax stores the number of bytes to add to %rcx to get
+                    // to the desired 'element'.
+                    let rax = Register::direct(RAX);
+                    // FIXME: duplication
+                    asm.extend(vec![
+                        MachineInst::mov(stack_loc.clone(), rcx),
+                        MachineInst::mov(index_val.clone(), rax),
+                        MachineInst::mov(Operand::Immediate(ty_size as isize,
+                                                            AccessMode::Full),
+                                         Register::direct(RSI)),
+                        MachineInst::mul(Register::direct(RSI)),
+                        MachineInst::add(rax, rcx),
+                        MachineInst::mov(rcx, stack_loc.clone()),
+                    ]);
+                }
             }
             CompiledInst::new(asm, stack_loc)
         } else {
@@ -1222,6 +1285,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     Instruction::Icmp(..) | Instruction::CheckOverflow(..) => {
                         // allocate a bool:
                         let inst_size = 8;
+                        let acc_mode = access_mode(inst_size);
+                        size += inst_size as isize / 8;
+                        let result =
+                            Location::RbpOffset(-size, acc_mode);
+                        CompiledInst::with_result(Operand::from(result))
+                    }
+                    Instruction::Cast(_, ty) => {
+                        let inst_size = ty.size(&self.cx.types.borrow());
                         let acc_mode = access_mode(inst_size);
                         size += inst_size as isize / 8;
                         let result =

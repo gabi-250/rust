@@ -65,10 +65,8 @@ fn struct_field_types(
     result
 
     //let mut fields = vec![];
-    //eprintln!("Struct layout is {:?}", layout);
     //for i in layout.fields.index_by_increasing_offset() {
         //let target_offset = layout.fields.offset(i as usize);
-        //eprintln!("target offset is {:?}", target_offset);
         //let field = layout.field(cx, i);
         //// FIXME: handle field alignment
         //fields.push(field.ironox_type(cx));

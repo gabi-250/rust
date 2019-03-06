@@ -506,7 +506,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         alloc: &Allocation,
         offset: Size,
     ) -> PlaceRef<'tcx, Value> {
-        unimplemented!("from_const_alloc");
+        unimplemented!("from_const_alloc {:?} {:?}\n{:?}\n{:?}",
+                       layout.ty.sty, layout, alloc, offset);
 /*        let mut llvals = Vec::with_capacity(alloc.relocations.len() + 1);*/
         //let dl = self.data_layout();
         //let pointer_size = dl.pointer_size.bytes() as usize;
