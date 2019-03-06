@@ -1233,6 +1233,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // Load the first byte pointed to by src.
         let src_val = memcpy_start.load(src, src_align);
         memcpy_start.store(src_val, dst, dst_align);
+        //memcpy_start.store(src, dst, dst_align);
 
         // src += 1; dst += 1;
         let src = memcpy_start.pointercast(src, self.cx.type_i64());

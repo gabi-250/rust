@@ -99,6 +99,14 @@ impl Instruction {
                     let ty = Instruction::load_ty(*ptr, cx);
                     ty.pointee_ty(&cx.types.borrow())
                 },
+                Instruction::Call(llfn, ..) => {
+                    if let Value::Function(idx) = llfn {
+                        let fn_ty = cx.module.borrow().functions[*idx].ret;
+                        fn_ty.pointee_ty(&cx.types.borrow())
+                    } else {
+                        unimplemented!("Call to {:?}", llfn);
+                    }
+                },
                 _ => unimplemented!("Load from instruction {:?}", inst)
             }
         } else if let Value::Param(_, _, ty) = val {
@@ -194,11 +202,14 @@ impl Instruction {
             Instruction::Gep(agg, ref offsets, inbounds) => {
                 let ty = cx.val_ty(agg);
                 let ty = ty.pointee_ty(&cx.types.borrow());
-                for offset in offsets.iter().skip(1) {
-                    unimplemented!("instruction gep {:?} {:?} {:?}", agg,
-                                   offset, cx.types.borrow());
-                }
-                ty
+                let arr_ty = match cx.types.borrow()[*ty] {
+                    OxType::Array { len, ty } => {
+                        assert_eq!(offsets.len(), 2);
+                        ty
+                    },
+                    _ => unimplemented!("GEP({:?})", ty),
+                };
+                cx.type_ptr_to(ty)
             },
             _ => unimplemented!("instruction {:?}", *self),
         }

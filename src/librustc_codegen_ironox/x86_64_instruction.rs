@@ -18,6 +18,7 @@ pub enum MachineInst {
     JL(Operand),
     NOT(Operand),
     SETO(Operand),
+    SETNO(Operand),
     SETE(Operand),
     SETNE(Operand),
     SETA(Operand),
@@ -25,6 +26,7 @@ pub enum MachineInst {
     SETAE(Operand),
     SETGE(Operand),
     SETB(Operand),
+    SETNB(Operand),
     SETL(Operand),
     SETBE(Operand),
     SETLE(Operand),
@@ -127,6 +129,10 @@ impl MachineInst {
         MachineInst::SETO(op.into())
     }
 
+    pub fn setno<U: Into<Operand>>(op: U) -> MachineInst {
+        MachineInst::SETNO(op.into())
+    }
+
     pub fn sete<U: Into<Operand>>(op: U) -> MachineInst {
         MachineInst::SETE(op.into())
     }
@@ -153,6 +159,10 @@ impl MachineInst {
 
     pub fn setb<U: Into<Operand>>(op: U) -> MachineInst {
         MachineInst::SETB(op.into())
+    }
+
+    pub fn setnb<U: Into<Operand>>(op: U) -> MachineInst {
+        MachineInst::SETNB(op.into())
     }
 
     pub fn setl<U: Into<Operand>>(op: U) -> MachineInst {
@@ -188,6 +198,7 @@ impl fmt::Display for MachineInst {
            MachineInst::JL(ref op) => write!(f, "\tjl {}\n", op),
            MachineInst::NOT(ref op) => write!(f, "\tnot {}\n", op),
            MachineInst::SETO(ref op) => write!(f, "\tseto {}\n", op),
+           MachineInst::SETNO(ref op) => write!(f, "\tsetno {}\n", op),
            MachineInst::SETE(ref op) => write!(f, "\tsete {}\n", op),
            MachineInst::SETNE(ref op) => write!(f, "\tsetne {}\n", op),
            MachineInst::SETA(ref op) => write!(f, "\tseta {}\n", op),
@@ -195,6 +206,7 @@ impl fmt::Display for MachineInst {
            MachineInst::SETAE(ref op) => write!(f, "\tsetae {}\n", op),
            MachineInst::SETGE(ref op) => write!(f, "\tsetge {}\n", op),
            MachineInst::SETB(ref op) => write!(f, "\tsetb {}\n", op),
+           MachineInst::SETNB(ref op) => write!(f, "\tsetnb {}\n", op),
            MachineInst::SETL(ref op) => write!(f, "\tsetl {}\n", op),
            MachineInst::SETBE(ref op) => write!(f, "\tsetbe {}\n", op),
            MachineInst::SETLE(ref op) => write!(f, "\tsetle {}\n", op),

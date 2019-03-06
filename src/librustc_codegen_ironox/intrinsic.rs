@@ -131,6 +131,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
             }
 
             _ => {
+
                 eprintln!("Intrinsic: {:?} {:?} {:?} {:?}", callee_ty,
                           fn_ty, args, llresult);
                 // Do nothing.
@@ -161,7 +162,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn expect(&mut self, cond: Value, expected: bool) -> Value {
         let expected_val = {
-            self.const_bool(!expected)
+            self.const_bool(expected)
         };
         self.icmp(IntPredicate::IntEQ, cond, expected_val)
     }

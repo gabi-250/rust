@@ -66,6 +66,7 @@ pub unsafe fn codegen(
         },
         ModuleKind::Metadata => {
             eprintln!("not emitting: {:?}", obj_path);
+            eprintln!("{:?}", module.module_llvm);
         }
     }
     Ok(module.into_compiled_module(config.emit_obj,

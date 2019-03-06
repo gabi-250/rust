@@ -97,15 +97,18 @@ pub enum OxType {
 impl OxType {
     pub fn offset(&self, idx: u64, types: &Vec<OxType>) -> u64 {
         // FIXME:?
-        let idx = idx as usize;
         match *self {
             OxType::StructType { ref name, ref members } => {
+                let idx = idx as usize;
                 let mut offset = 0;
                 for i in 0..idx {
                     offset += members[i].size(types);
                 }
                 offset
             },
+            OxType::Array { len, ty } => {
+                idx * ty.size(types)
+            }
             _ => unimplemented!("{:?}.offset({})", *self, idx)
         }
     }
@@ -153,6 +156,8 @@ impl Type {
         match types[**self] {
             OxType::StructType { ref name, ref members } => members[idx as usize],
             OxType::FnType { ref args, ref ret } => ret.ty_at_idx(idx, types),
+            OxType::PtrTo { ref pointee } => *pointee,
+            OxType::Array { len, ref ty } => *ty,
             ref ty => unimplemented!("Type at index {} for {:?}", idx, ty),
         }
     }
@@ -436,5 +441,9 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn fn_ptr_backend_type(&self, ty: &FnType<'tcx, Ty<'tcx>>) -> Type {
         ty.ptr_to_ironox_type(self)
+        //let arg_tys: Vec<Type> = vec![];
+        //let ret_ty = self.type_void();
+        //let fn_ty = self.type_func(&arg_tys, ret_ty);
+        //self.add_type(OxType::PtrTo { pointee: fn_ty })
     }
 }

@@ -845,6 +845,7 @@ impl<'a, 'tcx: 'a, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         llargs: &mut Vec<Bx::Value>,
         args: &[ArgType<'tcx, Ty<'tcx>>]
     ) {
+        eprintln!("untupled");
         let tuple = self.codegen_operand(bx, operand);
 
         // Handle both by-ref and immediate tuples.

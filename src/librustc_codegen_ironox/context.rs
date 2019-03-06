@@ -506,7 +506,42 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         alloc: &Allocation,
         offset: Size,
     ) -> PlaceRef<'tcx, Value> {
-        unimplemented!("from_const_alloc {:?} {:?} {:?}", layout,
-                       alloc, offset);
+        unimplemented!("from_const_alloc");
+/*        let mut llvals = Vec::with_capacity(alloc.relocations.len() + 1);*/
+        //let dl = self.data_layout();
+        //let pointer_size = dl.pointer_size.bytes() as usize;
+
+        //let mut next_offset = 0;
+        //for &(offset, ((), alloc_id)) in alloc.relocations.iter() {
+            //let offset = offset.bytes();
+            //assert_eq!(offset as usize as u64, offset);
+            //let offset = offset as usize;
+            //eprintln!("offset: {:?}", offset);
+            //eprintln!("next_offset: {:?}", next_offset);
+            //if offset > next_offset {
+                //llvals.push(self.const_bytes(&alloc.bytes[next_offset..offset]));
+            //}
+            //let ptr_offset = read_target_uint(
+                //dl.endian,
+                //&alloc.bytes[offset..(offset + pointer_size)],
+            //).expect("const_alloc_to_llvm: could not read relocation pointer") as u64;
+            //eprintln!("ptr_offset: {:?}", ptr_offset);
+            ////llvals.push(self.scalar_to_backend(
+                ////Pointer::new(alloc_id, Size::from_bytes(ptr_offset)).into(),
+                ////&layout::Scalar {
+                    ////value: layout::Primitive::Pointer,
+                    ////valid_range: 0..=!0
+                ////},
+                ////self.type_i8p()
+            ////));
+            //next_offset = offset + pointer_size;
+        //}
+        ////if alloc.bytes.len() >= next_offset {
+            ////llvals.push(self.const_bytes(&alloc.bytes[next_offset ..]));
+        ////}
+
+        ////cx.const_struct(&llvals, true)
+        //unimplemented!("from_const_alloc {:?} {:?}",
+                       /*alloc, offset);*/
     }
 }

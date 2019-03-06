@@ -217,10 +217,15 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm.asm);
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
             let reg = Register::direct(SubRegister::reg(RAX, access_mode(size)));
+            let mask = Register::direct(SubRegister::reg(RCX, access_mode(size)));
             let result = self.precompiled_result(inst);
             asm.extend(vec![
                 MachineInst::mov(instr_asm.result.unwrap(), reg),
+                MachineInst::xor(mask, mask),
+                MachineInst::mov(Operand::Immediate(1, AccessMode::Full), reg),
+                MachineInst::not(mask),
                 MachineInst::not(reg),
+                MachineInst::xor(mask, reg),
                 MachineInst::mov(reg, result.clone()),
             ]);
             CompiledInst::new(asm, result)
@@ -274,6 +279,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             let offset = result.rbp_offset();
                             let result1 = Location::RbpOffset(offset, am_full);
                             let result2 = Location::RbpOffset(offset + 8, am_full);
+                            eprintln!("result 1 {:?}", result1);
+                            eprintln!("result 2 {:?}", result2);
                             asm.extend(vec![
                                 MachineInst::mov(
                                     Register::direct(
@@ -315,6 +322,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_icmp(&self, inst: &Instruction) -> CompiledInst {
+        eprintln!("ICMP is {:?}", inst);
         match *inst {
             Instruction::Icmp(v1, v2, op) => {
                 // These instructions have a boolean result.
@@ -407,6 +415,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_store(&self, inst: &Instruction) -> CompiledInst {
+        eprintln!("\t\tstore: {:?}", inst);
         if let Instruction::Store(dest, src) = inst {
             let mut asm = vec![];
             let mut instr_asm1 = self.compile_value(*dest);
@@ -415,6 +424,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm2.asm);
             let dest_result = instr_asm1.result.clone().unwrap();
             let src_result = instr_asm2.result.unwrap();
+            eprintln!("instr_asm1: {:?}", instr_asm1);
+            eprintln!("src: {:?}", src_result);
+            eprintln!("dst: {:?}", dest_result);
             let src_am = src_result.access_mode();
             match src_am {
                 AccessMode::Large(16) => {
@@ -504,9 +516,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // Get register %dl.
             let reg = Register::direct(SubRegister::reg(RDX, AccessMode::Low8));
             let set_inst = if *signed {
-                MachineInst::seto(reg)
+                MachineInst::setno(reg)
             } else {
-                MachineInst::setb(reg)
+                MachineInst::setnb(reg)
             };
             let asm = vec![
                 set_inst,
@@ -626,9 +638,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let agg_val = self.compile_value(*agg).result.unwrap();
                     let stack_loc = self.precompiled_result(inst);
                     let asm = vec![
-                        MachineInst::mov(agg_val, Register::direct(RAX)),
+                        MachineInst::lea(agg_val, Register::direct(RAX)),
                         MachineInst::add(Operand::Immediate(offset as isize,
                                                             AccessMode::Full),
+                                         Register::direct(RAX)),
+                        MachineInst::mov(Register::indirect(RAX),
                                          Register::direct(RAX)),
                         MachineInst::mov(Register::direct(RAX),
                                          stack_loc.clone()),
@@ -676,14 +690,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // FIXME? an aggregate is only undefined if it is a Value::ConstUndef.
             // This is because storing an undefined value is a no-op.
             Value::ConstUndef(ty) => {
-                eprintln!("ty is {:?}", self.cx.val_ty(agg));
-                eprintln!("add size {:?}", agg_size);
-                for (i, c) in types.iter().enumerate() {
-                    eprintln!("Type {}: {:?}", i, c);
-                }
                 let reg =
                     Register::direct(SubRegister::reg(RCX, member_am));
-                eprintln!("agg is {:?} {:?}", agg, member_rbp_offset);
                 let asm = vec![
                     MachineInst::mov(compiled_v, reg),
                     MachineInst::lea(member_rbp_offset,
@@ -740,16 +748,16 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let Instruction::StructGep(agg, idx) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
-            eprintln!("gep {:?} {:?} {}", agg_ty, types[*agg_ty.pointee_ty(&types)],
-                      idx);
             // Agg is a pointer to a struct. To get its members, we must get the
             // pointee of the pointer (the pointee is the struct itself).
             let offset = types[*agg_ty.pointee_ty(&types)].offset(*idx, &types);
 
+            eprintln!("agg {:?} idx {:?} offset {:?}", agg_ty, idx, offset);
             assert!(offset % 8 == 0);
             let offset = offset / 8;
             let agg_val = self.compile_value(*agg).result.unwrap();
             let stack_loc = self.precompiled_result(inst);
+            eprintln!("Storing struct gep at {:?}", stack_loc);
             // FIXME:
             let asm = vec![
                 MachineInst::NOP,
@@ -786,29 +794,53 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // desired index.
             //
             // First, find out the type of the struct:
-            let agg_pointee = agg_ty.pointee_ty(&types);
-            // Find out the size of the struct:
-            let offset = agg_pointee.size(&types);
-            assert!(offset % 8 == 0);
-            let offset = offset / 8;
             // The address where the result of this instruction will be stored.
+
+            let mut asm = Vec::new();
+            let mut cur_agg_ty = agg_ty;
+            let indices: Vec<(Type, Operand)> =
+                indices.iter().enumerate().map(|(i, idx_val)| {
+                let index_val = self.compile_value(*idx_val);
+                asm.extend(index_val.asm);
+                cur_agg_ty = cur_agg_ty.ty_at_idx(i as u64, &types);
+                (cur_agg_ty, index_val.result.unwrap())
+
+            }).collect();
+
             let stack_loc = self.precompiled_result(inst);
-            let asm = vec![
-                MachineInst::NOP,
-                MachineInst::NOP,
-                // Find the offset of the field to get.
-                MachineInst::mov(Operand::Immediate(offset as isize, AccessMode::Full),
-                                 Register::direct(RAX)),
-                MachineInst::mov(index_val, Register::direct(RCX)),
-                MachineInst::mul(Register::direct(RCX)),
-                // Move the pointer from agg_val to %rax.
-                MachineInst::add(agg_ptr.clone(), Register::direct(RAX)),
-                // Store the result on the stack.
-                MachineInst::mov(Register::direct(RAX), stack_loc.clone()),
-            ];
-            for index in indices.iter().skip(1) {
-                unimplemented!("instruction gep {:?} {:?} {:?}", agg_ptr,
-                               index, types);
+            // First, get the base address of the pointer.
+            let agg_val = self.compile_value(*agg).result.unwrap();
+            asm.extend(vec![
+                MachineInst::mov(agg_val, Register::direct(RAX)),
+                MachineInst::mov(Register::direct(RAX), stack_loc.clone())
+            ]);
+
+            let agg_pointee = agg_ty.pointee_ty(&types);
+            match types[*agg_pointee] {
+                OxType::Array { .. } => {
+                    for (ty, index_val) in indices {
+                        // Find out the size of the struct:
+                        let ty_size = ty.size(&types);
+                        assert!(ty_size % 8 == 0);
+                        let ty_size = ty_size as u64 / 8;
+                        // %rcx initially contains the base address of the array.
+                        let rcx = Register::direct(RCX);
+                        // %rax stores the number of bytes to add to %rcx to get
+                        // to the desired 'element'.
+                        let rax = Register::direct(RAX);
+                        asm.extend(vec![
+                            MachineInst::mov(stack_loc.clone(), rcx),
+                            MachineInst::mov(index_val, rax),
+                            MachineInst::mov(Operand::Immediate(ty_size as isize,
+                                                                AccessMode::Full),
+                                             Register::direct(RSI)),
+                            MachineInst::mul(Register::direct(RSI)),
+                            MachineInst::add(rax, rcx),
+                            MachineInst::mov(rcx, stack_loc.clone()),
+                        ]);
+                    }
+                },
+                ref ty => unimplemented!("Gep of ty {:?}", ty)
             }
             CompiledInst::new(asm, stack_loc)
         } else {
@@ -977,6 +1009,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let Some(instr_asm) = self.compiled_insts.borrow().get(&inst_v) {
             return instr_asm.clone();
         }
+        eprintln!("instruction is {:?}", inst);
         let instr_asm = match inst {
             Instruction::Br(..) => self.compile_br(inst),
             Instruction::Ret(..) => self.compile_ret(inst),
@@ -1077,6 +1110,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             self.compiled_params.borrow_mut().insert(*param, instr_asm);
         }
         for bb in &f.basic_blocks {
+            eprintln!("compiling bb: {:?}", bb);
             for inst in &bb.instrs {
                 let instr_asm = match inst {
                     Instruction::Add(..) |
@@ -1321,6 +1355,29 @@ impl AsmPrinter<'ll, 'tcx> {
         asm
     }
 
+    pub fn pprint(&self) {
+        for (i, c) in self.cx.u_consts.borrow().iter().enumerate() {
+            eprintln!("uconst {}: {}", i, c.value);
+        }
+
+        for (i, c) in self.cx.const_casts.borrow().iter().enumerate() {
+            eprintln!("cast {}: {:?}", i, c);
+        }
+
+        for (i, c) in self.cx.types.borrow().iter().enumerate() {
+            eprintln!("Type {}: {:?}", i, c);
+        }
+        for (i, f) in self.cx.module.borrow().functions.iter().enumerate() {
+            eprintln!("fn[{}] {} {:?}", i, f.name, f.ironox_type);
+            for bb in &f.basic_blocks {
+                eprintln!("\tbb: {}", bb.label);
+                for (i, inst) in bb.instrs.iter().enumerate() {
+                    eprintln!("\t\t{}: {:?}", i, inst);
+                }
+            }
+        }
+    }
+
     /// Consume the printer, and return the stats and the codegen result.
     ///
     /// The codegen result is a string that contains the x86-64 program that
@@ -1335,11 +1392,13 @@ impl AsmPrinter<'ll, 'tcx> {
         for decl in &self.declare_functions() {
             asm.push_str(&decl.to_string());
         }
+        self.pprint();
         for f in &self.cx.module.borrow().functions {
             if !f.is_declaration() {
                 let mut fn_asm = String::new();
-                let instructions = FunctionPrinter::new(&self.cx).codegen_function(&f);
-                for inst in instructions {
+                let asm_insts  = FunctionPrinter::new(&self.cx).codegen_function(&f);
+                for inst in asm_insts {
+                    eprintln!("compiling {:?}", inst);
                     fn_asm.push_str(&format!("{}", inst));
                 }
                 asm.push_str(&fn_asm);
