@@ -1,12 +1,8 @@
-use super::basic_block::{BasicBlock, OxBasicBlock};
+use context::CodegenCx;
 use ir::type_::{OxType, Type};
 use ir::value::Value;
 use ir::instruction::Instruction;
-use context::CodegenCx;
-
-use rustc::ty::FnSig;
-use rustc::ty::layout::Align;
-use rustc::util::nodemap::FxHashMap;
+use super::basic_block::{BasicBlock, OxBasicBlock};
 
 /// An IronOx function.
 #[derive(PartialEq, Debug)]

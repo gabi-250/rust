@@ -6,7 +6,6 @@ use rustc_codegen_ssa::back::write::submit_codegened_module_to_llvm;
 use rustc_codegen_ssa::{ModuleCodegen, ModuleKind};
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mono_item::MonoItemExt;
-use rustc_mir::monomorphize::MonoItem;
 use rustc_mir::monomorphize::partitioning::CodegenUnitExt;
 use syntax_pos::symbol::InternedString;
 

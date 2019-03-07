@@ -1,5 +1,5 @@
 use context::CodegenCx;
-use ir::instruction::{ConstCast, Instruction};
+use ir::instruction::ConstCast;
 use ir::value::Value;
 use ir::type_::Type;
 
@@ -18,7 +18,7 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
     fn static_addr_of(
         &self,
         cv: Value,
-        align: Align,
+        _align: Align,
         kind: Option<&str>,
     ) -> Value {
         let mut const_globals_cache = self.const_globals_cache.borrow_mut();
@@ -26,8 +26,8 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
             // FIXME: update the alignment
             return Value::Global(gv);
         }
-        let mut gv = match kind {
-            Some(kind) if !self.tcx.sess.fewer_names() => {
+        let gv = match kind {
+            Some(_kind) if !self.tcx.sess.fewer_names() => {
                 // FIXME: generate name
                 let name = "my_global".to_string();
                 let gv = self.define_global(&name[..],
@@ -49,8 +49,8 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
 
     fn codegen_static(
         &self,
-        def_id: DefId,
-        is_mutable: bool,
+        _def_id: DefId,
+        _is_mutable: bool,
     ) {
         unimplemented!("codegen_static");
     }

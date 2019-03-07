@@ -1,13 +1,11 @@
-
 use abi::FnTypeExt;
 use context::CodegenCx;
+use global::Global;
 use ir::type_::Type;
 use ir::value::Value;
-use global::Global;
 
 use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
-use rustc_demangle;
 
 impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
@@ -74,16 +72,16 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn define_fn(
         &self,
-        name: &str,
-        fn_sig: PolyFnSig<'tcx>,
+        _name: &str,
+        _fn_sig: PolyFnSig<'tcx>,
     ) -> Value {
         unimplemented!("define_fn");
     }
 
     fn define_internal_fn(
         &self,
-        name: &str,
-        fn_sig: PolyFnSig<'tcx>,
+        _name: &str,
+        _fn_sig: PolyFnSig<'tcx>,
     ) -> Value {
         unimplemented!("define_internal_fn");
     }
