@@ -11,6 +11,7 @@ use rustc_target::abi::LayoutOf;
 use rustc_target::abi::call::{CastTarget, FnType, Reg};
 use rustc::ty::{self, layout, Ty, TyCtxt};
 use rustc::ty::layout::TyLayout;
+use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 
 use std::cell::RefCell;
 use std::ops::Deref;
@@ -50,18 +51,9 @@ impl ScalarType {
 }
 
 /// A `Type` is an index into the vector of types in the codegen context.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct Type(usize);
-
-/// Dereference a `Type` to retrieve its index.
-impl Deref for Type {
-    type Target = usize;
-
-    fn deref(&self) -> &usize {
-        &self.0
-    }
+newtype_index! {
+    pub struct Type { .. }
 }
-
 
 /// The actual types.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -95,7 +87,7 @@ pub enum OxType {
 }
 
 impl OxType {
-    pub fn offset(&self, idx: u64, types: &Vec<OxType>) -> u64 {
+    pub fn offset(&self, idx: u64, types: &IndexVec<Type, OxType>) -> u64 {
         // FIXME:?
         match *self {
             OxType::StructType { ref name, ref members } => {
@@ -115,8 +107,8 @@ impl OxType {
 }
 
 impl Type {
-    pub fn size(&self, types: &Vec<OxType>) -> u64 {
-        match types[**self] {
+    pub fn size(&self, types: &IndexVec<Type, OxType>) -> u64 {
+        match types[*self] {
             OxType::Scalar(sty) => sty.size(),
             OxType::PtrTo { .. } | OxType::FnType { .. } => 64,
             OxType::FatPtr { ptr, meta } => {
@@ -135,25 +127,25 @@ impl Type {
         }
     }
 
-    pub fn is_ptr(&self, types: &Vec<OxType>) -> bool {
-        match types[**self] {
+    pub fn is_ptr(&self, types: &IndexVec<Type, OxType>) -> bool {
+        match types[*self] {
             OxType::FnType {..} => true,
             OxType::PtrTo {..} => true,
             ref ty => false,
         }
     }
 
-    pub fn pointee_ty(&self, types: &Vec<OxType>) -> Type {
+    pub fn pointee_ty(&self, types: &IndexVec<Type, OxType>) -> Type {
         assert!(self.is_ptr(types));
-        if let OxType::PtrTo { ref pointee } = types[**self] {
+        if let OxType::PtrTo { ref pointee } = types[*self] {
             *pointee
         } else {
             bug!("cannot get pointee of non-pointer type: {:?}", *self);
         }
     }
 
-    pub fn ty_at_idx(&self, idx: u64, types: &Vec<OxType>) -> Type {
-        match types[**self] {
+    pub fn ty_at_idx(&self, idx: u64, types: &IndexVec<Type, OxType>) -> Type {
+        match types[*self] {
             OxType::StructType { ref name, ref members } => members[idx as usize],
             OxType::FnType { ref args, ref ret } => ret.ty_at_idx(idx, types),
             OxType::PtrTo { ref pointee } => *pointee,
@@ -188,7 +180,7 @@ impl CodegenCx<'ll, 'tcx> {
         *type_cache.entry(ll_type.clone()).or_insert_with(|| {
             // FIXME: don't always clone ll_type.
             types.push(ll_type);
-            Type(ty_idx)
+            Type::new(ty_idx)
         })
     }
 
@@ -205,11 +197,11 @@ impl CodegenCx<'ll, 'tcx> {
     /// structs.
     crate fn set_struct_body(&self, ty: Type, els: &[Type], packed: bool) {
         let mut types = self.types.borrow_mut();
-        if let OxType::StructType{ ref name, ref mut members } = types[*ty] {
+        if let OxType::StructType{ ref name, ref mut members } = types[ty] {
             *members = els.to_vec();
             return;
         }
-        bug!("expected OxType::StructType, found {:?}", types[*ty]);
+        bug!("expected OxType::StructType, found {:?}", types[ty]);
     }
 }
 

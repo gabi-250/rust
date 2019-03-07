@@ -4,6 +4,8 @@
 #![feature(libc)]
 #![feature(in_band_lifetimes)]
 #![feature(optin_builtin_traits)]
+#![feature(rustc_attrs)]
+#![feature(step_trait)]
 #![allow(unused)]
 
 extern crate rustc_errors;
@@ -21,6 +23,7 @@ extern crate libc;
 extern crate syntax;
 extern crate tempfile;
 extern crate rustc_demangle;
+extern crate serialize as rustc_serialize; // used for newtype_index
 
 use std::sync::{mpsc, Arc};
 use rustc::hir::def_id::LOCAL_CRATE;
@@ -46,6 +49,8 @@ use rustc::middle::allocator::AllocatorKind;
 use syntax_pos::symbol::InternedString;
 use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig};
 use rustc_codegen_ssa::back::lto::{SerializedModule, LtoModuleCodegen, ThinModule};
+
+use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 use rustc::dep_graph::WorkProduct;
 use rustc::util::time_graph::Timeline;
 use std::any::Any;

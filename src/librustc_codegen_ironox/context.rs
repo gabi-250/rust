@@ -17,7 +17,8 @@ use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
 use rustc_target::abi::HasDataLayout;
 use rustc_target::spec::{HasTargetSpec, Target};
-use rustc::mir::interpret::{Scalar, Allocation, read_target_uint};
+use rustc::mir::interpret::{Scalar, Allocation, Pointer, read_target_uint};
+use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
@@ -44,18 +45,22 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
 }
 
 pub struct CodegenCx<'ll, 'tcx: 'll> {
+    /// The typing context of this codegen context.
     pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
+    /// The codegen unit compiled using this context. This is None if this `CodegenCx`
+    /// is used to compile an allocator module.
     pub codegen_unit: Option<Arc<CodegenUnit<'tcx>>>,
+    /// Whether to emit overflow checks.
     pub check_overflow: bool,
+    /// The statistics collected while codegnning.
     pub stats: RefCell<Stats>,
     pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
     pub module: RefCell<&'ll mut ModuleIronOx>,
     pub vtables: RefCell<
         FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>,
-    eh_personality: Cell<Option<Value>>,
     pub personality_fns: RefCell<FxHashMap<Value, Value>>,
     /// All the types defined in this context.
-    pub types: RefCell<Vec<OxType>>,
+    pub types: RefCell<IndexVec<Type, OxType>>,
     /// The index of an `OxType` in `types`.
     pub type_cache: RefCell<FxHashMap<OxType, Type>>,
     /// The unsigned constants defined in this context.
@@ -72,10 +77,11 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub const_casts: RefCell<Vec<ConstCast>>,
     pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
     pub ty_map: RefCell<FxHashMap<Value, Type>>,
-    pub sym_count: Cell<usize>,
     pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, Type>>,
     pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), Type>>,
     pub bytes: RefCell<Vec<Vec<u8>>>,
+    sym_count: Cell<usize>,
+    eh_personality: Cell<Option<Value>>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
