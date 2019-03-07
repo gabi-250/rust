@@ -14,7 +14,7 @@ impl Operand {
     pub fn access_mode(&self) -> AccessMode {
         match *self {
             Operand::Loc(Location::Reg(r)) => r.access_mode(),
-            Operand::Loc(Location::RbpOffset(isize, acc_mode)) => acc_mode,
+            Operand::Loc(Location::RbpOffset(_, acc_mode)) => acc_mode,
             Operand::Immediate(_, acc_mode) => acc_mode,
             Operand::Loc(Location::RipOffset(_)) => unimplemented!("access mode of rip"),
             _ => AccessMode::Full,
@@ -35,20 +35,7 @@ impl Operand {
         }
     }
 
-    pub fn is_reg(&self) -> bool {
-        match *self {
-            Operand::Loc(Location::Reg(_)) => true,
-            _ => false,
-        }
-    }
-
-    pub fn get_reg(&self) -> Register {
-        match *self {
-            Operand::Loc(Location::Reg(r)) => r,
-            _ => bug!("Operand {:?} is not a register!", self),
-        }
-    }
-
+    #[allow(unused)]
     pub fn with_acc_mode(&mut self, acc_mode: AccessMode) -> Operand {
         match *self {
             Operand::Loc(Location::Reg(r)) => {
@@ -118,6 +105,7 @@ impl fmt::Display for Location {
     }
 }
 
+#[allow(unused)]
 #[derive(Clone, Copy, Debug)]
 pub enum GeneralPurposeReg {
     RAX,

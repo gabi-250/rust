@@ -2,7 +2,6 @@ use context::CodegenCx;
 use ir::basic_block::BasicBlock;
 use ir::type_::{OxType, Type};
 use ir::value::Value;
-use super::super::ModuleIronOx;
 
 use rustc::ty::layout::Align;
 use rustc_codegen_ssa::traits::{BaseTypeMethods, DerivedTypeMethods};
@@ -196,18 +195,18 @@ impl Instruction {
                 }
             },
             Instruction::Not(v) => cx.val_ty(v),
-            Instruction::InsertValue(agg, v, idx) => cx.val_ty(agg),
+            Instruction::InsertValue(agg, ..) => cx.val_ty(agg),
             Instruction::Select(_, v1, v2) => {
                 let ty = cx.val_ty(v1);
                 assert_eq!(ty, cx.val_ty(v2));
                 ty
             },
             Instruction::Icmp(..) => cx.type_bool(),
-            Instruction::Gep(agg, ref indices, inbounds) => {
+            Instruction::Gep(agg, ref indices, _inbounds) => {
                 let ty = cx.val_ty(agg);
                 let ty = ty.pointee_ty(&cx.types.borrow());
                 let arr_ty = match cx.types.borrow()[ty] {
-                    OxType::Array { len, ty } => {
+                    OxType::Array { ty, .. } => {
                         assert_eq!(indices.len(), 2);
                         ty
                     },
@@ -221,7 +220,8 @@ impl Instruction {
                     }
                     _ => unimplemented!("GEP({:?}) {:?}", ty, cx.types.borrow()),
                 };
-                cx.type_ptr_to(ty)
+                // FIXME:
+                cx.type_ptr_to(arr_ty)
             },
             _ => unimplemented!("instruction {:?}", *self),
         }

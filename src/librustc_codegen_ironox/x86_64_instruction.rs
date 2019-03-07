@@ -1,8 +1,9 @@
 use gas_directive::GasDirective;
-use x86_64_register::{Location, Operand, Register};
+use x86_64_register::Operand;
 
 use std::fmt;
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub enum MachineInst {
     MOV(Operand, Operand),
@@ -46,6 +47,7 @@ impl From<GasDirective> for MachineInst {
     }
 }
 
+#[allow(unused)]
 impl MachineInst {
     pub fn mov<U: Into<Operand>, V: Into<Operand>>(
         op: U,
