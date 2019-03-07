@@ -90,7 +90,7 @@ impl Instruction {
                 Instruction::Cast(_, ty) => ty.pointee_ty(&cx.types.borrow()),
                 Instruction::StructGep(_, _) => {
                     let ty = inst.val_ty(cx);
-                    match cx.types.borrow()[*ty] {
+                    match cx.types.borrow()[ty] {
                         OxType::PtrTo { pointee } => pointee,
                         _ => unimplemented!("Load from non-pointer ty {:?}", ty),
                     }
@@ -114,7 +114,7 @@ impl Instruction {
                 _ => unimplemented!("Load from instruction {:?}", inst)
             }
         } else if let Value::Param(_, _, ty) = val {
-            if let OxType::PtrTo { ref pointee } = cx.types.borrow()[*ty] {
+            if let OxType::PtrTo { ref pointee } = cx.types.borrow()[ty] {
                 *pointee
             } else {
                 unimplemented!("Load from non-pointer param {:?}", val);
@@ -140,10 +140,10 @@ impl Instruction {
             },
             Instruction::Call(value, _) => {
                 let fn_ty = cx.val_ty(value);
-                match cx.types.borrow()[*fn_ty] {
+                match cx.types.borrow()[fn_ty] {
                     OxType::FnType { ref ret, .. } => *ret,
                     OxType::PtrTo { ref pointee } => {
-                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[**pointee] {
+                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[*pointee] {
                             *ret
                         } else {
                             bug!("Cannot call value {:?}", value);
@@ -159,9 +159,9 @@ impl Instruction {
                 let member_ty = {
                     let types = cx.types.borrow();
                     let struct_ptr = cx.val_ty(ptr);
-                    let struct_ptr = &types[*struct_ptr];
+                    let struct_ptr = &types[struct_ptr];
                     if let OxType::PtrTo { pointee } = struct_ptr {
-                        let struct_ty = &types[**pointee];
+                        let struct_ty = &types[*pointee];
                         if let OxType::StructType { ref members, .. } = struct_ty {
                             members[idx as usize]
                         } else {
@@ -181,10 +181,10 @@ impl Instruction {
             Instruction::LandingPad { ty, .. } => ty,
             // FIXME: is that right?
             Instruction::Invoke { callee, .. } => {
-                match cx.types.borrow()[*cx.val_ty(callee)] {
+                match cx.types.borrow()[cx.val_ty(callee)] {
                     OxType::FnType { ref ret, .. } => *ret,
                     OxType::PtrTo { ref pointee } => {
-                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[**pointee] {
+                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[*pointee] {
                             *ret
                         } else {
                             bug!("Cannot call value {:?}", callee);
@@ -206,7 +206,7 @@ impl Instruction {
             Instruction::Gep(agg, ref indices, inbounds) => {
                 let ty = cx.val_ty(agg);
                 let ty = ty.pointee_ty(&cx.types.borrow());
-                let arr_ty = match cx.types.borrow()[*ty] {
+                let arr_ty = match cx.types.borrow()[ty] {
                     OxType::Array { len, ty } => {
                         assert_eq!(indices.len(), 2);
                         ty

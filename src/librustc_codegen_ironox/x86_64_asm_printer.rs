@@ -266,7 +266,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 asm.push(MachineInst::call(fn_name.clone()));
                 let ret_ty = inst.val_ty(self.cx);
                 // If the function doesn't return anything, carry on.
-                if let OxType::Void = self.cx.types.borrow()[*ret_ty] {
+                if let OxType::Void = self.cx.types.borrow()[ret_ty] {
                     CompiledInst::with_instructions(asm)
                 } else {
                     let result = self.precompiled_result(inst);
@@ -664,9 +664,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let Instruction::ExtractValue(agg, idx) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
-            match types[*agg_ty] {
+            match types[agg_ty] {
                 OxType::StructType { ref members, ref name } => {
-                    let offset = types[*agg_ty].offset(*idx, &types);
+                    let offset = types[agg_ty].offset(*idx, &types);
                     assert!(offset % 8 == 0);
                     let offset = offset / 8;
                     let agg_val = self.compile_value(*agg).result.unwrap();
@@ -703,14 +703,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let types = self.cx.types.borrow();
         let agg_ty = self.cx.val_ty(agg);
         let agg_size = self.cx.val_ty(agg).size(&types) / 8;
-        let members = match types[*agg_ty] {
+        let members = match types[agg_ty] {
             OxType::StructType { ref members, .. } => members,
             ref ty => bug!("Expected OxType::StructType, found {:?}", ty),
         };
 
         // The offset within the aggregated of the member at
         // position `idx`.
-        let offset = types[*agg_ty].offset(idx, &types) as isize;
+        let offset = types[agg_ty].offset(idx, &types) as isize;
         assert!(offset % 8 == 0);
         let offset = offset / 8;
 
@@ -766,7 +766,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let Instruction::InsertValue(agg, v, idx) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
-            match types[*agg_ty] {
+            match types[agg_ty] {
                 OxType::StructType { .. } => {
                     let agg_dst = self.precompiled_result(inst);
                     self.compile_insertvalue_struct(agg_dst, *agg, *v, *idx)
@@ -784,7 +784,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let agg_ty = self.cx.val_ty(*agg);
             // Agg is a pointer to a struct. To get its members, we must get the
             // pointee of the pointer (the pointee is the struct itself).
-            let offset = types[*agg_ty.pointee_ty(&types)].offset(*idx, &types);
+            let offset = types[agg_ty.pointee_ty(&types)].offset(*idx, &types);
 
             assert!(offset % 8 == 0);
             let offset = offset / 8;
@@ -848,7 +848,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             ]);
 
             let agg_pointee = agg_ty.pointee_ty(&types);
-            match types[*agg_pointee] {
+            match types[agg_pointee] {
                 OxType::Array { .. } => {
                     for (ty, index_val) in indices {
                         // Find out the size of the struct:
@@ -1174,6 +1174,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     Instruction::Load(..) => {
                         let inst_size =
                             inst.val_ty(self.cx).size(&self.cx.types.borrow());
+
                         let acc_mode = access_mode(inst_size as u64);
                         size += (inst_size / 8) as isize;
                         let result = Location::RbpOffset(-size, acc_mode);
@@ -1182,7 +1183,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     Instruction::Call(_, _) | Instruction::Invoke { .. } => {
                         let ret_ty = inst.val_ty(self.cx);
                         // If the function doesn't return anything, carry on.
-                        if let OxType::Void = self.cx.types.borrow()[*ret_ty] {
+                        if let OxType::Void = self.cx.types.borrow()[ret_ty] {
                             continue;
                         }
                         let inst_size = ret_ty.size(&self.cx.types.borrow());
@@ -1224,7 +1225,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     Instruction::ExtractValue(agg, idx) => {
                         let types = self.cx.types.borrow();
                         let agg_ty = self.cx.val_ty(*agg);
-                        let elt_size = match types[*agg_ty] {
+                        let elt_size = match types[agg_ty] {
                             OxType::StructType { ref members, ref name } => {
                                 members[*idx as usize].size(&types)
                             },
@@ -1396,7 +1397,7 @@ impl AsmPrinter<'ll, 'tcx> {
     }
 
     fn declare_scalar(&self, ty: Type, value: u128) -> GasDirective {
-        match self.cx.types.borrow()[*ty] {
+        match self.cx.types.borrow()[ty] {
             OxType::Scalar(ScalarType::I32) => GasDirective::Long(vec![value as u32]),
             OxType::Scalar(ScalarType::I64) => GasDirective::Quad(
                 vec![BigNum::Immediate(value as u64)]),
