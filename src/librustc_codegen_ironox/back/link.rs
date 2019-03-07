@@ -1,6 +1,5 @@
 use rustc::hir::def_id::CrateNum;
 use rustc::middle::cstore::METADATA_FILENAME;
-use rustc::session::filesearch;
 use rustc::session::Session;
 use rustc::session::config::{self, OutputFilenames, OutputType};
 use rustc::session::config::Lto;
@@ -8,8 +7,8 @@ use rustc::session::search_paths::PathKind;
 use rustc_codegen_ssa::CodegenResults;
 use rustc_codegen_ssa::back::command::Command;
 use rustc_codegen_ssa::back::linker::Linker;
-use rustc_codegen_ssa::back::link::{remove, ignored_for_lto, each_linked_rlib,
-                                    linker_and_flavor, get_linker};
+use rustc_codegen_ssa::back::link::{remove, ignored_for_lto, linker_and_flavor,
+                                    get_linker};
 pub use rustc_codegen_utils::link::{find_crate_name, filename_for_input,
                                     default_output_for_target,
                                     invalid_output_for_target,
@@ -141,10 +140,10 @@ fn link_binary_output(sess: &Session,
     out_filenames
 }
 
-fn link_staticlib(sess: &Session,
-                  codegen_results: &CodegenResults,
-                  out_filename: &Path,
-                  tempdir: &TempDir) {
+fn link_staticlib(_sess: &Session,
+                  _codegen_results: &CodegenResults,
+                  _out_filename: &Path,
+                  _tempdir: &TempDir) {
     unimplemented!("link_staticlib");
 }
 
@@ -287,7 +286,7 @@ fn link_natively(sess: &Session,
     }
 }
 
-fn exec_linker(sess: &Session, cmd: &mut Command, out_filename: &Path, tmpdir: &Path)
+fn exec_linker(_sess: &Session, cmd: &mut Command, _out_filename: &Path, _tmpdir: &Path)
     -> io::Result<Output>
 {
     if !cmd.very_likely_to_exceed_some_spawn_limit() {
@@ -618,8 +617,6 @@ fn add_upstream_rust_crates(cmd: &mut dyn Linker,
         }
 
         let dst = tmpdir.join(cratepath.file_name().unwrap());
-        let name = cratepath.file_name().unwrap().to_str().unwrap();
-        let name = &name[3..name.len() - 5]; // chop off lib/.rlib
         if crate_type == config::CrateType::Dylib &&
             codegen_results.crate_info.compiler_builtins != Some(cnum) {
             cmd.link_whole_rlib(&dst.to_path_buf());
@@ -737,7 +734,7 @@ fn add_local_native_libraries(cmd: &mut dyn Linker,
 }
 
 fn link_rlib(sess: &'a Session,
-             crate_type: config::CrateType,
+             _crate_type: config::CrateType,
              out_filename: &Path,
              codegen_results: &CodegenResults,
              tmpdir: &TempDir) {
@@ -770,7 +767,7 @@ fn link_rlib(sess: &'a Session,
     let mut cmd = ShellCommand::new("ar");
     cmd.arg("cr").arg(out_filename).args(ar_files);
     if cmd.status().is_err() {
-        sess.struct_err(&format!("failed to execute: {:?}", cmd));
+        sess.struct_err(&format!("failed to execute: {:?}", cmd)).emit();
         sess.abort_if_errors();
     }
 }

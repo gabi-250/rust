@@ -4,15 +4,12 @@ use ir::value::Value;
 use ir::type_::{OxType, Type};
 use type_of::LayoutIronOxExt;
 
-use libc::c_uint;
-
 use rustc::ty::{self, Ty, Instance};
 use rustc::ty::layout;
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_codegen_ssa::mir::operand::OperandValue;
 use rustc_target::abi::LayoutOf;
-use rustc_target::spec::HasTargetSpec;
 
 pub use rustc_target::spec::abi::Abi;
 pub use rustc_target::abi::call::*;
@@ -20,8 +17,8 @@ pub use rustc_target::abi::call::*;
 impl AbiBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn apply_attrs_callsite(
         &mut self,
-        ty: &FnType<'tcx, Ty<'tcx>>,
-        callsite: Value
+        _ty: &FnType<'tcx, Ty<'tcx>>,
+        _callsite: Value
     ) {
         // FIXME?
     }
@@ -188,12 +185,10 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             conv => unimplemented!("unsupported calling convention: {:?}", conv)
         };
 
-        let mut inputs = sig.inputs();
         let extra_args = if sig.abi == RustCall {
             assert!(!sig.variadic && extra_args.is_empty());
             match sig.inputs().last().unwrap().sty {
                 ty::Tuple(ref tupled_arguments) => {
-                    inputs = &sig.inputs()[0..sig.inputs().len() - 1];
                     tupled_arguments
                 }
                 _ => {
@@ -214,7 +209,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             // The ArgType of the specified ty.
             let mut arg = ArgType::new(cx.layout_of(ty));
 
-            if let layout::Abi::ScalarPair(ref a, ref b) = arg.layout.abi {
+            if let layout::Abi::ScalarPair(_, _) = arg.layout.abi {
                 let mut a_attrs = ArgAttributes::new();
                 let mut b_attrs = ArgAttributes::new();
                 arg.mode = PassMode::Pair(a_attrs, b_attrs);
@@ -279,8 +274,6 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
                         if cx.sess().target.target.options.simd_types_indirect =>
                     {
                         unimplemented!("vector layout for arg {:?}", arg);
-                        //arg.make_indirect();
-                        return
                     }
 
                     _ => return
@@ -374,8 +367,8 @@ impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn new_vtable(
         &self,
-        sig: ty::FnSig<'tcx>,
-        extra_args: &[Ty<'tcx>]
+        _sig: ty::FnSig<'tcx>,
+        _extra_args: &[Ty<'tcx>]
     ) -> FnType<'tcx, Ty<'tcx>> {
         unimplemented!("new_vtable");
     }

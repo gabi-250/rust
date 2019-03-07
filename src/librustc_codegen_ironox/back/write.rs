@@ -32,7 +32,7 @@ pub unsafe fn codegen(
     diag_handler: &Handler,
     module: ModuleCodegen<ModuleIronOx>,
     config: &ModuleConfig,
-    timeline: &mut Timeline
+    _timeline: &mut Timeline
 ) -> Result<CompiledModule, FatalError> {
     // FIXME: emit_bc_compressed
     if config.obj_is_bitcode || config.emit_bc {
@@ -60,7 +60,9 @@ pub unsafe fn codegen(
                 // Run the assembler to produce the object file from the assembly.
                 run_assembler(cgcx, diag_handler, &asm_path, &obj_path);
                 if !config.emit_asm && !cgcx.save_temps {
-                    fs::remove_file(&asm_path);
+                    if fs::remove_file(&asm_path).is_err() {
+                        // FIXME: handle this
+                    }
                 }
             }
         },

@@ -1,16 +1,14 @@
-use super::ModuleIronOx;
-
 use context::CodegenCx;
-use ir::instruction::{CompOp, Instruction};
-use ir::value::Value;
-
 use ir::basic_block::OxBasicBlock;
 use ir::function::OxFunction;
+use ir::instruction::{CompOp, Instruction};
 use ir::type_::{OxType, ScalarType, Type};
+use ir::value::Value;
+
 use rustc::mir::mono::Stats;
 use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::traits::{BaseTypeMethods, MiscMethods};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
 use gas_directive::{BigNum, GasDirective, GasType};
 use x86_64_instruction::MachineInst;
@@ -117,8 +115,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     bug!("param should've already been compiled!");
                 }
             }
-            Value::Instruction(fn_idx, bb_idx, idx) => {
-                let inst = &module.functions[fn_idx].basic_blocks[bb_idx].instrs[idx];
+            Value::Instruction(..) => {
                 // If the instruction has already been compiled, return its
                 // cached result.
                 if let Some(inst_asm) = self.compiled_insts.borrow().get(&value) {
@@ -135,7 +132,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             }
             Value::Global(idx) => {
                 let global = &self.cx.globals.borrow()[idx];
-                let global_size = global.ty.size(&self.cx.types.borrow());
                 let result = Operand::Loc(Location::RipOffset(global.name.clone()));
                 CompiledInst::with_result(result)
             }
@@ -334,8 +330,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 // mov the value into a register an compare it with the second value
                 let reg = Register::direct(
                     SubRegister::reg(RAX, operand_access_mode(&result1, &result2)));
-                let res_res = Register::direct(
-                    SubRegister::reg(RCX, AccessMode::Low8));
                 // FIXME: check the instruction and set RCX to cmp result.
                 // mov cmp result to cmp_res
                 asm.extend(vec![
@@ -355,7 +349,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     CompOp::Slt => MachineInst::setl(reg),
                     CompOp::Ule => MachineInst::setbe(reg),
                     CompOp::Sle => MachineInst::setle(reg),
-                    _ => unimplemented!("Operator: {:?}", op),
                 };
                 asm.extend(vec![
                     set,
@@ -371,10 +364,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let Instruction::CondBr(cond, bb1, bb2) = inst {
             let mut asm = vec![];
             match cond {
-                Value::Instruction(fn_idx, bb_idx, idx) => {
-                    let module = self.cx.module.borrow();
-                    let cond_inst =
-                        &module.functions[*fn_idx].basic_blocks[*bb_idx].instrs[*idx];
+                Value::Instruction(..) => {
                     let cond_val = self.compile_instruction(*cond).result.unwrap();
                     let true_reg = Register::direct(
                         SubRegister::reg(RCX, AccessMode::Low8));
@@ -424,8 +414,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             match src_am {
                 AccessMode::Large(16) => {
                     match (&src_result, &dest_result) {
-                        (Operand::Loc(Location::RbpOffset(src_offset, sam)),
-                         Operand::Loc(Location::RbpOffset(dst_offset, dam))) => {
+                        (Operand::Loc(Location::RbpOffset(src_offset, _sam)),
+                         Operand::Loc(Location::RbpOffset(_dst_offset, dam))) => {
                             let am_full = AccessMode::Full;
                             // Move two quad words from src to dst.
                             let reg =
@@ -518,7 +508,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     ]);
 
                 },
-                AccessMode::Large(bytes) => bug!("Unsupported mode: {:?}", acc_mode),
+                AccessMode::Large(_) => bug!("Unsupported mode: {:?}", acc_mode),
                 _ => {
                     asm.extend(vec![
                         MachineInst::mov(instr_asm.result.unwrap(),
@@ -539,9 +529,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_checkoverflow(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::CheckOverflow(check_inst, _, signed) = inst {
+        if let Instruction::CheckOverflow(_, _, signed) = inst {
             let result = self.precompiled_result(inst);
-            let instr_asm = self.compile_instruction(*check_inst);
             // Get register %dl.
             let reg = Register::direct(SubRegister::reg(RDX, AccessMode::Low8));
             let set_inst = if *signed {
@@ -667,7 +656,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             match types[agg_ty] {
-                OxType::StructType { ref members, ref name } => {
+                OxType::StructType { .. } => {
                     let offset = types[agg_ty].offset(*idx, &types);
                     assert!(offset % 8 == 0);
                     let offset = offset / 8;
@@ -704,7 +693,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     ) -> CompiledInst {
         let types = self.cx.types.borrow();
         let agg_ty = self.cx.val_ty(agg);
-        let agg_size = self.cx.val_ty(agg).size(&types) / 8;
         let members = match types[agg_ty] {
             OxType::StructType { ref members, .. } => members,
             ref ty => bug!("Expected OxType::StructType, found {:?}", ty),
@@ -725,7 +713,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         match agg {
             // FIXME? an aggregate is only undefined if it is a Value::ConstUndef.
             // This is because storing an undefined value is a no-op.
-            Value::ConstUndef(ty) => {
+            Value::ConstUndef(_) => {
                 let reg =
                     Register::direct(SubRegister::reg(RCX, member_am));
                 let asm = vec![
@@ -812,24 +800,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_gep(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::Gep(agg, indices, inbounds) = inst {
+        if let Instruction::Gep(agg, indices, _inbounds) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             // FIXME: normally, the indices of a GEP must be constants (they need
             // to be known at compile-time). However if an index is used to
             // index into an array, it doesn't have to be a constants (because
             // the type of the resulting GEP can be known statically anyway).
-
-            // Get a pointer to the aggregate.
-            let agg_ptr = self.compile_value(*agg).result.unwrap();
-            // The first index indexes through the struct ptrs.
-            let index_val = self.compile_value(indices[0]).result.unwrap();
-            // Find out how many bytes to add to the base address to get to the
-            // desired index.
-            //
-            // First, find out the type of the struct:
-            // The address where the result of this instruction will be stored.
-
             let mut asm = Vec::new();
             let mut cur_agg_ty = agg_ty;
             let indices: Vec<(Type, Operand)> =
@@ -910,7 +887,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
 
     fn compile_invoke(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::Invoke { callee, args, then, catch } = inst {
+        if let Instruction::Invoke { .. } = inst {
             // Emit the call
             self.compile_call(inst)
             // FIXME: skip the resume for now
@@ -921,7 +898,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_resume(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::Resume(v) = inst {
+        if let Instruction::Resume(_) = inst {
             // FIXME: crash for now.
             CompiledInst::with_instructions(vec![MachineInst::UD2])
         } else {
@@ -930,7 +907,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn compile_landingpad(&self, inst: &Instruction) -> CompiledInst {
-        if let Instruction::LandingPad { ty, pers_fn, num_clauses, cleanup } = inst {
+        if let Instruction::LandingPad { .. } = inst {
             // FIXME: crash for now.
             let landing_pad = self.precompiled_result(inst);
             CompiledInst::new(vec![MachineInst::UD2], landing_pad)
@@ -1010,10 +987,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             match cond {
                 // FIXME: assert that the condition is either an i1 or a vector
                 // of i1.
-                Value::Instruction(fn_idx, bb_idx, idx) => {
-                    let module = self.cx.module.borrow();
-                    let cond_inst =
-                        &module.functions[*fn_idx].basic_blocks[*bb_idx].instrs[*idx];
+                Value::Instruction(..) => {
                     let mut asm = Vec::new();
                     let compiled_cond = self.compile_instruction(*cond).result.unwrap();
                     let true_lbl = self.cx.get_sym_name("select_true");
@@ -1094,7 +1068,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             Instruction::Select(..)=> self.compile_select(inst),
             Instruction::Switch { .. } => self.compile_switch(inst),
             Instruction::Gep(..) => self.compile_gep(inst),
-            _ => unimplemented!("instruction {:?}\n{:?}", inst, self.cx.types),
         };
         let compiled_inst = if let Some(ref result) = instr_asm.result {
             CompiledInst::new(instr_asm.asm.clone(), result.clone())
@@ -1115,7 +1088,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     pub fn compile_block(&self, bb: &OxBasicBlock) -> Vec<MachineInst> {
         let mut asm = vec![];
-        for (inst_idx, inst) in bb.instrs.iter().enumerate() {
+        for (inst_idx, _) in bb.instrs.iter().enumerate() {
             let inst = &bb.instrs[inst_idx];
             if self.already_compiled(Value::Instruction(bb.parent, bb.idx, inst_idx)) {
                 // Always compile branching instructions.
@@ -1206,7 +1179,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         };
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    Instruction::Alloca(_, ty, align) => {
+                    Instruction::Alloca(_, ty, _) => {
                         let types = &self.cx.types.borrow();
                         let inst_size =
                             ty.pointee_ty(types).size(types);
@@ -1229,7 +1202,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let types = self.cx.types.borrow();
                         let agg_ty = self.cx.val_ty(*agg);
                         let elt_size = match types[agg_ty] {
-                            OxType::StructType { ref members, ref name } => {
+                            OxType::StructType { ref members, .. } => {
                                 members[*idx as usize].size(&types)
                             },
                             ref ty => unimplemented!("ExtractValue({:?})", ty),
@@ -1252,7 +1225,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let result = Location::RbpOffset(-size, AccessMode::Full);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    Instruction::InsertValue(agg, v, idx) => {
+                    Instruction::InsertValue(agg, _, _) => {
                         let agg_size = self.cx.val_ty(*agg).
                             size(&self.cx.types.borrow()) as isize;
                         size += agg_size / 8;
@@ -1383,7 +1356,6 @@ impl AsmPrinter<'ll, 'tcx> {
             match global.initializer {
                 Some(v) => asm.extend(self.compile_const_global(v)),
                 None => bug!("no initializer found for {:?}", global),
-                _ => unimplemented!("declare_globals({:?})", global),
             };
         }
         asm
