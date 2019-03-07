@@ -1,8 +1,6 @@
 use rustc_codegen_ssa::common::{IntPredicate, RealPredicate, AtomicOrdering,
     SynchronizationScope, AtomicRmwBinOp};
 use rustc_codegen_ssa::MemFlags;
-use libc::c_char;
-use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::mir::operand::{OperandValue, OperandRef};
 use rustc_codegen_ssa::mir::place::PlaceRef;
@@ -11,7 +9,6 @@ use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{self, Align, Size, TyLayout};
 use rustc_codegen_ssa::traits::*;
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::ffi::CStr;
 use std::ops::{Deref, Range};
 use syntax;
@@ -92,7 +89,7 @@ impl HasCodegen<'tcx> for Builder<'a, 'll, 'tcx> {
 }
 
 impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
-    fn get_static(&self, def_id: DefId) -> Value {
+    fn get_static(&self, _def_id: DefId) -> Value {
         unimplemented!("get_static");
     }
 }
@@ -149,7 +146,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             OverflowOp::Add => Instruction::Add(lhs, rhs),
             OverflowOp::Sub => Instruction::Sub(lhs, rhs),
             OverflowOp::Mul => Instruction::Mul(lhs, rhs, signed),
-            _ => unimplemented!("overflow op"),
         };
         let inst = self.emit_instr(inst);
         (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty, signed)))
@@ -200,11 +196,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
                    self.builder.bb_idx)
     }
 
-    fn count_insn(&self, category: &str) {
+    fn count_insn(&self, _category: &str) {
         unimplemented!("count_insn");
     }
 
-    fn set_value_name(&mut self, value: Value, name: &str) {
+    fn set_value_name(&mut self, _value: Value, _name: &str) {
         // Do nothing. Value names don't matter.
     }
 
@@ -220,7 +216,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         };
     }
 
-    fn position_at_start(&mut self, llbb: BasicBlock) {
+    fn position_at_start(&mut self, _llbb: BasicBlock) {
         unimplemented!("position_at_start");
     }
 
@@ -233,7 +229,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        let mut label;
+        let label;
         {
             let module = self.cx.module.borrow();
             label = module.functions[dest.0].basic_blocks[dest.1].label.clone();
@@ -275,13 +271,13 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         args: &[Value],
         then: BasicBlock,
         catch: BasicBlock,
-        funclet: Option<&Self::Funclet>,
+        _funclet: Option<&Self::Funclet>,
     )-> Value {
         let invoke = self.emit_instr(Instruction::Invoke {
             callee: llfn, args: args.to_vec(), then, catch
         });
         // Branch to 'then' if the invoke returns
-        let mut label;
+        let label;
         {
             let module = self.cx.module.borrow();
             label = module.functions[then.0].basic_blocks[then.1].label.clone();
@@ -304,16 +300,16 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn fadd(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fadd");
     }
 
     fn fadd_fast(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fadd_fast");
     }
@@ -328,16 +324,16 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn fsub(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fsub");
     }
 
     fn fsub_fast(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fsub_fast");
     }
@@ -353,158 +349,158 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn fmul(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fmul");
     }
 
     fn fmul_fast(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fmul_fast");
     }
 
     fn udiv(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("udiv");
     }
 
     fn exactudiv(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("exactudiv");
     }
 
     fn sdiv(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("sdiv");
     }
 
     fn exactsdiv(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("exactsdiv");
     }
 
     fn fdiv(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fdiv");
     }
 
     fn fdiv_fast(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fdiv_fast");
     }
 
     fn urem(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("urem");
     }
 
     fn srem(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("srem");
     }
 
     fn frem(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("frem");
     }
 
     fn frem_fast(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("frem_fast");
     }
 
     fn shl(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("shl");
     }
 
     fn lshr(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("lshr");
     }
 
     fn ashr(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("ashr");
     }
 
     fn and(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("and");
     }
 
     fn or(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("or");
     }
 
     fn xor(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("xor");
     }
 
     fn neg(
         &mut self,
-        v: Value
+        _v: Value
     )-> Value {
         unimplemented!("neg");
     }
 
     fn fneg(
         &mut self,
-        v: Value
+        _v: Value
     )-> Value {
         unimplemented!("fneg");
     }
@@ -519,7 +515,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn alloca(
         &mut self,
         ty: Type,
-        name: &str, align: Align
+        name: &str,
+        align: Align
     )-> Value {
         let ty = self.type_ptr_to(ty);
         self.emit_instr(Instruction::Alloca(name.to_string(), ty, align))
@@ -527,18 +524,19 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn dynamic_alloca(
         &mut self,
-        ty: Type,
-        name: &str, align: Align
+        _ty: Type,
+        _name: &str,
+        _align: Align
     )-> Value {
         unimplemented!("dynamic_alloca");
     }
 
     fn array_alloca(
         &mut self,
-        ty: Type,
-        len: Value,
-        name: &str,
-        align: Align
+        _ty: Type,
+        _len: Value,
+        _name: &str,
+        _align: Align
     )-> Value {
         unimplemented!("array_alloca");
     }
@@ -553,28 +551,29 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn volatile_load(
         &mut self,
-        ptr: Value
+        _ptr: Value
     )-> Value {
         unimplemented!("volatile_load");
     }
 
     fn atomic_load(
         &mut self,
-        ptr: Value,
-        order: AtomicOrdering, size: Size
+        _ptr: Value,
+        _order: AtomicOrdering,
+        _size: Size
     )-> Value {
         unimplemented!("atomic_load");
     }
 
     fn range_metadata(
         &mut self,
-        load: Value,
-        range: Range<u128>
+        _load: Value,
+        _range: Range<u128>
     ) {
         unimplemented!("range_metadata");
     }
 
-    fn nonnull_metadata(&mut self, load: Value) {
+    fn nonnull_metadata(&mut self, _load: Value) {
         unimplemented!("nonnull_metadata");
     }
 
@@ -589,10 +588,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn atomic_store(
         &mut self,
-        val: Value,
-        ptr: Value,
-        order: AtomicOrdering,
-        size: Size
+        _val: Value,
+        _ptr: Value,
+        _order: AtomicOrdering,
+        _size: Size
     ) {
         unimplemented!("atomic_store");
     }
@@ -601,8 +600,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         val: Value,
         ptr: Value,
-        align: Align,
-        flags: MemFlags,
+        _align: Align,
+        _flags: MemFlags,
     )-> Value {
         // FIXME: ignore the flags for now
         self.emit_instr(Instruction::Store(ptr, val))
@@ -642,64 +641,64 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn sext(
         &mut self,
-        val: Value,
-        dest_ty: Type
+        _val: Value,
+        _dest_ty: Type
     )-> Value {
         unimplemented!("sext");
     }
 
     fn fptoui(
         &mut self,
-        val: Value,
-        dest_ty: Type
+        _val: Value,
+        _dest_ty: Type
     )-> Value {
         unimplemented!("fptoui");
     }
 
     fn fptosi(
         &mut self,
-        val: Value,
-        dest_ty: Type
+        _val: Value,
+        _dest_ty: Type
     )-> Value {
         unimplemented!("fptosi");
     }
 
     fn uitofp(
         &mut self,
-        val: Value,
-        dest_ty: Type
+        _val: Value,
+        _dest_ty: Type
     )-> Value {
         unimplemented!("uitofp");
     }
 
     fn sitofp(
         &mut self,
-        val: Value,
-        dest_ty: Type
+        _val: Value,
+        _dest_ty: Type
     )-> Value {
         unimplemented!("sitofp");
     }
 
     fn fptrunc(
         &mut self,
-        val: Value,
-        dest_ty: Type
+        _val: Value,
+        _dest_ty: Type
     )-> Value {
         unimplemented!("fptrunc");
     }
 
     fn fpext(
         &mut self,
-        val: Value,
-        dest_ty: Type
+        _val: Value,
+        _dest_ty: Type
     )-> Value {
         unimplemented!("fpext");
     }
 
     fn ptrtoint(
         &mut self,
-        val: Value,
-        dest_ty: Type
+        _val: Value,
+        _dest_ty: Type
     )-> Value {
         unimplemented!("ptrtoint");
     }
@@ -724,7 +723,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         val: Value,
         dest_ty: Type,
-        is_signed: bool
+        _is_signed: bool
     )-> Value {
         self.emit_instr(Instruction::Cast(val, dest_ty))
     }
@@ -753,58 +752,60 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             IntPredicate::IntSLT => CompOp::Slt,
             IntPredicate::IntULE => CompOp::Ule,
             IntPredicate::IntSLE => CompOp::Sle,
-            _ => {
-                unimplemented!("icmp");
-            }
         };
         self.emit_instr(Instruction::Icmp(lhs, rhs, op))
     }
 
     fn fcmp(
         &mut self,
-        op: RealPredicate,
-        lhs: Value, rhs: Value
+        _op: RealPredicate,
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("fcmp");
     }
 
     fn empty_phi(
         &mut self,
-        ty: Type)-> Value {
+        _ty: Type
+    )-> Value {
         unimplemented!("empty_phi");
     }
 
     fn phi(
         &mut self,
-        ty: Type,
-        vals: &[Value],
-        bbs: &[BasicBlock]
+        _ty: Type,
+        _vals: &[Value],
+        _bbs: &[BasicBlock]
     )-> Value {
         unimplemented!("phi");
     }
 
     fn inline_asm_call(
         &mut self,
-        asm: &CStr,
-        cons: &CStr,
-        inputs: &[Value], output: Type,
-        volatile: bool, alignstack: bool,
-        dia: syntax::ast::AsmDialect) -> Option<Value> {
+        _asm: &CStr,
+        _cons: &CStr,
+        _inputs: &[Value],
+        _output: Type,
+        _volatile: bool,
+        _alignstack: bool,
+        _dia: syntax::ast::AsmDialect
+    ) -> Option<Value> {
         unimplemented!("inline_asm_call");
     }
 
     fn minnum(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("minnum");
     }
 
     fn maxnum(
         &mut self,
-        lhs: Value,
-        rhs: Value
+        _lhs: Value,
+        _rhs: Value
     )-> Value {
         unimplemented!("maxnum");
     }
@@ -819,135 +820,136 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn va_arg(
         &mut self,
-        list: Value,
-        ty: Type
+        _list: Value,
+        _ty: Type
     )-> Value {
         unimplemented!("va_arg");
     }
 
     fn extract_element(&mut self,
-        vec: Value,
-        idx: Value
+        _vec: Value,
+        _idx: Value
     )-> Value {
         unimplemented!("extract_element");
     }
 
     fn insert_element(
-        &mut self, vec: Value,
-        elt: Value,
-        idx: Value,
+        &mut self,
+        _vec: Value,
+        _elt: Value,
+        _idx: Value,
     )-> Value {
         unimplemented!("insert_element");
     }
 
     fn shuffle_vector(
         &mut self,
-        v1: Value,
-        v2: Value,
-        mask: Value
+        _v1: Value,
+        _v2: Value,
+        _mask: Value
     )-> Value {
         unimplemented!("shuffle_vector");
     }
 
     fn vector_splat(
         &mut self,
-        num_elts: usize,
-        elt: Value
+        _num_elts: usize,
+        _elt: Value
     )-> Value {
         unimplemented!("vector_splat");
     }
 
     fn vector_reduce_fadd_fast(
         &mut self,
-        acc: Value,
-        src: Value
+        _acc: Value,
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_fadd_fast");
     }
 
     fn vector_reduce_fmul_fast(
         &mut self,
-        acc: Value,
-        src: Value
+        _acc: Value,
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_fmul_fast");
     }
 
     fn vector_reduce_add(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_add");
     }
 
     fn vector_reduce_mul(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_mul");
     }
 
     fn vector_reduce_and(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_and");
     }
 
     fn vector_reduce_or(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_or");
     }
 
     fn vector_reduce_xor(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_xor");
     }
 
     fn vector_reduce_fmin(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_fmin");
     }
 
     fn vector_reduce_fmax(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_fmax");
     }
 
     fn vector_reduce_fmin_fast(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_fmin_fast");
     }
 
     fn vector_reduce_fmax_fast(
         &mut self,
-        src: Value
+        _src: Value
     )-> Value {
         unimplemented!("vector_reduce_fmax_fast");
     }
 
     fn vector_reduce_min(
         &mut self,
-        src: Value,
-        is_signed: bool
+        _src: Value,
+        _is_signed: bool
     )-> Value {
         unimplemented!("vector_reduce_min");
     }
 
     fn vector_reduce_max(
         &mut self,
-        src: Value,
-        is_signed: bool
+        _src: Value,
+        _is_signed: bool
     )-> Value {
         unimplemented!("vector_reduce_max");
     }
@@ -957,13 +959,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         agg_val: Value,
         idx: u64
     )-> Value {
-        match agg_val {
-            Value::Instruction(fn_idx, bb_idx, idx) => {
-                let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
-                    basic_blocks[bb_idx].instrs[idx];
-            },
-            _ => {}
-        }
         // Extract the value at position `idx` in aggregate `agg_val`.
         self.emit_instr(Instruction::ExtractValue(agg_val, idx))
     }
@@ -994,8 +989,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn add_clause(
         &mut self,
-        landing_pad: Value,
-        clause: Value
+        _landing_pad: Value,
+        _clause: Value
     ) {
         unimplemented!("add_clause");
     }
@@ -1028,49 +1023,49 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn cleanup_pad(
         &mut self,
-        parent: Option<Value>,
-        args: &[Value]
+        _parent: Option<Value>,
+        _args: &[Value]
     ) {
         unimplemented!("cleanup_pad");
     }
 
     fn cleanup_ret(
         &mut self,
-        cleanup: &<Self::CodegenCx as BackendTypes>::Funclet,
-        unwind: Option<BasicBlock>,
+        _cleanup: &<Self::CodegenCx as BackendTypes>::Funclet,
+        _unwind: Option<BasicBlock>,
     ) -> Value {
         unimplemented!("cleanup_ret");
     }
 
     fn catch_pad(
         &mut self,
-        parent: Value,
-        args: &[Value]
+        _parent: Value,
+        _args: &[Value]
     ) {
         unimplemented!("catch_pad");
     }
 
     fn catch_ret(
         &mut self,
-        pad: &<Self::CodegenCx as BackendTypes>::Funclet,
-        unwind: BasicBlock
+        _pad: &<Self::CodegenCx as BackendTypes>::Funclet,
+        _unwind: BasicBlock
     ) -> Value {
         unimplemented!("catch_ret");
     }
 
     fn catch_switch(
         &mut self,
-        parent: Option<Value>,
-        unwind: Option<BasicBlock>,
-        num_handlers: usize,
+        _parent: Option<Value>,
+        _unwind: Option<BasicBlock>,
+        _num_handlers: usize,
     )-> Value {
         unimplemented!("catch_switch");
     }
 
     fn add_handler(
         &mut self,
-        catch_switch: Value,
-        handler: BasicBlock
+        _catch_switch: Value,
+        _handler: BasicBlock
     ) {
         unimplemented!("add_handler");
     }
@@ -1081,27 +1076,31 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn atomic_cmpxchg(
         &mut self,
-        dst: Value,
-        cmp: Value,
-        src: Value,
-        order: AtomicOrdering,
-        failure_order: AtomicOrdering,
-        weak: bool,
+        _dst: Value,
+        _cmp: Value,
+        _src: Value,
+        _order: AtomicOrdering,
+        _failure_order: AtomicOrdering,
+        _weak: bool,
     )-> Value {
         unimplemented!("");
     }
 
     fn atomic_rmw(
         &mut self,
-        op: AtomicRmwBinOp,
-        dst: Value,
-        src: Value,
-        order: AtomicOrdering,
+        _op: AtomicRmwBinOp,
+        _dst: Value,
+        _src: Value,
+        _order: AtomicOrdering,
     )-> Value {
         unimplemented!("atomic_rmw");
     }
 
-    fn atomic_fence(&mut self, order: AtomicOrdering, scope: SynchronizationScope) {
+    fn atomic_fence(
+        &mut self,
+        _order: AtomicOrdering,
+        _scope: SynchronizationScope
+    ) {
         unimplemented!("atomic_fence");
     }
 
@@ -1128,22 +1127,22 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn add_incoming_to_phi(
         &mut self,
-        phi: Value,
-        val: Value,
-        bb: BasicBlock
+        _phi: Value,
+        _val: Value,
+        _bb: BasicBlock
     ) {
         unimplemented!("add_incoming_to_phi");
     }
 
-    fn set_invariant_load(&mut self, load: Value) {
+    fn set_invariant_load(&mut self, _load: Value) {
         unimplemented!("set_invariant_load");
     }
 
     /// Returns the ptr value that should be used for storing `val`.
     fn check_store(
         &mut self,
-        val: Value,
-        ptr: Value
+        _val: Value,
+        _ptr: Value
     )-> Value {
         unimplemented!("check_store");
     }
@@ -1151,18 +1150,18 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     /// Returns the args that should be used for a call to `llfn`.
     fn check_call<'b>(
         &mut self,
-        typ: &str,
-        llfn: Value,
-        args: &'b [Value]
+        _typ: &str,
+        _llfn: Value,
+        _args: &'b [Value]
     ) -> Cow<'b, [Value]> {
         unimplemented!("check_call");
     }
 
-    fn lifetime_start(&mut self, ptr: Value, size: Size) {
+    fn lifetime_start(&mut self, _ptr: Value, _size: Size) {
         // FIXME? nothing to do for now
     }
 
-    fn lifetime_end(&mut self, ptr: Value, size: Size) {
+    fn lifetime_end(&mut self, _ptr: Value, _size: Size) {
         // FIXME? nothing to do for now
     }
 
@@ -1186,11 +1185,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
-    unsafe fn delete_basic_block(&mut self, bb: BasicBlock) {
+    unsafe fn delete_basic_block(&mut self, _bb: BasicBlock) {
         unimplemented!("delete_basic_block");
     }
 
-    fn do_not_inline(&mut self, llret: Value) {
+    fn do_not_inline(&mut self, _llret: Value) {
         // No need to do anything. IronOx never inlines.
     }
 
@@ -1201,10 +1200,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         src: Self::Value,
         src_align: Align,
         size: Self::Value,
-        flags: MemFlags,
+        _flags: MemFlags,
     ) {
         let mut memcpy_start = self.build_sibling_block("memcpy_start");
-        let mut memcpy_end = self.build_sibling_block("memcpy_end");
+        let memcpy_end = self.build_sibling_block("memcpy_end");
         let i8p = self.type_i8p();
         // Enough space for a pointer
         let i64_ty = self.type_i64();
@@ -1257,12 +1256,12 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn memmove(
         &mut self,
-        dst: Self::Value,
-        dst_align: Align,
-        src: Self::Value,
-        src_align: Align,
-        size: Self::Value,
-        flags: MemFlags,
+        _dst: Self::Value,
+        _dst_align: Align,
+        _src: Self::Value,
+        _src_align: Align,
+        _size: Self::Value,
+        _flags: MemFlags,
     ) {
         unimplemented!("memmove");
     }
@@ -1273,11 +1272,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         fill_byte: Value,
         size: Value,
         align: Align,
-        flags: MemFlags,
+        _flags: MemFlags,
     ) {
 
         let mut memset_start = self.build_sibling_block("memset_start");
-        let mut memset_end = self.build_sibling_block("memset_end");
+        let memset_end = self.build_sibling_block("memset_end");
         let i8p = self.type_i8p();
         // Enough space for a pointer
         let i64_ty = self.type_i64();
@@ -1302,7 +1301,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // ptr += 1
         let ptr = memset_start.pointercast(ptr, self.cx.type_i64());
 
-        let new_ptr = memset_start.add(ptr, const_one);
         let new_size = memset_start.sub(size, const_one);
 
         // Store the pointers and the size back to the stack.

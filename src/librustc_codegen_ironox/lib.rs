@@ -6,7 +6,6 @@
 #![feature(optin_builtin_traits)]
 #![feature(rustc_attrs)]
 #![feature(step_trait)]
-#![allow(unused)]
 
 extern crate rustc_errors;
 #[macro_use] extern crate rustc;
@@ -32,12 +31,9 @@ use rustc::middle::cstore::MetadataLoader;
 use rustc::session::{CompileIncomplete, Session};
 use rustc::session::config::{self, OutputFilenames, OutputType, PrintRequest};
 use rustc::ty::{self, TyCtxt};
-use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
 use rustc_codegen_utils::target_features::{all_known_features, X86_WHITELIST};
 use rustc_data_structures::sync::Lrc;
-use rustc_mir::monomorphize::collector;
-use rustc_mir::monomorphize::item::MonoItem;
 use rustc_codegen_ssa::CompiledModule;
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_errors::{FatalError, Handler};
@@ -50,13 +46,9 @@ use syntax_pos::symbol::InternedString;
 use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig};
 use rustc_codegen_ssa::back::lto::{SerializedModule, LtoModuleCodegen, ThinModule};
 
-use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 use rustc::dep_graph::WorkProduct;
 use rustc::util::time_graph::Timeline;
 use std::any::Any;
-
-use std::process::{Command, Stdio};
-use std::io::Write;
 
 mod back {
     pub use rustc_codegen_utils::symbol_names;
@@ -95,11 +87,9 @@ mod x86_64_instruction;
 mod x86_64_register;
 
 use context::CodegenCx;
-use ir::constant::{UnsignedConst, SignedConst};
 use ir::type_::Type;
 use ir::value::Value;
 use ir::function::OxFunction;
-use ir::struct_::OxStruct;
 
 #[derive(Clone)]
 pub struct IronOxCodegenBackend(());
@@ -239,18 +229,18 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     }
 
     fn run_fat_lto(
-        cgcx: &CodegenContext<Self>,
-        modules: Vec<ModuleCodegen<Self::Module>>,
-        timeline: &mut Timeline
+        _cgcx: &CodegenContext<Self>,
+        _modules: Vec<ModuleCodegen<Self::Module>>,
+        _timeline: &mut Timeline
     ) -> Result<LtoModuleCodegen<Self>, FatalError> {
         unimplemented!("run_fat_lto");
     }
 
     fn run_thin_lto(
-        cgcx: &CodegenContext<Self>,
-        modules: Vec<(String, Self::ThinBuffer)>,
-        cached_modules: Vec<(SerializedModule<Self::ModuleBuffer>, WorkProduct)>,
-        timeline: &mut Timeline
+        _cgcx: &CodegenContext<Self>,
+        _modules: Vec<(String, Self::ThinBuffer)>,
+        _cached_modules: Vec<(SerializedModule<Self::ModuleBuffer>, WorkProduct)>,
+        _timeline: &mut Timeline
     ) -> Result<(Vec<LtoModuleCodegen<Self>>, Vec<WorkProduct>), FatalError> {
         unimplemented!("run_thin_lto");
     }
@@ -284,8 +274,8 @@ impl WriteBackendMethods for IronOxCodegenBackend {
     }
 
     fn prepare_thin(
-        cgcx: &CodegenContext<Self>,
-        module: ModuleCodegen<Self::Module>
+        _cgcx: &CodegenContext<Self>,
+        _module: ModuleCodegen<Self::Module>
     ) -> (String, Self::ThinBuffer) {
         unimplemented!("prepare_thin");
     }
@@ -372,7 +362,7 @@ impl CodegenBackend for IronOxCodegenBackend {
         _dep_graph: &DepGraph,
         outputs: &OutputFilenames,
     ) -> Result<(), CompileIncomplete> {
-        let (codegen_results, work_products) =
+        let (codegen_results, _work_products) =
             ongoing_codegen.downcast::
                 <rustc_codegen_ssa::back::write::OngoingCodegen<IronOxCodegenBackend>>()
                 .expect("Expected IronOxCodegenBackend's OngoingCodegen, found Box<Any>")

@@ -5,10 +5,8 @@ use libc::c_uint;
 use rustc::mir::mono::Stats;
 
 use rustc::session::Session;
-
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{LayoutOf, LayoutError, self, TyLayout, Size, VariantIdx};
-use type_of::LayoutIronOxExt;
 use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::base::wants_msvc_seh;
 use rustc_codegen_ssa::callee::resolve_and_get_fn;
@@ -18,21 +16,22 @@ use rustc_mir::monomorphize::Instance;
 use rustc_target::abi::HasDataLayout;
 use rustc_target::spec::{HasTargetSpec, Target};
 use rustc::mir::interpret::{Scalar, Allocation, Pointer, read_target_uint};
-use rustc_data_structures::indexed_vec::{Idx, IndexVec};
+use rustc_data_structures::indexed_vec::IndexVec;
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use syntax::symbol::LocalInternedString;
 
-use debuginfo::DIScope;
-use ir::basic_block::BasicBlock;
-use ir::constant::{UnsignedConst, SignedConst};
-use ir::instruction::{ConstCast, Instruction};
-use ir::value::Value;
-use ir::type_::{OxType, Type, IxLlcx};
-use ir::struct_::OxStruct;
 use consts::{self};
 use const_cstr::ConstCstr;
+use debuginfo::DIScope;
 use global::Global;
+use ir::basic_block::BasicBlock;
+use ir::constant::{UnsignedConst, SignedConst};
+use ir::instruction::ConstCast;
+use ir::struct_::OxStruct;
+use ir::type_::{OxType, Type, IxLlcx};
+use ir::value::Value;
+use type_of::LayoutIronOxExt;
 
 use super::ModuleIronOx;
 
@@ -272,11 +271,11 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         unimplemented!("used_statics");
     }
 
-    fn set_frame_pointer_elimination(&self, llfn: Value) {
+    fn set_frame_pointer_elimination(&self, _llfn: Value) {
         // FIXME
     }
 
-    fn apply_target_cpu_attr(&self, llfn: Value) {
+    fn apply_target_cpu_attr(&self, _llfn: Value) {
         // FIXME
     }
 
@@ -321,7 +320,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         Value::ConstUndef(t)
     }
 
-    fn const_int(&self, t: Type, i: i64) -> Value {
+    fn const_int(&self, _t: Type, _i: i64) -> Value {
         unimplemented!("const_int");
     }
 
@@ -337,7 +336,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         self.const_unsigned(self.type_i1(), val as u128)
     }
 
-    fn const_i32(&self, i: i32) -> Value {
+    fn const_i32(&self, _i: i32) -> Value {
         unimplemented!("const_i32");
     }
 
@@ -345,7 +344,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         self.const_unsigned(self.type_i32(), i as u128)
     }
 
-    fn const_u64(&self, i: u64) -> Value {
+    fn const_u64(&self, _i: u64) -> Value {
         unimplemented!("const_u64");
     }
 
@@ -430,29 +429,30 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         v
     }
 
-    fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
+    fn const_array(&self, _ty: Type, _elts: &[Value]) -> Value {
         unimplemented!("const_array");
     }
 
-    fn const_vector(&self, elts: &[Value]) -> Value {
+    fn const_vector(&self, _elts: &[Value]) -> Value {
         unimplemented!("const_vector");
     }
 
     fn const_bytes(&self, bytes: &[u8]) -> Value {
+        // FIXME: i8 array
         let mut c_bytes = self.bytes.borrow_mut();
         c_bytes.push(bytes.to_vec());
         Value::ConstBytes(c_bytes.len() - 1)
     }
 
-    fn const_get_elt(&self, v: Value, idx: u64) -> Value {
+    fn const_get_elt(&self, _v: Value, _idx: u64) -> Value {
         unimplemented!("const_get_elt");
     }
 
-    fn const_get_real(&self, v: Value) -> Option<(f64, bool)> {
+    fn const_get_real(&self, _v: Value) -> Option<(f64, bool)> {
         unimplemented!("const_get_real");
     }
 
-    fn const_to_uint(&self, v: Value) -> u64 {
+    fn const_to_uint(&self, _v: Value) -> u64 {
         unimplemented!("const_to_uint");
     }
 
@@ -463,14 +463,14 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         }
     }
 
-    fn is_const_real(&self, v: Value) -> bool {
+    fn is_const_real(&self, _v: Value) -> bool {
         unimplemented!("is_const_real");
     }
 
-    fn const_to_opt_u128(&self, v: Value, sign_ext: bool) -> Option<u128> {
+    fn const_to_opt_u128(&self, v: Value, _sign_ext: bool) -> Option<u128> {
         match v {
             Value::ConstUint(i) => Some(self.u_consts.borrow()[i].value),
-            Value::ConstInt(i) => unimplemented!("signed integers"),
+            Value::ConstInt(_) => unimplemented!("signed integers"),
             _ =>  None
         }
     }
@@ -494,14 +494,11 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Scalar::Bits { bits, size } => {
                 assert_eq!(size as u64, layout.value.size(self).bytes());
                 let llval = self.const_uint_big(self.type_ix(bitsize), bits);
-                if layout.value == layout::Pointer {
-                    unimplemented!("scalar_to_backend: layout::Pointer");
-                } else {
-                    self.const_ptrcast(llval, llty)
-                }
+                self.const_ptrcast(llval, llty)
             },
             Scalar::Ptr(ptr) => {
-                unimplemented!("Scalar::Ptr");
+                let alloc_kind = self.tcx.alloc_map.lock().get(ptr.alloc_id);
+                unimplemented!("Scalar::Ptr {:?}", alloc_kind);
             }
         }
     }

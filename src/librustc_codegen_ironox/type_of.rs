@@ -28,7 +28,6 @@ fn struct_field_types(
     layout: TyLayout<'tcx>) -> Vec<Type> {
     let field_count = layout.fields.count();
 
-    let mut packed = false;
     let mut offset = Size::ZERO;
     let mut prev_effective_align = layout.align.abi;
     let mut result: Vec<_> = Vec::with_capacity(1 + field_count * 2);
@@ -38,7 +37,6 @@ fn struct_field_types(
         let effective_field_align = layout.align.abi
             .min(field.align.abi)
             .restrict_for_offset(target_offset);
-        packed |= effective_field_align < field.align.abi;
 
         assert!(target_offset >= offset);
         let padding = target_offset - offset;
@@ -140,10 +138,10 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
         } else {
             match self.abi {
                 layout::Abi::Scalar(_) => bug!("handled elsewhere"),
-                layout::Abi::Vector { ref element, count } => {
+                layout::Abi::Vector { .. } => {
                     unimplemented!("Vector");
                 }
-                layout::Abi::ScalarPair(ref a, ref b) => {
+                layout::Abi::ScalarPair(_, _) => {
                     // This may or may not be a fat pointer. It could be
                     // another type that must be represented as a pair of scalars.
                     // Create a struct that contains the types of the two elements
@@ -236,7 +234,7 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
 
     fn scalar_ironox_type_at(&self, cx: &CodegenCx<'_, 'tcx>,
                              scalar: &layout::Scalar,
-                             offset: Size) -> Type {
+                             _offset: Size) -> Type {
         match scalar.value {
             layout::Int(i, _) => cx.type_from_integer(i),
             layout::Float(FloatTy::F32) => cx.type_f32(),

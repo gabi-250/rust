@@ -1,7 +1,6 @@
 use context::CodegenCx;
 use ir::instruction::Instruction;
 use ir::function::OxFunction;
-use ir::value::Value;
 
 /// The index of the parent function, and the index of the basic block
 /// in the function.
@@ -24,7 +23,7 @@ pub struct OxBasicBlock {
 }
 
 impl OxBasicBlock {
-    pub fn new(cx: &CodegenCx,
+    pub fn new(_cx: &CodegenCx,
                label: &str,
                parent: &OxFunction,
                idx: usize) -> OxBasicBlock {

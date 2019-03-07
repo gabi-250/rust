@@ -20,18 +20,18 @@ impl DebugInfoMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn create_vtable_metadata(
         &self,
-        ty: Ty<'tcx>,
-        vtable: Self::Value,
+        _ty: Ty<'tcx>,
+        _vtable: Self::Value,
     ) {
         // FIXME do nothing for now
     }
 
     fn create_function_debug_context(
         &self,
-        instance: Instance<'tcx>,
-        sig: ty::FnSig<'tcx>,
-        llfn: Value,
-        mir: &mir::Mir,
+        _instance: Instance<'tcx>,
+        _sig: ty::FnSig<'tcx>,
+        _llfn: Value,
+        _mir: &mir::Mir,
     ) -> FunctionDebugContext<Self::DIScope> {
         if self.tcx.sess.opts.debuginfo == DebugInfo::None {
             return FunctionDebugContext::DebugInfoDisabled;
@@ -60,9 +60,9 @@ impl DebugInfoMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn extend_scope_to_file(
         &self,
-        scope_metadata: &'ll DIScope,
-        file: &syntax_pos::SourceFile,
-        defining_crate: CrateNum,
+        _scope_metadata: &'ll DIScope,
+        _file: &syntax_pos::SourceFile,
+        _defining_crate: CrateNum,
     ) -> &'ll DIScope {
         unimplemented!("extend_scope_to_file");
     }
@@ -71,7 +71,10 @@ impl DebugInfoMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         // do nothing
     }
 
-    fn debuginfo_upvar_decls_ops_sequence(&self, byte_offset_of_var_in_env: u64) -> [i64; 4] {
+    fn debuginfo_upvar_decls_ops_sequence(
+        &self,
+        _byte_offset_of_var_in_env: u64
+    ) -> [i64; 4] {
         unimplemented!("debuginfo_upvar_decls_ops_sequence");
     }
 }
@@ -81,22 +84,22 @@ impl<'a, 'll: 'a, 'tcx: 'll> DebugInfoBuilderMethods<'tcx>
 {
     fn declare_local(
         &mut self,
-        dbg_context: &FunctionDebugContext<&'ll DIScope>,
-        variable_name: ast::Name,
-        variable_type: Ty<'tcx>,
-        scope_metadata: &'ll DIScope,
-        variable_access: VariableAccess<'_, Value>,
-        variable_kind: VariableKind,
-        span: syntax_pos::Span,
+        _dbg_context: &FunctionDebugContext<&'ll DIScope>,
+        _variable_name: ast::Name,
+        _variable_type: Ty<'tcx>,
+        _scope_metadata: &'ll DIScope,
+        _variable_access: VariableAccess<'_, Value>,
+        _variable_kind: VariableKind,
+        _span: syntax_pos::Span,
     ) {
         unimplemented!("declare_local");
     }
 
     fn set_source_location(
         &mut self,
-        debug_context: &FunctionDebugContext<&'ll DIScope>,
-        scope: Option<&'ll DIScope>,
-        span: syntax_pos::Span,
+        _debug_context: &FunctionDebugContext<&'ll DIScope>,
+        _scope: Option<&'ll DIScope>,
+        _span: syntax_pos::Span,
     ) {
         // do nothing
     }

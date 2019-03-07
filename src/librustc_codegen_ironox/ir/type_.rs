@@ -1,20 +1,17 @@
 use abi::{FnTypeExt, IronOxType};
 use context::CodegenCx;
-use ir::instruction::Instruction;
-use type_of::LayoutIronOxExt;
 use ir::value::Value;
+use type_of::LayoutIronOxExt;
 
 use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods};
 use rustc_codegen_ssa::common::TypeKind;
 use rustc::util::nodemap::FxHashMap;
-use rustc_target::abi::LayoutOf;
 use rustc_target::abi::call::{CastTarget, FnType, Reg};
-use rustc::ty::{self, layout, Ty, TyCtxt};
+use rustc::ty::{layout, Ty};
 use rustc::ty::layout::TyLayout;
 use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 
 use std::cell::RefCell;
-use std::ops::Deref;
 
 /// The type of a scalar.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -90,7 +87,7 @@ impl OxType {
     pub fn offset(&self, idx: u64, types: &IndexVec<Type, OxType>) -> u64 {
         // FIXME:?
         match *self {
-            OxType::StructType { ref name, ref members } => {
+            OxType::StructType { ref members, .. } => {
                 let idx = idx as usize;
                 let mut offset = 0;
                 for i in 0..idx {
@@ -98,7 +95,7 @@ impl OxType {
                 }
                 offset
             },
-            OxType::Array { len, ty } => {
+            OxType::Array { ty, .. } => {
                 idx * ty.size(types)
             }
             _ => unimplemented!("{:?}.offset({})", *self, idx)
@@ -114,7 +111,7 @@ impl Type {
             OxType::FatPtr { ptr, meta } => {
                 ptr.size(types) + meta.size(types)
             },
-            OxType::StructType { ref name, ref members } => {
+            OxType::StructType { ref members, .. } => {
                 let mut struct_size = 0;
                 for mem in members {
                     let size = mem.size(types);
@@ -131,7 +128,7 @@ impl Type {
         match types[*self] {
             OxType::FnType {..} => true,
             OxType::PtrTo {..} => true,
-            ref ty => false,
+            ref _ty => false,
         }
     }
 
@@ -146,10 +143,10 @@ impl Type {
 
     pub fn ty_at_idx(&self, idx: u64, types: &IndexVec<Type, OxType>) -> Type {
         match types[*self] {
-            OxType::StructType { ref name, ref members } => members[idx as usize],
-            OxType::FnType { ref args, ref ret } => ret.ty_at_idx(idx, types),
+            OxType::StructType { ref members, .. } => members[idx as usize],
+            OxType::FnType { ref ret, .. } => ret.ty_at_idx(idx, types),
             OxType::PtrTo { ref pointee } => *pointee,
-            OxType::Array { len, ref ty } => *ty,
+            OxType::Array { ref ty, .. } => *ty,
             ref ty => unimplemented!("Type at index {} for {:?}", idx, ty),
         }
     }
@@ -184,7 +181,12 @@ impl CodegenCx<'ll, 'tcx> {
         })
     }
 
-    crate fn type_named_struct(&self, name: &str, els: &[Type], packed: bool) -> Type {
+    crate fn type_named_struct(
+        &self,
+        name: &str,
+        els: &[Type],
+        _packed: bool
+    ) -> Type {
         // FIXME: do something with packed.
         let struct_type = OxType::StructType {
             name: Some(name.to_string()),
@@ -195,9 +197,14 @@ impl CodegenCx<'ll, 'tcx> {
 
     /// If two structs have the same Type `ty`, this will modify the type of both
     /// structs.
-    crate fn set_struct_body(&self, ty: Type, els: &[Type], packed: bool) {
+    crate fn set_struct_body(
+        &self,
+        ty: Type,
+        els: &[Type],
+        _packed: bool
+    ) {
         let mut types = self.types.borrow_mut();
-        if let OxType::StructType{ ref name, ref mut members } = types[ty] {
+        if let OxType::StructType{ ref mut members, .. } = types[ty] {
             *members = els.to_vec();
             return;
         }
@@ -292,8 +299,8 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn type_variadic_func(
         &self,
-        args: &[Type],
-        ret: Type
+        _args: &[Type],
+        _ret: Type
     ) -> Type {
         unimplemented!("type_variadic_func");
     }
@@ -301,7 +308,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn type_struct(
         &self,
         els: &[Type],
-        packed: bool
+        _packed: bool
     ) -> Type {
         self.add_type(OxType::StructType {
             name: None,
@@ -313,11 +320,11 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         self.add_type(OxType::Array { len, ty })
     }
 
-    fn type_vector(&self, ty: Type, len: u64) -> Type {
+    fn type_vector(&self, _ty: Type, _len: u64) -> Type {
         unimplemented!("type_vector");
     }
 
-    fn type_kind(&self, ty: Type) -> TypeKind {
+    fn type_kind(&self, _ty: Type) -> TypeKind {
         unimplemented!("type_kind");
     }
 
@@ -325,23 +332,23 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         self.add_type(OxType::PtrTo { pointee: ty })
     }
 
-    fn element_type(&self, ty: Type) -> Type {
+    fn element_type(&self, _ty: Type) -> Type {
         unimplemented!("element_type");
     }
 
-    fn vector_length(&self, ty: Type) -> usize {
+    fn vector_length(&self, _ty: Type) -> usize {
         unimplemented!("vector_length");
     }
 
-    fn func_params_types(&self, ty: Type) -> Vec<Type> {
+    fn func_params_types(&self, _ty: Type) -> Vec<Type> {
         unimplemented!("func_params_types");
     }
 
-    fn float_width(&self, ty : Type) -> usize {
+    fn float_width(&self, _ty : Type) -> usize {
         unimplemented!("float_width");
     }
 
-    fn int_width(&self, ty: Type) -> u64 {
+    fn int_width(&self, _ty: Type) -> u64 {
         unimplemented!("int_width");
     }
 
@@ -357,8 +364,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
                 inst.val_ty(self)
             },
-            Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
-            Value::ConstStruct(idx) => self.ty_map.borrow()[&v],
+            Value::ConstStruct(_) => self.ty_map.borrow()[&v],
                                        //self.const_structs.borrow()[idx].ty,
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
             Value::Cast(idx) => self.const_casts.borrow()[idx].ty,
@@ -423,11 +429,11 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         ty.ironox_type(self)
     }
 
-    fn fn_backend_type(&self, ty: &FnType<'tcx, Ty<'tcx>>) -> Type {
+    fn fn_backend_type(&self, _ty: &FnType<'tcx, Ty<'tcx>>) -> Type {
         unimplemented!("fn_backend_type");
     }
 
-    fn reg_backend_type(&self, ty: &Reg) -> Type {
+    fn reg_backend_type(&self, _ty: &Reg) -> Type {
         unimplemented!("reg_backend_type");
     }
 

@@ -1,20 +1,17 @@
 use abi::{IronOxType, PassMode};
 use builder::Builder;
-use context::CodegenCx;
 use ir::value::Value;
-use type_of::LayoutIronOxExt;
 
 use rustc::ty::{self, Ty};
 use rustc::ty::layout::LayoutOf;
 use rustc_codegen_ssa::common::IntPredicate;
-use rustc_codegen_ssa::traits::{BuilderMethods, ConstMethods, IntrinsicCallMethods,
-                                BaseTypeMethods};
+use rustc_codegen_ssa::traits::{BaseTypeMethods, BuilderMethods, ConstMethods,
+                                IntrinsicCallMethods};
 use rustc_codegen_ssa::mir::operand::OperandRef;
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_codegen_ssa::MemFlags;
 use rustc_target::abi::call::FnType;
 use syntax_pos::Span;
-
 
 fn memset_intrinsic(
     bx: &mut Builder<'a, 'll, 'tcx>,
@@ -45,7 +42,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         fn_ty: &FnType<'tcx, Ty<'tcx>>,
         args: &[OperandRef<'tcx, Value>],
         llresult: Value,
-        span: Span,
+        _span: Span,
     ) {
 
 
@@ -56,12 +53,6 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 
         let name = &*self.tcx.item_name(def_id).as_str();
 
-        let sig = callee_ty.fn_sig(self.tcx);
-        let sig = self.tcx.normalize_erasing_late_bound_regions(
-            ty::ParamEnv::reveal_all(), &sig);
-        let ret_ty = sig.output();
-
-        let llret_ty = self.layout_of(&ret_ty).ironox_type(self);
         let result = PlaceRef::new_sized(llresult,
                                          fn_ty.ret.layout,
                                          fn_ty.ret.layout.align.abi);
@@ -156,7 +147,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("abort");
     }
 
-    fn assume(&mut self, val: Value) {
+    fn assume(&mut self, _val: Value) {
         // Do nothing.
     }
 
