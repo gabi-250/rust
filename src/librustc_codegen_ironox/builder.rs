@@ -469,10 +469,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn and(
         &mut self,
-        _lhs: Value,
-        _rhs: Value
+        lhs: Value,
+        rhs: Value
     )-> Value {
-        unimplemented!("and");
+        self.emit_instr(Instruction::And(lhs, rhs))
     }
 
     fn or(
@@ -1320,7 +1320,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         let val = if let Some(llextra) = place.llextra {
             OperandValue::Ref(place.llval, Some(llextra), place.align)
         } else if place.layout.is_ironox_immediate() {
-            let mut const_llval = None;
+            let mut const_llval = if let Value::Global(idx) = place.llval {
+                self.cx.globals.borrow()[idx].get_initializer()
+            } else {
+                None
+            };
             // FIXME: If this is a constant global, get its initializer.
             let llval = const_llval.unwrap_or_else(|| {
                 self.load(place.llval, place.align)

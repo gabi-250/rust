@@ -4,6 +4,8 @@ use ir::value::Value;
 use ir::instruction::Instruction;
 use super::basic_block::{BasicBlock, OxBasicBlock};
 
+use rustc::mir::mono::Visibility;
+
 /// An IronOx function.
 #[derive(PartialEq, Debug)]
 pub struct OxFunction {
@@ -19,6 +21,8 @@ pub struct OxFunction {
     pub params: Vec<Value>,
     /// The return type of the function.
     pub ret: Type,
+    pub visibility: Visibility,
+    pub is_codegenned: bool,
 }
 
 impl OxFunction {
@@ -41,6 +45,8 @@ impl OxFunction {
                     basic_blocks: vec![],
                     params,
                     ret,
+                    visibility: Visibility::Default,
+                    is_codegenned: false,
                 }
             },
             _ => bug!("Expected OxType::FnType, found {:?}", fn_type)
@@ -65,6 +71,10 @@ impl OxFunction {
         self.params[index]
     }
 
+    pub fn set_visibility(&mut self, visibility: Visibility) {
+        self.visibility = visibility;
+    }
+
     /// Add a new basic block to this function.
     ///
     /// The basic block is inserted after the last basic block in the function.
@@ -75,7 +85,15 @@ impl OxFunction {
         BasicBlock(self.idx, idx)
     }
 
+    pub fn set_is_codegenned(&mut self, is_codegenned: bool) {
+        self.is_codegenned = is_codegenned
+    }
+
+    pub fn is_codegenned(&self) -> bool {
+        self.is_codegenned
+    }
+
     pub fn is_declaration(&self) -> bool {
-        self.basic_blocks.len() == 0
+        self.basic_blocks.is_empty()
     }
 }

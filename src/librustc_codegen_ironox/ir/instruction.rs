@@ -35,6 +35,7 @@ pub enum Instruction {
     Sub(Value, Value),
     Icmp(Value, Value, CompOp),
     Not(Value),
+    And(Value, Value),
     /// Check overflow: (instruction, type, signed).
     CheckOverflow(Value, Type, bool),
     /// (agg_val, elt, idx)
@@ -131,7 +132,7 @@ impl Instruction {
             Instruction::Cast(_, ty) => ty,
             Instruction::Ret(Some(v)) => cx.val_ty(v),
             Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) |
-            Instruction::Mul(v1, v2, _) => {
+            Instruction::Mul(v1, v2, _) | Instruction::And(v1, v2) => {
                 let ty1 = cx.val_ty(v1);
                 let ty2 = cx.val_ty(v2);
                 assert_eq!(ty1, ty2);
