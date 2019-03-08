@@ -185,10 +185,14 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
             conv => unimplemented!("unsupported calling convention: {:?}", conv)
         };
 
+        let mut inputs = sig.inputs();
         let extra_args = if sig.abi == RustCall {
             assert!(!sig.variadic && extra_args.is_empty());
             match sig.inputs().last().unwrap().sty {
                 ty::Tuple(ref tupled_arguments) => {
+                    // Skip the last argument (it's a tuple, so it counts as an 'extra'
+                    // argument (without this, the tuple would be added twice).
+                    inputs = &sig.inputs()[0..sig.inputs().len() - 1];
                     tupled_arguments
                 }
                 _ => {
@@ -230,7 +234,7 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
         // Return the FnType of this function.
         let mut fn_ty = FnType {
             ret: arg_of(sig.output(), None),
-            args: sig.inputs().iter().chain(extra_args).enumerate().map(|(i, ty)| {
+            args: inputs.iter().chain(extra_args).enumerate().map(|(i, ty)| {
                 arg_of(ty, Some(i))
             }).collect(),
             variadic: sig.variadic,
@@ -250,26 +254,6 @@ impl FnTypeExt<'tcx> for FnType<'tcx, Ty<'tcx>> {
 
                 match arg.layout.abi {
                     layout::Abi::Aggregate { .. } => {}
-
-                    // This is a fun case! The gist of what this is doing is
-                    // that we want callers and callees to always agree on the
-                    // ABI of how they pass SIMD arguments. If we were to *not*
-                    // make these arguments indirect then they'd be immediates
-                    // in LLVM, which means that they'd used whatever the
-                    // appropriate ABI is for the callee and the caller. That
-                    // means, for example, if the caller doesn't have AVX
-                    // enabled but the callee does, then passing an AVX argument
-                    // across this boundary would cause corrupt data to show up.
-                    //
-                    // This problem is fixed by unconditionally passing SIMD
-                    // arguments through memory between callers and callees
-                    // which should get them all to agree on ABI regardless of
-                    // target feature sets. Some more information about this
-                    // issue can be found in #44367.
-                    //
-                    // Note that the platform intrinsic ABI is exempt here as
-                    // that's how we connect up to LLVM and it's unstable
-                    // anyway, we control all calls to it in libstd.
                     layout::Abi::Vector { .. }
                         if cx.sess().target.target.options.simd_types_indirect =>
                     {

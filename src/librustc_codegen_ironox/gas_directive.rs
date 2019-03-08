@@ -4,12 +4,15 @@ use std::fmt;
 pub enum GasDirective {
     Ascii(Vec<String>),
     Global(String),
+    Hidden(String),
+    Protected(String),
     Section(String),
     Size(String, usize),
     Text,
     Type(String, GasType),
     Quad(Vec<BigNum>),
     Long(Vec<u32>),
+    Byte(Vec<u8>),
 }
 
 #[derive(Clone, Debug)]
@@ -51,12 +54,18 @@ impl fmt::Display for GasDirective {
                 write!(f, ".ascii\t{}", strs.join(","))
             }
             GasDirective::Global(ref name) => write!(f, ".globl\t{}", name),
+            GasDirective::Hidden(ref name) => write!(f, ".hidden\t{}", name),
+            GasDirective::Protected(ref name) => write!(f, ".protected\t{}", name),
             GasDirective::Section(ref name) => write!(f, ".section\t{}", name),
             GasDirective::Size(ref name, ref size) => {
                 write!(f, ".size\t{},{}", name, size)
             },
             GasDirective::Text => write!(f, ".text"),
             GasDirective::Type(ref name, ref ty) => write!(f, ".type\t{},{}", name, ty),
+            GasDirective::Byte(ref nums) => {
+                let nums: Vec<String> = nums.iter().map(|x| x.to_string()).collect();
+                write!(f, ".byte\t{}", nums.join(","))
+            },
             GasDirective::Long(ref nums) => {
                 let nums: Vec<String> = nums.iter().map(|x| x.to_string()).collect();
                 write!(f, ".long\t{}", nums.join(","))
