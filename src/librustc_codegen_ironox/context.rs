@@ -15,12 +15,14 @@ use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_mir::monomorphize::Instance;
 use rustc_target::abi::HasDataLayout;
 use rustc_target::spec::{HasTargetSpec, Target};
-use rustc::mir::interpret::{Scalar, Allocation, Pointer, read_target_uint};
+use rustc::mir::interpret::{Scalar, AllocKind, Allocation, Pointer, read_target_uint};
 use rustc_data_structures::indexed_vec::IndexVec;
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use syntax::ast::Mutability;
 use syntax::symbol::LocalInternedString;
 
+use bytes::ConstBytes;
 use consts::{self};
 use const_cstr::ConstCstr;
 use debuginfo::DIScope;
@@ -70,6 +72,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub globals_cache: RefCell<FxHashMap<String, usize>>,
     /// The constant globals (which have a static address).
     pub const_structs: RefCell<Vec<OxStruct>>,
+    pub const_structs_cache: RefCell<FxHashMap<(Vec<Value>, bool), Value>>,
     pub const_globals_cache: RefCell<FxHashMap<Value, usize>>,
     pub const_cstr_cache: RefCell<FxHashMap<LocalInternedString, Value>>,
     pub const_cstrs: RefCell<Vec<ConstCstr>>,
@@ -78,7 +81,7 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub ty_map: RefCell<FxHashMap<Value, Type>>,
     pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, Type>>,
     pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), Type>>,
-    pub bytes: RefCell<Vec<Vec<u8>>>,
+    pub bytes: RefCell<Vec<ConstBytes>>,
     sym_count: Cell<usize>,
     eh_personality: Cell<Option<Value>>,
 }
@@ -104,6 +107,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             globals: Default::default(),
             globals_cache: Default::default(),
             const_structs: Default::default(),
+            const_structs_cache: Default::default(),
             const_globals_cache: Default::default(),
             const_cstr_cache: Default::default(),
             const_cstrs: Default::default(),
@@ -307,6 +311,59 @@ impl CodegenCx<'ll, 'tcx> {
         consts.push(uconst);
         Value::ConstUint(consts.len() - 1)
     }
+
+    fn const_gep(base_addr: Value, offset: u64) -> Value {
+        if let Value::ConstStruct(idx) = base_addr {
+            Value::ConstGep { ptr_idx: idx, offset }
+        } else {
+            bug!("Expected Value::ConstStruct, found {:?}", base_addr)
+        }
+    }
+
+    fn const_alloc_to_ironox(
+        &self,
+        alloc: &Allocation,
+    ) -> Value {
+        // The allocation is represented as a struct.
+        let mut struct_elts = Vec::with_capacity(alloc.relocations.len() + 1);
+        let dl = self.data_layout();
+        let ptr_size = dl.pointer_size.bytes() as usize;
+        // The offset into the allocation where we left off...
+        let mut last_offset = 0;
+        // alloc.relocations are the relocations (pointers) from the `Allocation`.
+        // This iterates over the pointers in sorted order.
+        for &(offset, ((), alloc_id)) in alloc.relocations.iter() {
+            // The offset of the current pointer.
+            let offset = offset.bytes();
+            assert_eq!(offset as usize as u64, offset);
+            let offset = offset as usize;
+            // There are some bytes left in between the last pointer codegenned and
+            // the current one. Generate the bytes in between:
+            if offset > last_offset {
+                struct_elts.push(self.const_bytes(&alloc.bytes[last_offset..offset]));
+            }
+            let ptr_offset = read_target_uint(
+                dl.endian,
+                &alloc.bytes[offset..(offset + ptr_size)],
+            ).expect("const_alloc_to_ironox: could not read relocation pointer") as u64;
+            struct_elts.push(self.scalar_to_backend(
+                Pointer::new(alloc_id, Size::from_bytes(ptr_offset)).into(),
+                &layout::Scalar {
+                    value: layout::Primitive::Pointer,
+                    valid_range: 0..=!0
+                },
+                self.type_i8p()
+            ));
+            // Move to the next byte that has not yet been added to the struct.
+            last_offset = offset + ptr_size;
+        }
+        // If there are more bytes after the last emitted relocation, add them
+        // to the struct:
+        if alloc.bytes.len() > last_offset {
+            struct_elts.push(self.const_bytes(&alloc.bytes[last_offset..]));
+        }
+        self.const_struct(&struct_elts, true)
+    }
 }
 
 // common?
@@ -423,7 +480,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             elt_tys.push(self.val_ty(*v))
         }
         let ty = self.type_struct(&elt_tys[..], packed);
-        structs.push(OxStruct::new(name, elts, ty));
+        structs.push(OxStruct::new(name.clone(), elts, ty));
         let v = Value::ConstStruct(structs.len() - 1);
         self.ty_map.borrow_mut().insert(v.clone(), ty);
         v
@@ -438,9 +495,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_bytes(&self, bytes: &[u8]) -> Value {
-        // FIXME: i8 array
         let mut c_bytes = self.bytes.borrow_mut();
-        c_bytes.push(bytes.to_vec());
+        let name = self.get_sym_name("const_bytes");
+        c_bytes.push(ConstBytes::new(name, bytes));
         Value::ConstBytes(c_bytes.len() - 1)
     }
 
@@ -498,7 +555,20 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             },
             Scalar::Ptr(ptr) => {
                 let alloc_kind = self.tcx.alloc_map.lock().get(ptr.alloc_id);
-                unimplemented!("Scalar::Ptr {:?}", alloc_kind);
+                let base_addr = match alloc_kind {
+                    Some(AllocKind::Memory(alloc)) => {
+                        let init = self.const_alloc_to_ironox(alloc);
+                        if alloc.mutability == Mutability::Mutable {
+                            unimplemented!("Mutable allocation");
+                        } else {
+                            init
+                        }
+                    }
+                    None => bug!("missing allocation {:?}", ptr.alloc_id),
+                    _ => unimplemented!("scalar_to_backend({:?})", alloc_kind),
+                };
+                let val = CodegenCx::const_gep(base_addr, ptr.offset.bytes());
+                self.const_ptrcast(val, llty)
             }
         }
     }
@@ -509,43 +579,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         alloc: &Allocation,
         offset: Size,
     ) -> PlaceRef<'tcx, Value> {
-        unimplemented!("from_const_alloc {:?} {:?}\n{:?}\n{:?}",
-                       layout.ty.sty, layout, alloc, offset);
-/*        let mut llvals = Vec::with_capacity(alloc.relocations.len() + 1);*/
-        //let dl = self.data_layout();
-        //let pointer_size = dl.pointer_size.bytes() as usize;
-
-        //let mut next_offset = 0;
-        //for &(offset, ((), alloc_id)) in alloc.relocations.iter() {
-            //let offset = offset.bytes();
-            //assert_eq!(offset as usize as u64, offset);
-            //let offset = offset as usize;
-            //eprintln!("offset: {:?}", offset);
-            //eprintln!("next_offset: {:?}", next_offset);
-            //if offset > next_offset {
-                //llvals.push(self.const_bytes(&alloc.bytes[next_offset..offset]));
-            //}
-            //let ptr_offset = read_target_uint(
-                //dl.endian,
-                //&alloc.bytes[offset..(offset + pointer_size)],
-            //).expect("const_alloc_to_llvm: could not read relocation pointer") as u64;
-            //eprintln!("ptr_offset: {:?}", ptr_offset);
-            ////llvals.push(self.scalar_to_backend(
-                ////Pointer::new(alloc_id, Size::from_bytes(ptr_offset)).into(),
-                ////&layout::Scalar {
-                    ////value: layout::Primitive::Pointer,
-                    ////valid_range: 0..=!0
-                ////},
-                ////self.type_i8p()
-            ////));
-            //next_offset = offset + pointer_size;
-        //}
-        ////if alloc.bytes.len() >= next_offset {
-            ////llvals.push(self.const_bytes(&alloc.bytes[next_offset ..]));
-        ////}
-
-        ////cx.const_struct(&llvals, true)
-        //unimplemented!("from_const_alloc {:?} {:?}",
-                       /*alloc, offset);*/
+        let const_struct = self.const_alloc_to_ironox(alloc);
+        let val = CodegenCx::const_gep(const_struct, offset.bytes());
+        // FIXME: get the right ptr in the const struct....
+        PlaceRef::new_sized(val, layout, alloc.align)
     }
 }

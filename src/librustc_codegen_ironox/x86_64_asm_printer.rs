@@ -151,11 +151,49 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     MachineInst::lea(Operand::Sym(function_name), result.clone())];
                 CompiledInst::new(asm, Operand::from(result))
             }
+            Value::ConstGep { ptr_idx, offset } => {
+                let const_struct = &self.cx.const_structs.borrow()[ptr_idx];
+                let const_struct = format!("{}(%rip)", const_struct.name);
+                let const_struct = Operand::Sym(const_struct);
+                // FIXME: this clobbers r11
+                let r11 = Register::direct(R11);
+                let asm = vec![
+                    MachineInst::lea(const_struct, r11),
+                    MachineInst::add(
+                        Operand::Immediate(offset as isize, AccessMode::Full), r11),
+                ];
+                CompiledInst::new(asm, Operand::Loc(Location::Reg(r11)))
+            }
             _ => {
                 unimplemented!("compile_value({:?})", value);
             }
         }
     }
+
+    fn compile_and(&self, inst: &Instruction) -> CompiledInst {
+        if let Instruction::And(lhs, rhs) = inst {
+            let mut asm = vec![];
+            let mut instr_asm1 = self.compile_value(*lhs);
+            asm.append(&mut instr_asm1.asm);
+            let mut instr_asm2 = self.compile_value(*rhs);
+            asm.append(&mut instr_asm2.asm);
+            // the size in bits
+            let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
+            let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
+            let reg2 = Register::direct(SubRegister::reg(RCX, access_mode(size)));
+            asm.extend(vec![
+                MachineInst::mov(instr_asm1.result.unwrap(), reg1),
+                MachineInst::mov(instr_asm2.result.unwrap(), reg2),
+                MachineInst::and(reg2, reg1),
+            ]);
+            let result = self.precompiled_result(inst);
+            asm.push(MachineInst::mov(reg1, result.clone()));
+            CompiledInst::new(asm, result)
+        } else {
+            bug!("expected Instruction::And, found {:?}", inst);
+        }
+    }
+
 
     fn compile_add(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Add(lhs, rhs) = inst {
@@ -270,20 +308,25 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let result = self.precompiled_result(inst);
                     let acc_mode = result.access_mode();
                     match acc_mode {
-                        AccessMode::Large(16) => {
+                        AccessMode::Large(bytes) if bytes <= 16 => {
                             let am_full = AccessMode::Full;
                             let offset = result.rbp_offset();
                             let result1 = Location::RbpOffset(offset, am_full);
-                            let result2 = Location::RbpOffset(offset + 8, am_full);
+                            let am2 = access_mode(8 * (bytes - 8));
+                            let result2 = Location::RbpOffset(offset + 8, am2);
                             asm.extend(vec![
+                                MachineInst::xor(Register::direct(RAX),
+                                                 Register::direct(RAX)),
                                 MachineInst::mov(
                                     Register::direct(
                                         SubRegister::reg(RAX, AccessMode::Full)),
                                     result1),
                                 // Load RDX at result + 8
+                                MachineInst::xor(Register::direct(RDX),
+                                                 Register::direct(RDX)),
                                 MachineInst::mov(
                                     Register::direct(
-                                        SubRegister::reg(RDX, AccessMode::Full)),
+                                        SubRegister::reg(RDX, am2)),
                                     result2),
                             ]);
                         },
@@ -411,7 +454,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let dest_result = instr_asm1.result.clone().unwrap();
             let src_result = instr_asm2.result.unwrap();
             let src_am = src_result.access_mode();
-            eprintln!("Move from {:?} -> {:?}", src_result, dest_result);
             match src_am {
                 AccessMode::Large(16) => {
                     match (&src_result, &dest_result) {
@@ -481,7 +523,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let inst_size =
                 inst.val_ty(self.cx).size(&self.cx.types.borrow());
             let acc_mode = access_mode(inst_size as u64);
-            let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
             let result = self.precompiled_result(inst);
             match acc_mode {
                 AccessMode::Large(16) => {
@@ -607,15 +648,18 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         MachineInst::xor(reg_full, reg_full),
                         MachineInst::mov(result, reg),
                     ]);
-                } else if size == 128 {
+                } else if size <= 128 {
                     // The return value is placed in RAX:RDX
                     let rax = Register::direct(RAX);
-                    let rdx = Register::direct(RDX);
+                    // RAX already covers 64 bits...
+                    let am2 = access_mode(size - 64);
+                    let rdx = Operand::Loc(Location::Reg(
+                            Register::direct(SubRegister::reg(RDX, am2))));
 
                     let offset = result.rbp_offset();
                     let am_full = AccessMode::Full;
                     let result_lo = Location::RbpOffset(offset, am_full);
-                    let result_hi = Location::RbpOffset(offset + 8, am_full);
+                    let result_hi = Location::RbpOffset(offset + 8, am2);
                     asm.extend(vec![
                         MachineInst::mov(result_lo, rax),
                         MachineInst::mov(result_hi, rdx),
@@ -777,12 +821,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // pointee of the pointer (the pointee is the struct itself).
             let offset = types[agg_ty.pointee_ty(&types)].offset(*idx, &types);
 
-            eprintln!("agg {:?} idx {:?} offset {:?}", agg_ty, idx, offset);
             assert!(offset % 8 == 0);
             let offset = offset / 8;
             let agg_val = self.compile_value(*agg).result.unwrap();
             let stack_loc = self.precompiled_result(inst);
-            eprintln!("Storing struct gep at {:?}", stack_loc);
             // FIXME:
             let asm = vec![
                 MachineInst::NOP,
@@ -887,7 +929,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             bug!("expected Instruction::Gep, found {:?}", inst);
         }
     }
-
 
     fn compile_invoke(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Invoke { .. } = inst {
@@ -1046,7 +1087,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let Some(instr_asm) = self.compiled_insts.borrow().get(&inst_v) {
             return instr_asm.clone();
         }
-        eprintln!("instruction is {:?}", inst);
         let instr_asm = match inst {
             Instruction::Br(..) => self.compile_br(inst),
             Instruction::Ret(..) => self.compile_ret(inst),
@@ -1066,6 +1106,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             Instruction::InsertValue(..) => self.compile_insertvalue(inst),
             Instruction::StructGep(..) => self.compile_structgep(inst),
             Instruction::Not(..) => self.compile_not(inst),
+            Instruction::And(..) => self.compile_and(inst),
             Instruction::Invoke {..} => self.compile_invoke(inst),
             Instruction::Resume(..)=> self.compile_resume(inst),
             Instruction::LandingPad { .. } => self.compile_landingpad(inst),
@@ -1146,12 +1187,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             self.compiled_params.borrow_mut().insert(*param, instr_asm);
         }
         for bb in &f.basic_blocks {
-            eprintln!("compiling bb: {:?}", bb);
             for inst in &bb.instrs {
                 let instr_asm = match inst {
                     Instruction::Add(..) |
                     Instruction::Sub(..) |
                     Instruction::Mul(..) |
+                    Instruction::And(..) |
                     Instruction::Load(..) => {
                         let inst_size =
                             inst.val_ty(self.cx).size(&self.cx.types.borrow());
@@ -1159,8 +1200,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let acc_mode = access_mode(inst_size as u64);
                         size += (inst_size / 8) as isize;
                         let result = Location::RbpOffset(-size, acc_mode);
-                        eprintln!("Load to rbp {:?} has acc mode {:?}", size,
-                                  acc_mode);
                         CompiledInst::with_result(Operand::from(result))
                     }
                     Instruction::Call(_, _) | Instruction::Invoke { .. } => {
@@ -1290,11 +1329,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 pub struct AsmPrinter<'ll, 'tcx> {
     /// The codegen context, which also contains the `ModuleIronOx` to be compiled.
     cx: CodegenCx<'ll, 'tcx>,
+    codegenned_consts: RefCell<Vec<Value>>,
 }
 
 impl AsmPrinter<'ll, 'tcx> {
     pub fn new(cx: CodegenCx<'ll, 'tcx>) -> AsmPrinter<'ll, 'tcx> {
-        AsmPrinter { cx }
+        AsmPrinter { cx, codegenned_consts: Default::default() }
     }
 
     fn constant_value(&self, v: Value) -> String {
@@ -1302,6 +1342,10 @@ impl AsmPrinter<'ll, 'tcx> {
             Value::ConstCstr(idx) => self.cx.const_cstrs.borrow()[idx].name.clone(),
             Value::Global(idx) => {
                 self.constant_value(self.cx.globals.borrow()[idx].initializer.unwrap())
+            },
+            Value::ConstGep { ptr_idx, offset } if offset == 0 => {
+                // FIXME: handle non-zero offsets
+                self.cx.bytes.borrow()[ptr_idx].name.clone()
             }
             _ => unimplemented!("value of {:?}", v),
         }
@@ -1328,6 +1372,7 @@ impl AsmPrinter<'ll, 'tcx> {
             }
             Value::ConstStruct(idx) => {
                 let const_struct = &self.cx.const_structs.borrow()[idx];
+                self.codegenned_consts.borrow_mut().push(c);
                 asm.push(MachineInst::Label(const_struct.name.clone()));
                 for c in &const_struct.components {
                     asm.extend(self.compile_const_global(*c));
@@ -1350,6 +1395,17 @@ impl AsmPrinter<'ll, 'tcx> {
                     MachineInst::Directive(GasDirective::Ascii(vec![const_str])),
                 ]);
             }
+            Value::ConstBytes(idx) => {
+                let const_bytes = &self.cx.bytes.borrow()[idx];
+                asm.extend(vec![
+                    MachineInst::Label(const_bytes.name.clone()),
+                    MachineInst::Directive(
+                        GasDirective::Size(const_bytes.name.clone(),
+                                           const_bytes.len())),
+                    MachineInst::Directive(
+                        GasDirective::Byte(const_bytes.bytes.clone())),
+                ]);
+            },
             _ => unimplemented!("compile_const_global({:?})", c),
         };
         asm
@@ -1358,12 +1414,30 @@ impl AsmPrinter<'ll, 'tcx> {
     fn declare_globals(&self) -> Vec<MachineInst> {
         let mut asm = vec![
             MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
-        for global in self.cx.globals.borrow().iter() {
+        for global in self.cx.globals.borrow().iter().rev() {
             asm.push(MachineInst::Label(global.name.clone()));
             match global.initializer {
-                Some(v) => asm.extend(self.compile_const_global(v)),
+                Some(v) => {
+                    let codegen = {
+                        !self.codegenned_consts.borrow().contains(&v)
+                    };
+                    if codegen {
+                        asm.extend(self.compile_const_global(v));
+                        self.codegenned_consts.borrow_mut().push(v);
+                    }
+                }
                 None => bug!("no initializer found for {:?}", global),
             };
+        }
+        for (i, _c_struct) in self.cx.const_structs.borrow().iter().enumerate() {
+            let v = Value::ConstStruct(i);
+            let codegen = {
+                !self.codegenned_consts.borrow().contains(&v)
+            };
+            if codegen {
+                asm.extend(self.compile_const_global(v));
+                self.codegenned_consts.borrow_mut().push(v);
+            }
         }
         asm
     }
@@ -1438,13 +1512,11 @@ impl AsmPrinter<'ll, 'tcx> {
         for decl in &self.declare_functions() {
             asm.push_str(&decl.to_string());
         }
-        self.pprint();
         for f in &self.cx.module.borrow().functions {
             if !f.is_declaration() {
                 let mut fn_asm = String::new();
                 let asm_insts  = FunctionPrinter::new(&self.cx).codegen_function(&f);
                 for inst in asm_insts {
-                    eprintln!("compiling {:?}", inst);
                     fn_asm.push_str(&format!("{}", inst));
                 }
                 asm.push_str(&fn_asm);

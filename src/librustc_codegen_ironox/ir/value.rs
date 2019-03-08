@@ -30,6 +30,9 @@ pub enum Value {
     Cast(usize),
     ConstFatPtr(usize),
     ConstBytes(usize),
+    /// ptr_idx is the index of a constant struct
+    /// offset is the offset into the struct
+    ConstGep { ptr_idx: usize, offset: u64 },
     Intrinsic,
 }
 

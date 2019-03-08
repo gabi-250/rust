@@ -10,6 +10,7 @@ pub enum GasDirective {
     Type(String, GasType),
     Quad(Vec<BigNum>),
     Long(Vec<u32>),
+    Byte(Vec<u8>),
 }
 
 #[derive(Clone, Debug)]
@@ -57,6 +58,10 @@ impl fmt::Display for GasDirective {
             },
             GasDirective::Text => write!(f, ".text"),
             GasDirective::Type(ref name, ref ty) => write!(f, ".type\t{},{}", name, ty),
+            GasDirective::Byte(ref nums) => {
+                let nums: Vec<String> = nums.iter().map(|x| x.to_string()).collect();
+                write!(f, ".byte\t{}", nums.join(","))
+            },
             GasDirective::Long(ref nums) => {
                 let nums: Vec<String> = nums.iter().map(|x| x.to_string()).collect();
                 write!(f, ".long\t{}", nums.join(","))

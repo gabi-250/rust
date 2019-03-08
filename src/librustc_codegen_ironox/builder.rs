@@ -469,10 +469,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn and(
         &mut self,
-        _lhs: Value,
-        _rhs: Value
+        lhs: Value,
+        rhs: Value
     )-> Value {
-        unimplemented!("and");
+        self.emit_instr(Instruction::And(lhs, rhs))
     }
 
     fn or(

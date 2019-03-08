@@ -7,6 +7,7 @@ use std::fmt;
 #[derive(Clone, Debug)]
 pub enum MachineInst {
     MOV(Operand, Operand),
+    AND(Operand, Operand),
     ADD(Operand, Operand),
     SUB(Operand, Operand),
     MUL(Operand),
@@ -63,6 +64,14 @@ impl MachineInst {
         let loc = loc.into();
         match loc {
             Operand::Loc(_) => MachineInst::LEA(op.into(), loc),
+            _ => bug!("destination has to be a location"),
+        }
+    }
+
+    pub fn and<U: Into<Operand>, V: Into<Operand>>(op: U, loc: V) -> MachineInst {
+        let loc = loc.into();
+        match loc {
+            Operand::Loc(_) => MachineInst::AND(op.into(), loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -188,6 +197,7 @@ impl fmt::Display for MachineInst {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
            MachineInst::MOV(ref op, ref loc) => write!(f, "\tmov {}, {}\n", op, loc),
+           MachineInst::AND(ref op, ref loc) => write!(f, "\tand {}, {}\n", op, loc),
            MachineInst::ADD(ref op, ref loc) => write!(f, "\tadd {}, {}\n", op, loc),
            MachineInst::SUB(ref op, ref loc) => write!(f, "\tsub {}, {}\n", op, loc),
            MachineInst::MUL(ref loc) => write!(f, "\tmul {}\n", loc),

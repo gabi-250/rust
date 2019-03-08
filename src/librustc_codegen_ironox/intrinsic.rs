@@ -65,7 +65,6 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
             "offset" => {
                 let ptr = args[0].immediate();
                 let offset = args[1].immediate();
-                eprintln!("offset is {:?}", args[1]);
                 Some(self.inbounds_gep(ptr, &[offset]))
             },
             "arith_offset" => {

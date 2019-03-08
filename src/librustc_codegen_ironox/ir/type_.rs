@@ -370,6 +370,12 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::Cast(idx) => self.const_casts.borrow()[idx].ty,
             Value::ConstFatPtr(idx) => self.val_ty(self.const_fat_ptrs.borrow()[idx].0),
             Value::ConstUndef(ty) => ty,
+            Value::ConstBytes(_) | Value::ConstGep { .. } => {
+                let i8_ty = {
+                    self.type_i8()
+                };
+                self.type_ptr_to(i8_ty)
+            },
             _ => {
                 // FIXME
                 //Type(0)
