@@ -6,6 +6,7 @@
 #![feature(optin_builtin_traits)]
 #![feature(rustc_attrs)]
 #![feature(step_trait)]
+#![allow(unused)]
 
 extern crate rustc_errors;
 #[macro_use] extern crate rustc;
@@ -71,6 +72,7 @@ mod allocator;
 mod asm;
 mod base;
 mod builder;
+mod bytes;
 mod consts;
 mod const_cstr;
 mod context;

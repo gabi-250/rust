@@ -30,6 +30,9 @@ pub enum Value {
     Cast(usize),
     ConstFatPtr(usize),
     ConstBytes(usize),
+    /// ptr_idx is the index of a constant struct
+    /// offset is the offset into the struct
+    ConstGep { ptr_idx: usize, offset: u64 },
     Intrinsic,
 }
 
@@ -38,6 +41,13 @@ impl Value {
         match *self {
             Value::Global(_) | Value::ConstCstr(_) => true,
             _ => false,
+        }
+    }
+
+    pub fn fn_idx(&self) -> usize {
+        match *self {
+            Value::Function(idx) => idx,
+            _ => bug!("Expected Value::Function, found {:?}", *self),
         }
     }
 }

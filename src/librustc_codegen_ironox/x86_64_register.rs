@@ -255,31 +255,61 @@ impl From<Location> for Operand {
 impl fmt::Display for SubRegister {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let reg_str = match self.reg {
-            GeneralPurposeReg::RAX => "a",
-            GeneralPurposeReg::RBX => "b",
-            GeneralPurposeReg::RCX => "c",
-            GeneralPurposeReg::RDX => "d",
-            GeneralPurposeReg::RBP => "bp",
-            GeneralPurposeReg::RSP => "sp",
-            GeneralPurposeReg::RSI => "si",
-            GeneralPurposeReg::RDI => "di",
-            _ => unimplemented!("reg_str of {:?}", *self),
-        };
-        let reg_str = if reg_str.len() == 1 {
-            match self.access_mode {
-                AccessMode::Full => format!("r{}x", reg_str),
-                AccessMode::Low32 => format!("e{}x", reg_str),
-                AccessMode::Low16 => format!("{}x", reg_str),
-                AccessMode::Low8 => format!("{}l", reg_str),
-                _ => bug!("unsupported access mode: {:?}", self.access_mode),
-            }
-        } else {
-            match self.access_mode {
-                AccessMode::Full => format!("r{}", reg_str),
-                AccessMode::Low32 => format!("e{}", reg_str),
-                AccessMode::Low16 => format!("{}", reg_str),
-                AccessMode::Low8 => format!("{}l", reg_str),
-                _ => bug!("unsupported access mode: {:?}", self.access_mode),
+            GeneralPurposeReg::RAX | GeneralPurposeReg::RBX |
+            GeneralPurposeReg::RCX | GeneralPurposeReg::RDX |
+            GeneralPurposeReg::RBP | GeneralPurposeReg::RSP |
+            GeneralPurposeReg::RSI | GeneralPurposeReg::RDI => {
+                let reg_str = match self.reg {
+                    GeneralPurposeReg::RAX => "a",
+                    GeneralPurposeReg::RBX => "b",
+                    GeneralPurposeReg::RCX => "c",
+                    GeneralPurposeReg::RDX => "d",
+                    GeneralPurposeReg::RBP => "bp",
+                    GeneralPurposeReg::RSP => "sp",
+                    GeneralPurposeReg::RSI => "si",
+                    GeneralPurposeReg::RDI => "di",
+                    _ => unimplemented!("reg_str of {:?}", *self),
+                };
+                if reg_str.len() == 1 {
+                    match self.access_mode {
+                        AccessMode::Full => format!("r{}x", reg_str),
+                        AccessMode::Low32 => format!("e{}x", reg_str),
+                        AccessMode::Low16 => format!("{}x", reg_str),
+                        AccessMode::Low8 => format!("{}l", reg_str),
+                        _ => bug!("unsupported access mode: {:?}", self.access_mode),
+                    }
+                } else {
+                    match self.access_mode {
+                        AccessMode::Full => format!("r{}", reg_str),
+                        AccessMode::Low32 => format!("e{}", reg_str),
+                        AccessMode::Low16 => format!("{}", reg_str),
+                        AccessMode::Low8 => format!("{}l", reg_str),
+                        _ => bug!("unsupported access mode: {:?}", self.access_mode),
+                    }
+                }
+            },
+            GeneralPurposeReg::R8 | GeneralPurposeReg::R9 |
+            GeneralPurposeReg::R10 | GeneralPurposeReg::R11 |
+            GeneralPurposeReg::R12 | GeneralPurposeReg::R13 |
+            GeneralPurposeReg::R14 | GeneralPurposeReg::R15=> {
+                let reg_str = match self.reg {
+                    GeneralPurposeReg::R8 => "r8",
+                    GeneralPurposeReg::R9 => "r9",
+                    GeneralPurposeReg::R10 => "r10",
+                    GeneralPurposeReg::R11 => "r11",
+                    GeneralPurposeReg::R12 => "r12",
+                    GeneralPurposeReg::R13 => "r13",
+                    GeneralPurposeReg::R14 => "r14",
+                    GeneralPurposeReg::R15 => "r15",
+                    _ => unreachable!("Handled elsewhere: {:?}", self.reg),
+                };
+                match self.access_mode {
+                    AccessMode::Full => format!("{}", reg_str),
+                    AccessMode::Low32 => format!("{}d", reg_str),
+                    AccessMode::Low16 => format!("{}w", reg_str),
+                    AccessMode::Low8 => format!("{}b", reg_str),
+                    _ => bug!("unsupported access mode: {:?}", self.access_mode),
+                }
             }
         };
         write!(f, "%{}", reg_str)
