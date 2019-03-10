@@ -43,4 +43,11 @@ impl Value {
             _ => false,
         }
     }
+
+    pub fn fn_idx(&self) -> usize {
+        match *self {
+            Value::Function(idx) => idx,
+            _ => bug!("Expected Value::Function, found {:?}", *self),
+        }
+    }
 }

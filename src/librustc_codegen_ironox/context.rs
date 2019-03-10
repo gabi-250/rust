@@ -192,12 +192,12 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_fn(&self, instance: Instance<'tcx>) -> Value {
+        let sym_name = self.tcx.symbol_name(instance).as_str();
         if let Some(ref llfn) = self.instances.borrow().get(&instance) {
             // The function has already been defined
             return **llfn;
         }
 
-        let sym_name = self.tcx.symbol_name(instance).as_str();
         let llfn = if let Some(llfn) = self.get_declared_value(&sym_name) {
             // FIXME:
             llfn
@@ -205,7 +205,11 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             // Otherwise, it probably exists in an external lib...
             let fn_sig = instance.fn_sig(self.tcx);
             let llfn = self.declare_fn(&sym_name, fn_sig);
-            // visbility, linkage......
+            let instance_def_id = instance.def_id();
+            // This is a non-generic function
+            self.module.borrow_mut().functions[llfn.fn_idx()]
+                .set_is_codegenned(self.tcx.is_codegened_item(instance_def_id));
+            // FIXME: visibility, linkage.
             llfn
         };
         self.instances.borrow_mut().insert(instance, llfn);

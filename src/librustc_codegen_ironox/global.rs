@@ -18,7 +18,7 @@ impl Global {
         self.initializer = Some(value)
     }
 
-    pub fn get_initializer(&mut self) -> Option<Value> {
+    pub fn get_initializer(&self) -> Option<Value> {
         self.initializer
     }
 

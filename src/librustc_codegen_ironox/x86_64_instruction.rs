@@ -34,6 +34,7 @@ pub enum MachineInst {
     SETLE(Operand),
     CALL(Operand),
     PUSH(Operand),
+    POP(Operand),
     LEAVE,
     RET,
     UD2,
@@ -136,6 +137,10 @@ impl MachineInst {
         MachineInst::PUSH(op.into())
     }
 
+    pub fn pop<U: Into<Operand>>(op: U) -> MachineInst {
+        MachineInst::POP(op.into())
+    }
+
     pub fn seto<U: Into<Operand>>(op: U) -> MachineInst {
         MachineInst::SETO(op.into())
     }
@@ -224,6 +229,7 @@ impl fmt::Display for MachineInst {
            MachineInst::SETLE(ref op) => write!(f, "\tsetle {}\n", op),
            MachineInst::CALL(ref op) => write!(f, "\tcall {}\n", op),
            MachineInst::PUSH(ref op) => write!(f, "\tpush {}\n", op),
+           MachineInst::POP(ref op) => write!(f, "\tpop {}\n", op),
            MachineInst::LEAVE => write!(f, "\tleave\n"),
            MachineInst::RET => write!(f, "\tret\n"),
            MachineInst::UD2 => write!(f, "\tud2\n"),

@@ -4,6 +4,8 @@ use std::fmt;
 pub enum GasDirective {
     Ascii(Vec<String>),
     Global(String),
+    Hidden(String),
+    Protected(String),
     Section(String),
     Size(String, usize),
     Text,
@@ -52,6 +54,8 @@ impl fmt::Display for GasDirective {
                 write!(f, ".ascii\t{}", strs.join(","))
             }
             GasDirective::Global(ref name) => write!(f, ".globl\t{}", name),
+            GasDirective::Hidden(ref name) => write!(f, ".hidden\t{}", name),
+            GasDirective::Protected(ref name) => write!(f, ".protected\t{}", name),
             GasDirective::Section(ref name) => write!(f, ".section\t{}", name),
             GasDirective::Size(ref name, ref size) => {
                 write!(f, ".size\t{},{}", name, size)
