@@ -297,19 +297,26 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             }
         }
         let remaining_args: Vec<&Value> = args.iter().skip(6).collect();
-        let rax = Register::direct(RAX);
-        let padding = 16 - remaining_args.len();
+        let mut total_arg_size = 0;
+        for arg in remaining_args.iter().rev() {
+            let arg_size = self.cx.val_ty(**arg).size(&self.cx.types.borrow());
+            total_arg_size += arg_size / 8;
+        }
+        let padding = total_arg_size % 16;
         if remaining_args.len() > 0 {
             // Align the stack:
-            for i in 0..padding {
-                asm.push(MachineInst::push(rax));
-            }
+            asm.push(MachineInst::sub(
+                Operand::Immediate(padding as isize, AccessMode::Full),
+                Register::direct(RSP)));
         }
 
         // The remaining arguments are pushed to the stack in reverse order.
         for arg in remaining_args.iter().rev() {
             let mut instr_asm = self.compile_value(**arg);
             asm.append(&mut instr_asm.asm);
+            let arg_size = self.cx.val_ty(**arg).size(&self.cx.types.borrow());
+            let acc_mode = access_mode(arg_size);
+            let rax = Register::direct(SubRegister::reg(RAX, acc_mode));
 
             if let Some(Operand::Loc(Location::RipOffset(_))) = instr_asm.result.clone() {
                 // globals are always treated as addresses
@@ -330,11 +337,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     module.functions[*idx].name.clone()
                 };
                 asm.push(MachineInst::call(fn_name.clone()));
-                if remaining_args > 0 {
+                if total_arg_size > 0 {
                     // Pop all the pushed arguments:
-                    for i in 0..remaining_args + padding {
-                        asm.push(MachineInst::pop(rax));
-                    }
+                    asm.push(
+                        MachineInst::add(
+                            Operand::Immediate((total_arg_size + padding) as isize,
+                                               AccessMode::Full),
+                            Register::direct(RSP)));
                 }
                 let ret_ty = inst.val_ty(self.cx);
                 // If the function doesn't return anything, carry on.
@@ -1393,7 +1402,9 @@ impl AsmPrinter<'ll, 'tcx> {
             },
             Value::ConstGep { ptr_idx, offset } if offset == 0 => {
                 // FIXME: handle non-zero offsets
-                self.cx.bytes.borrow()[ptr_idx].name.clone()
+                let name = self.cx.const_structs.borrow()[ptr_idx].name.clone();
+                eprintln!("Name of gep {} is {}", ptr_idx, name);
+                name
             }
             _ => unimplemented!("value of {:?}", v),
         }
@@ -1448,10 +1459,10 @@ impl AsmPrinter<'ll, 'tcx> {
                 asm.extend(vec![
                     MachineInst::Label(const_bytes.name.clone()),
                     MachineInst::Directive(
+                        GasDirective::Byte(const_bytes.bytes.clone())),
+                    MachineInst::Directive(
                         GasDirective::Size(const_bytes.name.clone(),
                                            const_bytes.len())),
-                    MachineInst::Directive(
-                        GasDirective::Byte(const_bytes.bytes.clone())),
                 ]);
             },
             _ => unimplemented!("compile_const_global({:?})", c),
