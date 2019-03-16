@@ -10,7 +10,7 @@ use rustc_mir::monomorphize::partitioning::CodegenUnitExt;
 use syntax_pos::symbol::InternedString;
 
 use builder::Builder;
-use x86_64_asm_printer::AsmPrinter;
+use x86_64::asm_printer::AsmPrinter;
 use context::CodegenCx;
 
 pub fn compile_codegen_unit<'ll, 'tcx>(
