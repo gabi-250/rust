@@ -78,15 +78,17 @@ mod const_cstr;
 mod context;
 mod debuginfo;
 mod declare;
-mod gas_directive;
 mod global;
 mod intrinsic;
 mod type_of;
 mod metadata;
 mod mono_item;
-mod x86_64_asm_printer;
-mod x86_64_instruction;
-mod x86_64_register;
+mod x86_64 {
+    pub mod asm_printer;
+    pub mod gas_directive;
+    pub mod instruction;
+    pub mod register;
+}
 
 use context::CodegenCx;
 use ir::type_::Type;
@@ -164,7 +166,6 @@ pub struct ModuleIronOx {
     /// The x86-64 program which corresponds to the module. This field is only
     /// initialised after the code emitter processes the module.
     pub asm: Option<String>,
-    pub allocators: Option<Vec<OxFunction>>,
 }
 
 impl ModuleIronOx {
@@ -173,7 +174,6 @@ impl ModuleIronOx {
         ModuleIronOx {
             functions: Default::default(),
             asm: None,
-            allocators: None,
         }
     }
 
