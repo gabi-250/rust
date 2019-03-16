@@ -1,5 +1,5 @@
-use gas_directive::GasDirective;
-use x86_64_register::Operand;
+use x86_64::gas_directive::GasDirective;
+use x86_64::register::Operand;
 
 use std::fmt;
 
