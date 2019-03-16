@@ -1,5 +1,5 @@
 use context::CodegenCx;
-use ir::instruction::Instruction;
+use ir::instruction::OxInstruction;
 use ir::function::OxFunction;
 
 /// The index of the parent function, and the index of the basic block
@@ -15,7 +15,7 @@ pub struct OxBasicBlock {
     /// The index of the basic block in the parent function.
     pub idx: usize,
     /// The instructions in this basic block.
-    pub instrs: Vec<Instruction>,
+    pub instrs: Vec<OxInstruction>,
     /// The function the basic block belongs to.
     pub parent: usize,
     /// The terminator of the basic block.
