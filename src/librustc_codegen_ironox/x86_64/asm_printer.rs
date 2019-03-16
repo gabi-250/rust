@@ -10,11 +10,12 @@ use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::traits::{BaseTypeMethods, MiscMethods};
 use std::cell::RefCell;
 
-use gas_directive::{BigNum, GasDirective, GasType};
-use x86_64_instruction::MachineInst;
-use x86_64_register::GeneralPurposeReg::{self, *};
-use x86_64_register::{Location, Operand, Register, SubRegister, AccessMode,
+use x86_64::gas_directive::{BigNum, GasDirective, GasType};
+use x86_64::instruction::MachineInst;
+use x86_64::register::GeneralPurposeReg::{self, *};
+use x86_64::register::{Location, Operand, Register, SubRegister, AccessMode,
                       operand_access_mode, access_mode};
+
 
 const FN_ARG_REGS: [GeneralPurposeReg; 6] = [RDI, RSI, RDX, RCX, R8, R9];
 
@@ -78,13 +79,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let (mut param_movs, stack_size) = self.compute_stack_size(&f);
         asm.append(&mut FunctionPrinter::emit_prologue(stack_size));
         for param in &f.params {
-            let mut inst_asm = self.compile_value(*param);
+            let mut inst_asm = self.codegen_value(*param);
             asm.append(&mut inst_asm.asm);
         }
         asm.append(&mut param_movs);
         for bb in &f.basic_blocks {
             asm.push(MachineInst::Label(bb.label.clone()));
-            asm.append(&mut self.compile_block(&bb));
+            asm.append(&mut self.codegen_block(&bb));
         }
         asm
     }
@@ -97,7 +98,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_value(&self, value: Value) -> CompiledInst {
+    fn codegen_value(&self, value: Value) -> CompiledInst {
         let module = self.cx.module.borrow();
         match value {
             Value::ConstUint(idx) => {
@@ -128,7 +129,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     };
                     return compiled_inst;
                 }
-                self.compile_instruction(value)
+                self.codegen_instruction(value)
             }
             Value::Global(idx) => {
                 let global = &self.cx.globals.borrow()[idx];
@@ -136,7 +137,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 CompiledInst::with_result(result)
             }
             Value::Cast(idx) => {
-                self.compile_value(self.cx.const_casts.borrow()[idx].value)
+                self.codegen_value(self.cx.const_casts.borrow()[idx].value)
             }
             Value::Function(idx) => {
                 // Move the result to the stack, and assume its size is 8.
@@ -165,17 +166,17 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 CompiledInst::new(asm, Operand::Loc(Location::Reg(r11)))
             }
             _ => {
-                unimplemented!("compile_value({:?})", value);
+                unimplemented!("codegen_value({:?})", value);
             }
         }
     }
 
-    fn compile_and(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_and(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::And(lhs, rhs) = inst {
             let mut asm = vec![];
-            let mut instr_asm1 = self.compile_value(*lhs);
+            let mut instr_asm1 = self.codegen_value(*lhs);
             asm.append(&mut instr_asm1.asm);
-            let mut instr_asm2 = self.compile_value(*rhs);
+            let mut instr_asm2 = self.codegen_value(*rhs);
             asm.append(&mut instr_asm2.asm);
             // the size in bits
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
@@ -195,12 +196,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
 
-    fn compile_add(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_add(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Add(lhs, rhs) = inst {
             let mut asm = vec![];
-            let mut instr_asm1 = self.compile_value(*lhs);
+            let mut instr_asm1 = self.codegen_value(*lhs);
             asm.append(&mut instr_asm1.asm);
-            let mut instr_asm2 = self.compile_value(*rhs);
+            let mut instr_asm2 = self.codegen_value(*rhs);
             asm.append(&mut instr_asm2.asm);
             // the size in bits
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
@@ -220,12 +221,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_sub(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_sub(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Sub(lhs, rhs) = inst {
             let mut asm = vec![];
-            let mut instr_asm1 = self.compile_value(*lhs);
+            let mut instr_asm1 = self.codegen_value(*lhs);
             asm.append(&mut instr_asm1.asm);
-            let mut instr_asm2 = self.compile_value(*rhs);
+            let mut instr_asm2 = self.codegen_value(*rhs);
             asm.append(&mut instr_asm2.asm);
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
             let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
@@ -244,10 +245,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_not(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_not(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Not(v) = inst {
             let mut asm = vec![];
-            let mut instr_asm = self.compile_value(*v);
+            let mut instr_asm = self.codegen_value(*v);
             asm.append(&mut instr_asm.asm);
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
             let reg = Register::direct(SubRegister::reg(RAX, access_mode(size)));
@@ -268,7 +269,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_call(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_call(&self, inst: &Instruction) -> CompiledInst {
         let (callee, args) = match inst {
             Instruction::Call(callee, ref args) |
             Instruction::Invoke { callee, ref args, .. } => (callee, args),
@@ -279,11 +280,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // Compile everything before actually passing the argument to the
             // called function (this enusres we don't clobber any registers we
             // actually need in the function call).
-            self.compile_value(*arg);
+            self.codegen_value(*arg);
         }
         // Prepare the function arguments.
         for (idx, arg) in args.iter().take(6).enumerate() {
-            let mut instr_asm = self.compile_value(*arg);
+            let mut instr_asm = self.codegen_value(*arg);
             asm.append(&mut instr_asm.asm);
             let param = FunctionPrinter::get_func_arg(idx);
             // FIXME: always handle globals correctly
@@ -298,6 +299,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
         let remaining_args: Vec<&Value> = args.iter().skip(6).collect();
         let mut total_arg_size = 0;
+
         for arg in remaining_args.iter().rev() {
             let arg_size = self.cx.val_ty(**arg).size(&self.cx.types.borrow());
             total_arg_size += arg_size / 8;
@@ -312,7 +314,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
         // The remaining arguments are pushed to the stack in reverse order.
         for arg in remaining_args.iter().rev() {
-            let mut instr_asm = self.compile_value(**arg);
+            let mut instr_asm = self.codegen_value(**arg);
             asm.append(&mut instr_asm.asm);
             let arg_size = self.cx.val_ty(**arg).size(&self.cx.types.borrow());
             let acc_mode = access_mode(arg_size);
@@ -384,7 +386,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 }
             },
             Value::Instruction(_, _, _) => {
-                let ptr = self.compile_value(*callee);
+                let ptr = self.codegen_value(*callee);
                 let result = ptr.result.clone().unwrap();
                 let acc_mode = result.access_mode();
                 let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
@@ -399,15 +401,15 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_icmp(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_icmp(&self, inst: &Instruction) -> CompiledInst {
         match *inst {
             Instruction::Icmp(v1, v2, op) => {
                 // These instructions have a boolean result.
                 let cmp_res = self.precompiled_result(inst);
                 let mut asm = vec![];
-                let mut instr_asm1 = self.compile_value(v1);
+                let mut instr_asm1 = self.codegen_value(v1);
                 asm.append(&mut instr_asm1.asm);
-                let mut instr_asm2 = self.compile_value(v2);
+                let mut instr_asm2 = self.codegen_value(v2);
                 asm.append(&mut instr_asm2.asm);
                 let result1 = instr_asm1.result.unwrap();
                 let result2 = instr_asm2.result.unwrap();
@@ -444,12 +446,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_condbr(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_condbr(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::CondBr(cond, bb1, bb2) = inst {
             let mut asm = vec![];
             match cond {
                 Value::Instruction(..) => {
-                    let cond_val = self.compile_instruction(*cond).result.unwrap();
+                    let cond_val = self.codegen_instruction(*cond).result.unwrap();
                     let true_reg = Register::direct(
                         SubRegister::reg(RCX, AccessMode::Low8));
                     let cond_reg = Register::direct(
@@ -476,7 +478,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_br(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_br(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Br(target) = inst {
             CompiledInst::with_instructions(
                 vec![MachineInst::jmp(target.to_string())])
@@ -485,12 +487,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_store(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_store(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Store(dest, src) = inst {
             let mut asm = vec![];
-            let mut instr_asm1 = self.compile_value(*dest);
+            let mut instr_asm1 = self.codegen_value(*dest);
             asm.append(&mut instr_asm1.asm);
-            let mut instr_asm2 = self.compile_value(*src);
+            let mut instr_asm2 = self.codegen_value(*src);
             asm.append(&mut instr_asm2.asm);
             let dest_result = instr_asm1.result.clone().unwrap();
             let src_result = instr_asm2.result.unwrap();
@@ -555,10 +557,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_load(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_load(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Load(ptr, _) = inst {
             let mut asm = vec![];
-            let mut instr_asm = self.compile_value(*ptr);
+            let mut instr_asm = self.codegen_value(*ptr);
             // FIXME:
             asm.append(&mut instr_asm.asm);
             let inst_size =
@@ -611,7 +613,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_checkoverflow(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_checkoverflow(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::CheckOverflow(_, _, signed) = inst {
             let result = self.precompiled_result(inst);
             // Get register %dl.
@@ -631,10 +633,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_cast(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_cast(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Cast(cast, ty) = inst {
             let stack_loc = self.precompiled_result(inst);
-            let mut v = self.compile_value(*cast);
+            let mut v = self.codegen_value(*cast);
             if let Some(mut op) = v.result {
                 let old_acc_mode = op.access_mode();
                 let val_size = ty.size(&self.cx.types.borrow());
@@ -648,6 +650,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let reg_old = Register::direct(
                         SubRegister::reg(RAX, old_acc_mode));
                     v.asm.extend(vec![
+                        MachineInst::NOP,
+                        MachineInst::NOP,
+                        MachineInst::NOP,
+                        MachineInst::NOP,
+                        MachineInst::NOP,
+                        MachineInst::NOP,
                         MachineInst::xor(reg_new, reg_new),
                         MachineInst::mov(op, reg_old),
                         MachineInst::mov(reg_new, stack_loc.clone()),
@@ -668,13 +676,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_ret(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_ret(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Ret(value) = inst {
             let mut asm = vec![];
             if let Some(val) = value {
                 asm.push(
                     MachineInst::xor(Register::direct(RAX), Register::direct(RAX)));
-                let mut instr_asm = self.compile_value(*val);
+                let mut instr_asm = self.codegen_value(*val);
                 asm.append(&mut instr_asm.asm);
                 let result = instr_asm.result.unwrap();
                 let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
@@ -694,6 +702,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let rax = Register::direct(RAX);
                     // RAX already covers 64 bits...
                     let am2 = access_mode(size - 64);
+
                     let rdx = Operand::Loc(Location::Reg(
                             Register::direct(SubRegister::reg(RDX, am2))));
 
@@ -720,7 +729,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_alloca(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_alloca(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Alloca(..) = inst {
             let result = self.precompiled_result(inst);
             CompiledInst::with_result(result)
@@ -729,7 +738,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_unreachable(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_unreachable(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Unreachable = inst {
             CompiledInst::with_instructions(vec![MachineInst::UD2])
         } else {
@@ -737,7 +746,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_extractvalue(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_extractvalue(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::ExtractValue(agg, idx) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
@@ -746,7 +755,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let offset = types[agg_ty].offset(*idx, &types);
                     assert!(offset % 8 == 0);
                     let offset = offset / 8;
-                    let agg_val = self.compile_value(*agg).result.unwrap();
+                    let agg_val = self.codegen_value(*agg).result.unwrap();
                     let stack_loc = self.precompiled_result(inst);
                     let asm = vec![
                         MachineInst::lea(agg_val, Register::direct(RAX)),
@@ -770,7 +779,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_insertvalue_struct(
+    fn codegen_insertvalue_struct(
         &self,
         agg_dst: Operand,
         agg: Value,
@@ -790,8 +799,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         assert!(offset % 8 == 0);
         let offset = offset / 8;
 
-        //let agg_val = self.compile_value(*agg);
-        let compiled_v = self.compile_value(v).result.unwrap();
+        //let agg_val = self.codegen_value(*agg);
+        let compiled_v = self.codegen_value(v).result.unwrap();
         let member_rbp_offset = agg_dst.rbp_offset() + offset;
         let member_rbp_offset = Location::RbpOffset(member_rbp_offset,
                                                     AccessMode::Full);
@@ -838,14 +847,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_insertvalue(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_insertvalue(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::InsertValue(agg, v, idx) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             match types[agg_ty] {
                 OxType::StructType { .. } => {
                     let agg_dst = self.precompiled_result(inst);
-                    self.compile_insertvalue_struct(agg_dst, *agg, *v, *idx)
+                    self.codegen_insertvalue_struct(agg_dst, *agg, *v, *idx)
                 }
                 ref ty => unimplemented!("Insert into ty {:?}", ty),
             }
@@ -854,7 +863,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_structgep(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_structgep(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::StructGep(agg, idx) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
@@ -864,7 +873,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
             assert!(offset % 8 == 0);
             let offset = offset / 8;
-            let agg_val = self.compile_value(*agg).result.unwrap();
+            let agg_val = self.codegen_value(*agg).result.unwrap();
             let stack_loc = self.precompiled_result(inst);
             // FIXME:
             let asm = vec![
@@ -885,7 +894,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_gep(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_gep(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Gep(agg, indices, _inbounds) = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
@@ -897,7 +906,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let mut cur_agg_ty = agg_ty;
             let indices: Vec<(Type, Operand)> =
                 indices.iter().enumerate().map(|(i, idx_val)| {
-                let index_val = self.compile_value(*idx_val);
+                let index_val = self.codegen_value(*idx_val);
                 asm.extend(index_val.asm);
                 cur_agg_ty = cur_agg_ty.ty_at_idx(i as u64, &types);
                 (cur_agg_ty, index_val.result.unwrap())
@@ -906,7 +915,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
             let stack_loc = self.precompiled_result(inst);
             // First, get the base address of the pointer.
-            let agg_val = self.compile_value(*agg).result.unwrap();
+            let agg_val = self.codegen_value(*agg).result.unwrap();
             asm.extend(vec![
                 MachineInst::mov(agg_val, Register::direct(RAX)),
                 MachineInst::mov(Register::direct(RAX), stack_loc.clone())
@@ -971,10 +980,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_invoke(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_invoke(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Invoke { .. } = inst {
             // Emit the call
-            self.compile_call(inst)
+            self.codegen_call(inst)
             // FIXME: skip the resume for now
             //unimplemented!("Invoke {:?}, {:?}", then, catch);
         } else {
@@ -982,7 +991,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_resume(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_resume(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Resume(_) = inst {
             // FIXME: crash for now.
             CompiledInst::with_instructions(vec![MachineInst::UD2])
@@ -991,7 +1000,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_landingpad(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_landingpad(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::LandingPad { .. } = inst {
             // FIXME: crash for now.
             let landing_pad = self.precompiled_result(inst);
@@ -1001,12 +1010,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_mul(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_mul(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Mul(lhs, rhs, signed) = inst {
             let mut asm = vec![];
-            let mut instr_asm1 = self.compile_value(*lhs);
+            let mut instr_asm1 = self.codegen_value(*lhs);
             asm.append(&mut instr_asm1.asm);
-            let mut instr_asm2 = self.compile_value(*rhs);
+            let mut instr_asm2 = self.codegen_value(*rhs);
             asm.append(&mut instr_asm2.asm);
             // The size in bits.
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
@@ -1035,9 +1044,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_switch(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_switch(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Switch { value, default, cases } = inst {
-            let compiled_v = self.compile_value(*value);
+            let compiled_v = self.codegen_value(*value);
             let v_stack_loc = compiled_v.result.clone().unwrap();
             // Load the value and compare it with each of the cases
             let acc_mode = access_mode(
@@ -1046,7 +1055,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let mut asm = vec![MachineInst::mov(v_stack_loc, reg)];
             let module = &self.cx.module.borrow();
             for (v, bb) in cases {
-                let compiled_v = self.compile_value(*v);
+                let compiled_v = self.codegen_value(*v);
                 asm.extend(compiled_v.asm);
                 let compiled_v = compiled_v.result.clone().unwrap();
                 let acc_mode = access_mode(
@@ -1067,19 +1076,19 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_select(&self, inst: &Instruction) -> CompiledInst {
+    fn codegen_select(&self, inst: &Instruction) -> CompiledInst {
         if let Instruction::Select(cond, then_val, else_val) = inst {
             match cond {
                 // FIXME: assert that the condition is either an i1 or a vector
                 // of i1.
                 Value::Instruction(..) => {
                     let mut asm = Vec::new();
-                    let compiled_cond = self.compile_instruction(*cond).result.unwrap();
+                    let compiled_cond = self.codegen_instruction(*cond).result.unwrap();
                     let true_lbl = self.cx.get_sym_name("select_true");
                     let done_lbl = self.cx.get_sym_name("select_done");
                     let mut add_asm_and_get_result =
                         |v: Value, asm: &mut Vec<MachineInst>| {
-                            let v = self.compile_value(v);
+                            let v = self.codegen_value(v);
                             asm.extend(v.asm);
                             v.result.unwrap()
                         };
@@ -1118,7 +1127,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-    fn compile_instruction(&self, inst_v: Value) -> CompiledInst {
+    fn codegen_instruction(&self, inst_v: Value) -> CompiledInst {
         let module = self.cx.module.borrow();
         let inst = if let Value::Instruction(fn_idx, bb_idx, idx) = inst_v {
             &module.functions[fn_idx].basic_blocks[bb_idx].instrs[idx]
@@ -1129,31 +1138,31 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             return instr_asm.clone();
         }
         let instr_asm = match inst {
-            Instruction::Br(..) => self.compile_br(inst),
-            Instruction::Ret(..) => self.compile_ret(inst),
-            Instruction::Store(..) => self.compile_store(inst),
-            Instruction::Add(..) => self.compile_add(inst),
-            Instruction::Sub(..) => self.compile_sub(inst),
-            Instruction::Mul(..) => self.compile_mul(inst),
-            Instruction::Call(..) => self.compile_call(inst),
-            Instruction::Alloca(..) => self.compile_alloca(inst),
-            Instruction::Icmp(..) => self.compile_icmp(inst),
-            Instruction::CondBr(..) => self.compile_condbr(inst),
-            Instruction::Load(..) => self.compile_load(inst),
-            Instruction::CheckOverflow(..) => self.compile_checkoverflow(inst),
-            Instruction::Cast(..) => self.compile_cast(inst),
-            Instruction::Unreachable => self.compile_unreachable(inst),
-            Instruction::ExtractValue(..) => self.compile_extractvalue(inst),
-            Instruction::InsertValue(..) => self.compile_insertvalue(inst),
-            Instruction::StructGep(..) => self.compile_structgep(inst),
-            Instruction::Not(..) => self.compile_not(inst),
-            Instruction::And(..) => self.compile_and(inst),
-            Instruction::Invoke {..} => self.compile_invoke(inst),
-            Instruction::Resume(..)=> self.compile_resume(inst),
-            Instruction::LandingPad { .. } => self.compile_landingpad(inst),
-            Instruction::Select(..)=> self.compile_select(inst),
-            Instruction::Switch { .. } => self.compile_switch(inst),
-            Instruction::Gep(..) => self.compile_gep(inst),
+            Instruction::Br(..) => self.codegen_br(inst),
+            Instruction::Ret(..) => self.codegen_ret(inst),
+            Instruction::Store(..) => self.codegen_store(inst),
+            Instruction::Add(..) => self.codegen_add(inst),
+            Instruction::Sub(..) => self.codegen_sub(inst),
+            Instruction::Mul(..) => self.codegen_mul(inst),
+            Instruction::Call(..) => self.codegen_call(inst),
+            Instruction::Alloca(..) => self.codegen_alloca(inst),
+            Instruction::Icmp(..) => self.codegen_icmp(inst),
+            Instruction::CondBr(..) => self.codegen_condbr(inst),
+            Instruction::Load(..) => self.codegen_load(inst),
+            Instruction::CheckOverflow(..) => self.codegen_checkoverflow(inst),
+            Instruction::Cast(..) => self.codegen_cast(inst),
+            Instruction::Unreachable => self.codegen_unreachable(inst),
+            Instruction::ExtractValue(..) => self.codegen_extractvalue(inst),
+            Instruction::InsertValue(..) => self.codegen_insertvalue(inst),
+            Instruction::StructGep(..) => self.codegen_structgep(inst),
+            Instruction::Not(..) => self.codegen_not(inst),
+            Instruction::And(..) => self.codegen_and(inst),
+            Instruction::Invoke {..} => self.codegen_invoke(inst),
+            Instruction::Resume(..)=> self.codegen_resume(inst),
+            Instruction::LandingPad { .. } => self.codegen_landingpad(inst),
+            Instruction::Select(..)=> self.codegen_select(inst),
+            Instruction::Switch { .. } => self.codegen_switch(inst),
+            Instruction::Gep(..) => self.codegen_gep(inst),
         };
         let compiled_inst = if let Some(ref result) = instr_asm.result {
             CompiledInst::new(instr_asm.asm.clone(), result.clone())
@@ -1172,19 +1181,19 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         self.compiled_insts.borrow().get(&value).is_some()
     }
 
-    pub fn compile_block(&self, bb: &OxBasicBlock) -> Vec<MachineInst> {
+    pub fn codegen_block(&self, bb: &OxBasicBlock) -> Vec<MachineInst> {
         let mut asm = vec![];
         for (inst_idx, _) in bb.instrs.iter().enumerate() {
             let inst = &bb.instrs[inst_idx];
             if self.already_compiled(Value::Instruction(bb.parent, bb.idx, inst_idx)) {
                 // Always compile branching instructions.
                 if inst.is_branch() {
-                    let mut instr_asm = self.compile_instruction(
+                    let mut instr_asm = self.codegen_instruction(
                         Value::Instruction(bb.parent, bb.idx, inst_idx));
                     asm.append(&mut instr_asm.asm);
                 }
             } else {
-                let mut instr_asm = self.compile_instruction(
+                let mut instr_asm = self.codegen_instruction(
                     Value::Instruction(bb.parent, bb.idx, inst_idx));
                 asm.append(&mut instr_asm.asm);
             }
@@ -1319,6 +1328,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         // The size of a pointer
                         size += 8;
                         let result = Location::RbpOffset(-size, AccessMode::Full);
+
                         CompiledInst::with_result(Operand::from(result))
                     }
                     Instruction::Not(v) => {
@@ -1409,13 +1419,13 @@ impl AsmPrinter<'ll, 'tcx> {
         }
     }
 
-    fn compile_const_global(&self, c: Value) -> Vec<MachineInst> {
+    fn codegen_const_global(&self, c: Value) -> Vec<MachineInst> {
         let mut asm = vec![];
         match c {
             Value::ConstFatPtr(idx) => {
                 let (v1, v2) = self.cx.const_fat_ptrs.borrow()[idx];
-                asm.append(&mut self.compile_const_global(v1));
-                asm.append(&mut self.compile_const_global(v2));
+                asm.append(&mut self.codegen_const_global(v1));
+                asm.append(&mut self.codegen_const_global(v2));
             }
             Value::ConstUint(idx) => {
                 let u_const = self.cx.u_consts.borrow()[idx];
@@ -1430,10 +1440,11 @@ impl AsmPrinter<'ll, 'tcx> {
             }
             Value::ConstStruct(idx) => {
                 let const_struct = &self.cx.const_structs.borrow()[idx];
+
                 self.codegenned_consts.borrow_mut().push(c);
                 asm.push(MachineInst::Label(const_struct.name.clone()));
                 for c in &const_struct.components {
-                    asm.extend(self.compile_const_global(*c));
+                    asm.extend(self.codegen_const_global(*c));
                 }
             }
             Value::Function(idx) => {
@@ -1464,39 +1475,8 @@ impl AsmPrinter<'ll, 'tcx> {
                                            const_bytes.len())),
                 ]);
             },
-            _ => unimplemented!("compile_const_global({:?})", c),
+            _ => unimplemented!("codegen_const_global({:?})", c),
         };
-        asm
-    }
-
-    fn declare_globals(&self) -> Vec<MachineInst> {
-        let mut asm = vec![
-            MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
-        for global in self.cx.globals.borrow().iter().rev() {
-            asm.push(MachineInst::Label(global.name.clone()));
-            match global.initializer {
-                Some(v) => {
-                    let codegen = {
-                        !self.codegenned_consts.borrow().contains(&v)
-                    };
-                    if codegen {
-                        asm.extend(self.compile_const_global(v));
-                        self.codegenned_consts.borrow_mut().push(v);
-                    }
-                }
-                None => bug!("no initializer found for {:?}", global),
-            };
-        }
-        for (i, _c_struct) in self.cx.const_structs.borrow().iter().enumerate() {
-            let v = Value::ConstStruct(i);
-            let codegen = {
-                !self.codegenned_consts.borrow().contains(&v)
-            };
-            if codegen {
-                asm.extend(self.compile_const_global(v));
-                self.codegenned_consts.borrow_mut().push(v);
-            }
-        }
         asm
     }
 
@@ -1518,6 +1498,38 @@ impl AsmPrinter<'ll, 'tcx> {
             _ => unimplemented!("type of {:?}", ty),
         }
     }
+
+    fn declare_globals(&self) -> Vec<MachineInst> {
+        let mut asm = vec![
+            MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
+        for global in self.cx.globals.borrow().iter().rev() {
+            asm.push(MachineInst::Label(global.name.clone()));
+            match global.initializer {
+                Some(v) => {
+                    let codegen = {
+                        !self.codegenned_consts.borrow().contains(&v)
+                    };
+                    if codegen {
+                        asm.extend(self.codegen_const_global(v));
+                        self.codegenned_consts.borrow_mut().push(v);
+                    }
+                }
+                None => bug!("no initializer found for {:?}", global),
+            };
+        }
+        for (i, _c_struct) in self.cx.const_structs.borrow().iter().enumerate() {
+            let v = Value::ConstStruct(i);
+            let codegen = {
+                !self.codegenned_consts.borrow().contains(&v)
+            };
+            if codegen {
+                asm.extend(self.codegen_const_global(v));
+                self.codegenned_consts.borrow_mut().push(v);
+            }
+        }
+        asm
+    }
+
 
     fn declare_functions(&self) -> Vec<MachineInst> {
         let mut asm: Vec<MachineInst> = vec![
@@ -1551,6 +1563,7 @@ impl AsmPrinter<'ll, 'tcx> {
     /// The codegen result is a string that contains the x86-64 program that
     /// corresponds to the module from the `CodegenCx` of this printer.
     pub fn codegen(self) -> (Stats, String) {
+        self.pprint();
         let mut asm = String::new();
         // Define the globals.
         for globl in &self.declare_globals() {

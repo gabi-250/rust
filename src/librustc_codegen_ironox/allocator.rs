@@ -8,7 +8,7 @@ use rustc_codegen_ssa::traits::{BaseTypeMethods, BuilderMethods, DeclareMethods,
 
 use builder::Builder;
 use context::CodegenCx;
-use x86_64_asm_printer::AsmPrinter;
+use x86_64::asm_printer::AsmPrinter;
 use ModuleIronOx;
 
 pub(crate) fn codegen<'ll, 'tcx: 'll>(

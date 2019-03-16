@@ -52,7 +52,7 @@ impl BuilderPosition {
 
 pub struct Builder<'a, 'll: 'a, 'tcx: 'll> {
     pub cx: &'a CodegenCx<'ll, 'tcx>,
-    pub builder: BuilderPosition,
+    pub build_pos: BuilderPosition,
 }
 
 impl ty::layout::LayoutOf for Builder<'_, '_, 'tcx> {
@@ -98,13 +98,13 @@ impl Builder<'a, 'll, 'tcx> {
     /// Add the instruction at the current `BuilderPosition`.
     fn emit_instr(&mut self, inst: Instruction) -> Value {
         let mut module = self.cx.module.borrow_mut();
-        module.get_function(self.builder.fn_idx)
-            .insert_inst(self.builder.bb_idx, self.builder.inst_idx, inst);
-        let inst = Value::Instruction(self.builder.fn_idx,
-                                      self.builder.bb_idx,
-                                      self.builder.inst_idx);
+        module.get_function(self.build_pos.fn_idx)
+            .insert_inst(self.build_pos.bb_idx, self.build_pos.inst_idx, inst);
+        let inst = Value::Instruction(self.build_pos.fn_idx,
+                                      self.build_pos.bb_idx,
+                                      self.build_pos.inst_idx);
         // move to the next instruction
-        self.builder.inst_idx += 1;
+        self.build_pos.inst_idx += 1;
         inst
     }
 }
@@ -173,7 +173,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // FIXME? this is an invalid position and must be overwritten
         Builder {
             cx,
-            builder: BuilderPosition::new(0, 0, 0)
+            build_pos: BuilderPosition::new(0, 0, 0)
         }
     }
 
@@ -186,14 +186,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn llfn(&self) -> Value {
-        // The function this builder is adding instructions to.
-        Value::Function(self.builder.fn_idx)
+        // The function this build_pos is adding instructions to.
+        Value::Function(self.build_pos.fn_idx)
     }
 
     fn llbb(&self) -> BasicBlock {
         // The BasicBlock this builder is adding instructions to.
-        BasicBlock(self.builder.fn_idx,
-                   self.builder.bb_idx)
+        BasicBlock(self.build_pos.fn_idx,
+                   self.build_pos.bb_idx)
     }
 
     fn count_insn(&self, _category: &str) {
@@ -211,7 +211,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // the basic block.
         let instr =
             self.cx.module.borrow().functions[llfn].basic_blocks[llbb].instrs.len();
-        self.builder = {
+        self.build_pos = {
             BuilderPosition::new(llfn, llbb, instr)
         };
     }
@@ -1274,7 +1274,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         _flags: MemFlags,
     ) {
-
         let mut memset_start = self.build_sibling_block("memset_start");
         let memset_end = self.build_sibling_block("memset_end");
         let i8p = self.type_i8p();
