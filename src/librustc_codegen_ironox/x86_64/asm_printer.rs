@@ -5,7 +5,7 @@ use ir::instruction::{CompOp, OxInstruction};
 use ir::type_::{OxType, ScalarType, Type};
 use ir::value::Value;
 
-use rustc::mir::mono::{Stats, Visibility};
+use rustc::mir::mono::Visibility;
 use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::traits::{BaseTypeMethods, MiscMethods};
 use std::cell::RefCell;
@@ -1393,14 +1393,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 }
 
-pub struct AsmPrinter<'ll, 'tcx> {
+pub struct AsmPrinter<'a, 'll, 'tcx> {
     /// The codegen context, which also contains the `ModuleIronOx` to be compiled.
-    cx: CodegenCx<'ll, 'tcx>,
+    cx: &'a CodegenCx<'ll, 'tcx>,
     codegenned_consts: RefCell<Vec<Value>>,
 }
 
-impl AsmPrinter<'ll, 'tcx> {
-    pub fn new(cx: CodegenCx<'ll, 'tcx>) -> AsmPrinter<'ll, 'tcx> {
+impl AsmPrinter<'a, 'll, 'tcx> {
+    pub fn new(cx: &'a CodegenCx<'ll, 'tcx>) -> AsmPrinter<'a, 'll, 'tcx> {
         AsmPrinter { cx, codegenned_consts: Default::default() }
     }
 
@@ -1562,7 +1562,7 @@ impl AsmPrinter<'ll, 'tcx> {
     ///
     /// The codegen result is a string that contains the x86-64 program that
     /// corresponds to the module from the `CodegenCx` of this printer.
-    pub fn codegen(self) -> (Stats, String) {
+    pub fn codegen(self) -> String {
         self.pprint();
         let mut asm = String::new();
         // Define the globals.
@@ -1583,6 +1583,6 @@ impl AsmPrinter<'ll, 'tcx> {
                 asm.push_str(&fn_asm);
             }
         }
-        (self.cx.consume_stats().into_inner(), asm)
+        asm
     }
 }
