@@ -454,6 +454,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         SubRegister::reg(RCX, AccessMode::Low8));
                     let cond_reg = Register::direct(
                         SubRegister::reg(RDI, AccessMode::Low8));
+                    let then_label = self.cx.module.borrow().bb_label(*then_bb);
+                    let else_label = self.cx.module.borrow().bb_label(*else_bb);
+
                     asm.extend(vec![
                         // Check if the condition is true
                         MachineInst::mov(
@@ -462,9 +465,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         // Compile the result of evaluating the condition with 1.
                         MachineInst::cmp(cond_reg, true_reg),
                         // If the condition is true.
-                        MachineInst::je(then_bb.to_string()),
+                        MachineInst::je(then_label),
                     ]);
-                    asm.push(MachineInst::jmp(else_bb.to_string()));
+                    asm.push(MachineInst::jmp(else_label));
                     CompiledInst::with_instructions(asm)
                 }
                 _ => {
@@ -478,8 +481,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn codegen_br(&self, inst: &OxInstruction) -> CompiledInst {
         if let OxInstruction::Br(target) = inst {
+            let label = self.cx.module.borrow().bb_label(*target);
             CompiledInst::with_instructions(
-                vec![MachineInst::jmp(target.to_string())])
+                vec![MachineInst::jmp(label)])
         } else {
             bug!("expected OxInstruction::Br, found {:?}", inst);
         }
