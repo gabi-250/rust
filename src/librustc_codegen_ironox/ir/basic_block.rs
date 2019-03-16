@@ -18,8 +18,6 @@ pub struct OxBasicBlock {
     pub instrs: Vec<OxInstruction>,
     /// The function the basic block belongs to.
     pub parent: usize,
-    /// The terminator of the basic block.
-    pub terminator: Option<String>,
 }
 
 impl OxBasicBlock {
@@ -32,7 +30,6 @@ impl OxBasicBlock {
             idx,
             instrs: vec![],
             parent: parent.idx,
-            terminator: None,
         }
     }
 }
