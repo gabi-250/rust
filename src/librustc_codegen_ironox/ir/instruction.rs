@@ -9,48 +9,59 @@ use rustc_codegen_ssa::traits::{BaseTypeMethods, DerivedTypeMethods};
 /// An IronOx instruction.
 #[derive(PartialEq, Clone, Debug, Eq, Hash)]
 pub enum OxInstruction {
-    /// Store (ptr, value).
-    Store(Value, Value),
-    /// Load the value of a pointer.
-    Load(Value, Align),
+    /// Store value `val` at the address pointed to by `ptr`.
+    Store { ptr: Value, val: Value },
+    /// Return the value `ptr` points to.
+    Load { ptr: Value, align: Align },
     /// An unconditional branch to a label.
     Br(String),
-    CondBr(Value, String, String),
-    /// (cond, then_val, else_val)
-    Select(Value, Value, Value),
-    /// Return instruction.
+    /// Branch to `then_bb` if `cond` is true, otherwise branch to `else_bb`.
+    CondBr { cond: Value, then_bb: String, else_bb: String },
+    /// If `cond` is true, return `then_val` else return `else_val`.
+    Select { cond: Value, then_val: Value, else_val: Value },
+    /// Return from the current function.
     Ret(Option<Value>),
-    /// Call(fn_idx, args). Emit a call to the function found at index `fn_idx`
-    /// in the `functions` vector of the module.
-    Call(Value, Vec<Value>),
-    /// Allocate space on the stack for a variable of a particular type and
-    /// alignment.
-    Alloca(String, Type, Align),
-    /// Cast a value to a type.
-    Cast(Value, Type),
-    /// Add two values and return the result.
-    Add(Value, Value),
-    /// Multiply two values and return the result.
-    Mul(Value, Value, bool),
-    Sub(Value, Value),
-    Icmp(Value, Value, CompOp),
+    /// Call `callee` with the arguments in `args`.
+    Call { callee: Value, args: Vec<Value> },
+    /// Allocate space on the stack for a variable named `name` of type `ty`, and
+    /// make sure the location on the stack has the alignment `align`.
+    Alloca { name: String, ty: Type, align: Align},
+    /// Cast value `val` to a type `ty`.
+    Cast { val: Value, ty: Type },
+    /// Add `lhs` to `rhs` and return the result.
+    Add { lhs: Value, rhs: Value },
+    /// Multiply `lhs` by `rhs` and return the result.
+    Mul { lhs: Value, rhs: Value, signed: bool },
+    /// Subtract `rhs` from `lhs` and return the result.
+    Sub { lhs: Value, rhs: Value},
+    /// Compare `lhs` with `rhs` using the comparison operator `op`. Returns a bool.
+    Icmp { lhs: Value, rhs: Value, op: CompOp },
+    /// Negate a boolean value.
     Not(Value),
-    And(Value, Value),
+    /// Compute the bitwise and of `lhs` and `rhs` and return the result.
+    And { lhs: Value, rhs: Value },
     /// Check overflow: (instruction, type, signed).
-    CheckOverflow(Value, Type, bool),
-    /// (agg_val, elt, idx)
-    InsertValue(Value, Value, u64),
-    ExtractValue(Value, u64),
-    /// Get an element from an aggregate value, as indicated by the indices:
-    /// (agg_val, [indices], inbounds).
-    Gep(Value, Vec<Value>, bool),
-    StructGep(Value, u64),
-    /// (type, pers_fn, num_clauses)
+    CheckOverflow { inst: Value, ty: Type, signed: bool },
+    /// Insert value `elt` at position `idx` into the aggregate `agg`.
+    InsertValue { agg: Value, elt: Value, idx: u64 },
+    /// Extract the value at position `idx` from the aggregate `agg`.
+    ExtractValue { agg: Value, idx: u64 },
+    /// Get a pointer to an element from the aggregate pointed to by `ptr`, as
+    /// indicated by `indices`.
+    Gep { ptr: Value, indices: Vec<Value>, inbounds: bool },
+    /// Get a pointer to the element at position `idx` from the struct `ptr` points to.
+    StructGep { ptr: Value, idx: u64 },
+    /// **Not currently implemented**: crashes the program.
     LandingPad { ty: Type, pers_fn: Value, num_clauses: usize, cleanup: bool },
+    /// **Not currently implemented**: crashes the program.
     Resume(Value),
+    /// Compare `value` with each of the values in `cases`. If a value in `cases`
+    /// matches `value`, branch to the respective basic block; otherwise, branch
+    /// to `default`.
     Switch { value: Value, default: BasicBlock, cases: Vec<(Value, BasicBlock)>},
-    // FIXME: add the funclet?
+    /// **Not currently implemented**: this is simply a call.
     Invoke { callee: Value, args: Vec<Value>, then: BasicBlock, catch: BasicBlock },
+    /// Emits an instruction that stops the execution.
     Unreachable,
 }
 
@@ -86,28 +97,28 @@ impl OxInstruction {
             let inst = &cx.module.borrow().functions[fn_idx].
                 basic_blocks[bb_idx].instrs[inst_idx];
             match inst {
-                OxInstruction::Alloca(_, ty, _) |
-                OxInstruction::Cast(_, ty) => ty.pointee_ty(&cx.types.borrow()),
-                OxInstruction::StructGep(_, _) => {
+                OxInstruction::Alloca { ty, .. } |
+                OxInstruction::Cast { ty, .. } => ty.pointee_ty(&cx.types.borrow()),
+                OxInstruction::StructGep { .. } => {
                     let ty = inst.val_ty(cx);
                     match cx.types.borrow()[ty] {
                         OxType::PtrTo { pointee } => pointee,
                         _ => unimplemented!("Load from non-pointer ty {:?}", ty),
                     }
                 },
-                OxInstruction::Load(ptr, _) => {
+                OxInstruction::Load { ptr, .. } => {
                     let ty = OxInstruction::load_ty(*ptr, cx);
                     ty.pointee_ty(&cx.types.borrow())
                 },
-                OxInstruction::Call(llfn, ..) => {
-                    if let Value::Function(idx) = llfn {
+                OxInstruction::Call { callee, .. } => {
+                    if let Value::Function(idx) = callee {
                         let fn_ty = cx.module.borrow().functions[*idx].ret;
                         fn_ty.pointee_ty(&cx.types.borrow())
                     } else {
-                        unimplemented!("Call to {:?}", llfn);
+                        unimplemented!("Call to {:?}", callee);
                     }
                 },
-                OxInstruction::Gep(..) => {
+                OxInstruction::Gep { .. } => {
                     let ty = cx.val_ty(val);
                     let ty = ty.pointee_ty(&cx.types.borrow());
                     ty
@@ -129,25 +140,25 @@ impl OxInstruction {
     /// instruction.
     pub fn val_ty(&self, cx: &CodegenCx) -> Type {
         match *self {
-            OxInstruction::Alloca(_, ty, _) => ty,
-            OxInstruction::Cast(_, ty) => ty,
+            OxInstruction::Alloca { ty, .. } => ty,
+            OxInstruction::Cast { ty, .. } => ty,
             OxInstruction::Ret(Some(v)) => cx.val_ty(v),
-            OxInstruction::Add(v1, v2) | OxInstruction::Sub(v1, v2) |
-            OxInstruction::Mul(v1, v2, _) | OxInstruction::And(v1, v2) => {
-                let ty1 = cx.val_ty(v1);
-                let ty2 = cx.val_ty(v2);
+            OxInstruction::Add { lhs, rhs } | OxInstruction::Sub { lhs, rhs } |
+            OxInstruction::Mul { lhs, rhs, .. } | OxInstruction::And { lhs, rhs } => {
+                let ty1 = cx.val_ty(lhs);
+                let ty2 = cx.val_ty(rhs);
                 assert_eq!(ty1, ty2);
                 ty1
             },
-            OxInstruction::Call(value, _) => {
-                let fn_ty = cx.val_ty(value);
+            OxInstruction::Call { callee, .. } => {
+                let fn_ty = cx.val_ty(callee);
                 match cx.types.borrow()[fn_ty] {
                     OxType::FnType { ref ret, .. } => *ret,
                     OxType::PtrTo { ref pointee } => {
                         if let OxType::FnType { ref ret, .. } = cx.types.borrow()[*pointee] {
                             *ret
                         } else {
-                            bug!("Cannot call value {:?}", value);
+                            bug!("Cannot call callee {:?}", callee);
                         }
                     },
                     _ => {
@@ -155,8 +166,8 @@ impl OxInstruction {
                     }
                 }
             }
-            OxInstruction::Load(ptr, _) => OxInstruction::load_ty(ptr, cx),
-            OxInstruction::StructGep(ptr, idx) => {
+            OxInstruction::Load { ptr, .. } => OxInstruction::load_ty(ptr, cx),
+            OxInstruction::StructGep { ptr, idx } => {
                 let member_ty = {
                     let types = cx.types.borrow();
                     let struct_ptr = cx.val_ty(ptr);
@@ -174,7 +185,7 @@ impl OxInstruction {
                 };
                 cx.type_ptr_to(member_ty)
             },
-            OxInstruction::ExtractValue(ptr, idx) => {
+            OxInstruction::ExtractValue { agg: ptr, idx } => {
                 let agg_ty = cx.val_ty(ptr);
                 agg_ty.ty_at_idx(idx, &cx.types.borrow())
             },
@@ -197,15 +208,15 @@ impl OxInstruction {
                 }
             },
             OxInstruction::Not(v) => cx.val_ty(v),
-            OxInstruction::InsertValue(agg, ..) => cx.val_ty(agg),
-            OxInstruction::Select(_, v1, v2) => {
-                let ty = cx.val_ty(v1);
-                assert_eq!(ty, cx.val_ty(v2));
-                ty
+            OxInstruction::InsertValue { agg, .. } => cx.val_ty(agg),
+            OxInstruction::Select { then_val, else_val, .. } => {
+                let then_ty = cx.val_ty(then_val);
+                assert_eq!(then_ty, cx.val_ty(else_val));
+                then_ty
             },
-            OxInstruction::Icmp(..) => cx.type_bool(),
-            OxInstruction::Gep(agg, ref indices, _inbounds) => {
-                let ty = cx.val_ty(agg);
+            OxInstruction::Icmp { .. }=> cx.type_bool(),
+            OxInstruction::Gep { ptr, ref indices, .. }=> {
+                let ty = cx.val_ty(ptr);
                 let ty = ty.pointee_ty(&cx.types.borrow());
                 let arr_ty = match cx.types.borrow()[ty] {
                     OxType::Array { ty, .. } => {
@@ -231,7 +242,7 @@ impl OxInstruction {
 
     pub fn is_branch(&self) -> bool {
         match *self {
-            OxInstruction::Br(..) | OxInstruction::CondBr(..) => true,
+            OxInstruction::Br(..) | OxInstruction::CondBr { .. } => true,
             _ => false,
         }
     }

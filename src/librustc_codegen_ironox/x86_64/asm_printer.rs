@@ -31,7 +31,6 @@ pub struct CompiledInst {
 impl CompiledInst {
     /// Create a new `CompiledInst` from a vector of machine instructions.
     pub fn new(asm: Vec<MachineInst>, result: Operand) -> CompiledInst {
-        //eprintln!("asm is \n{:?}", asm);
         CompiledInst { asm, result: Some(result) }
     }
 
@@ -143,7 +142,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             Value::Function(idx) => {
                 // Move the result to the stack, and assume its size is 8.
                 let function_name = if !module.functions[idx].is_codegenned() {
-                    eprintln!("{} is declaration!", module.functions[idx].name);
                     format!("{}@PLT", &module.functions[idx].name)
                 } else {
                     format!("{}(%rip)", &module.functions[idx].name)
@@ -174,7 +172,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_and(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::And(lhs, rhs) = inst {
+        if let OxInstruction::And { lhs, rhs } = inst {
             let mut asm = vec![];
             let mut instr_asm1 = self.codegen_value(*lhs);
             asm.append(&mut instr_asm1.asm);
@@ -199,7 +197,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
 
     fn codegen_add(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Add(lhs, rhs) = inst {
+        if let OxInstruction::Add { lhs, rhs } = inst {
             let mut asm = vec![];
             let mut instr_asm1 = self.codegen_value(*lhs);
             asm.append(&mut instr_asm1.asm);
@@ -224,7 +222,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_sub(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Sub(lhs, rhs) = inst {
+        if let OxInstruction::Sub { lhs, rhs } = inst {
             let mut asm = vec![];
             let mut instr_asm1 = self.codegen_value(*lhs);
             asm.append(&mut instr_asm1.asm);
@@ -273,7 +271,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn codegen_call(&self, inst: &OxInstruction) -> CompiledInst {
         let (callee, args) = match inst {
-            OxInstruction::Call(callee, ref args) |
+            OxInstruction::Call { callee, ref args } |
             OxInstruction::Invoke { callee, ref args, .. } => (callee, args),
             _ => bug!("Expected invoke or call, found {:?}", inst)
         };
@@ -306,7 +304,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let arg_size = self.cx.val_ty(**arg).size(&self.cx.types.borrow());
             total_arg_size += arg_size / 8;
         }
-        eprintln!("total remaining arg size: {}", total_arg_size);
         let padding = total_arg_size % 16;
         if remaining_args.len() > 0 {
             // Align the stack:
@@ -363,8 +360,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             let offset = result.rbp_offset();
                             let result1 = Location::RbpOffset(offset, am_full);
                             let am2 = access_mode(8 * (bytes - 8));
-                            //eprintln!("LEFTOVER: from {:?} {:?}",
-                                      //bytes, 8 * (bytes - 8));
                             let result2 = Location::RbpOffset(offset + 8, am2);
                             asm.extend(vec![
                                 MachineInst::mov(
@@ -408,13 +403,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn codegen_icmp(&self, inst: &OxInstruction) -> CompiledInst {
         match *inst {
-            OxInstruction::Icmp(v1, v2, op) => {
+            OxInstruction::Icmp { lhs, rhs, op } => {
                 // These instructions have a boolean result.
                 let cmp_res = self.precompiled_result(inst);
                 let mut asm = vec![];
-                let mut instr_asm1 = self.codegen_value(v1);
+                let mut instr_asm1 = self.codegen_value(lhs);
                 asm.append(&mut instr_asm1.asm);
-                let mut instr_asm2 = self.codegen_value(v2);
+                let mut instr_asm2 = self.codegen_value(rhs);
                 asm.append(&mut instr_asm2.asm);
                 let result1 = instr_asm1.result.unwrap();
                 let result2 = instr_asm2.result.unwrap();
@@ -452,7 +447,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_condbr(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::CondBr(cond, bb1, bb2) = inst {
+        if let OxInstruction::CondBr { cond, then_bb, else_bb } = inst {
             let mut asm = vec![];
             match cond {
                 Value::Instruction(..) => {
@@ -469,9 +464,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         // Compile the result of evaluating the condition with 1.
                         MachineInst::cmp(cond_reg, true_reg),
                         // If the condition is true.
-                        MachineInst::je(bb1.to_string()),
+                        MachineInst::je(then_bb.to_string()),
                     ]);
-                    asm.push(MachineInst::jmp(bb2.to_string()));
+                    asm.push(MachineInst::jmp(else_bb.to_string()));
                     CompiledInst::with_instructions(asm)
                 }
                 _ => {
@@ -493,35 +488,34 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_store(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Store(dest, src) = inst {
+        if let OxInstruction::Store { ptr, val } = inst {
             let mut asm = vec![];
-            let mut instr_asm1 = self.codegen_value(*dest);
+            let mut instr_asm1 = self.codegen_value(*ptr);
             asm.append(&mut instr_asm1.asm);
-            let mut instr_asm2 = self.codegen_value(*src);
+            let mut instr_asm2 = self.codegen_value(*val);
             asm.append(&mut instr_asm2.asm);
-            let dest_result = instr_asm1.result.clone().unwrap();
-            let src_result = instr_asm2.result.unwrap();
-            let src_am = src_result.access_mode();
-            //eprintln!("Move from {:?} -> {:?}", src_result, dest_result);
-            match src_am {
+            let ptr_result = instr_asm1.result.clone().unwrap();
+            let val_result = instr_asm2.result.unwrap();
+            let val_am = val_result.access_mode();
+            match val_am {
                 AccessMode::Large(16) => {
-                    match (&src_result, &dest_result) {
-                        (Operand::Loc(Location::RbpOffset(src_offset, _sam)),
+                    match (&val_result, &ptr_result) {
+                        (Operand::Loc(Location::RbpOffset(val_offset, _sam)),
                          Operand::Loc(Location::RbpOffset(_dst_offset, dam))) => {
                             let am_full = AccessMode::Full;
-                            // Move two quad words from src to dst.
+                            // Move two quad words from val to dst.
                             let reg =
                                 Register::direct(SubRegister::reg(RCX, am_full));
-                            let src_word1 = Operand::Loc(
-                                Location::RbpOffset(*src_offset, am_full));
-                            let src_word2 = Operand::Loc(
-                                Location::RbpOffset(src_offset + 8, am_full));
-                            // check if dest result is a ptr?
+                            let val_word1 = Operand::Loc(
+                                Location::RbpOffset(*val_offset, am_full));
+                            let val_word2 = Operand::Loc(
+                                Location::RbpOffset(val_offset + 8, am_full));
+                            // check if ptr result is a ptr?
                             asm.extend(vec![
                                 // Move the first word.
-                                MachineInst::mov(dest_result.clone(),
+                                MachineInst::mov(ptr_result.clone(),
                                                  Register::direct(RAX)),
-                                MachineInst::mov(src_word1, reg),
+                                MachineInst::mov(val_word1, reg),
                                 MachineInst::mov(reg, Register::indirect(RAX))
                             ]);
                             if let AccessMode::Large(16) = dam {
@@ -529,14 +523,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                                     // Move the second word.
                                     MachineInst::add(Operand::Immediate(8, am_full),
                                                      Register::direct(RAX)),
-                                    MachineInst::mov(src_word2, reg),
+                                    MachineInst::mov(val_word2, reg),
                                     MachineInst::mov(reg, Register::indirect(RAX)),
                                 ]);
                             }
                          },
                          _ => {
-                            bug!("Invalid src-dst pair: ({:?}, {:?})",
-                                 src_result, dest_result)
+                            bug!("Invalid val-dst pair: ({:?}, {:?})",
+                                 val_result, ptr_result)
                          }
                     }
                 },
@@ -544,15 +538,15 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     unimplemented!("AccessMode::Large({})", bytes)
                 },
                 _ => {
-                    let access_mode = src_result.access_mode();
+                    let access_mode = val_result.access_mode();
                     let reg =
                         Register::direct(SubRegister::reg(RCX, access_mode));
                     asm.extend(vec![
                         MachineInst::NOP,
                         MachineInst::NOP,
                         MachineInst::NOP,
-                        MachineInst::mov(dest_result, Register::direct(RAX)),
-                        MachineInst::mov(src_result, reg),
+                        MachineInst::mov(ptr_result, Register::direct(RAX)),
+                        MachineInst::mov(val_result, reg),
                         MachineInst::mov(reg, Register::indirect(RAX)),
                     ]);
                 }
@@ -564,7 +558,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_load(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Load(ptr, _) = inst {
+        if let OxInstruction::Load { ptr, .. } = inst {
             let mut asm = vec![];
             let mut instr_asm = self.codegen_value(*ptr);
             // FIXME:
@@ -575,7 +569,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let result = self.precompiled_result(inst);
             match acc_mode {
                 AccessMode::Large(16) => {
-                    //eprintln!("load......");
                     asm.extend(vec![
                         MachineInst::mov(instr_asm.result.unwrap(),
                                          Register::direct(RAX)),
@@ -621,7 +614,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_checkoverflow(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::CheckOverflow(_, _, signed) = inst {
+        if let OxInstruction::CheckOverflow { signed, .. } = inst {
             let result = self.precompiled_result(inst);
             // Get register %dl.
             let reg = Register::direct(SubRegister::reg(RDX, AccessMode::Low8));
@@ -641,9 +634,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_cast(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Cast(cast, ty) = inst {
+        if let OxInstruction::Cast { val, ty } = inst {
             let stack_loc = self.precompiled_result(inst);
-            let mut v = self.codegen_value(*cast);
+            let mut v = self.codegen_value(*val);
             if let Some(mut op) = v.result {
                 let old_acc_mode = op.access_mode();
                 let val_size = ty.size(&self.cx.types.borrow());
@@ -710,7 +703,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     // RAX already covers 64 bits...
                     let am2 = access_mode(size - 64);
 
-                    //eprintln!("LEFTOVER2: {:?}", size - 64);
                     let rdx = Operand::Loc(Location::Reg(
                             Register::direct(SubRegister::reg(RDX, am2))));
 
@@ -738,7 +730,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_alloca(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Alloca(..) = inst {
+        if let OxInstruction::Alloca { .. }= inst {
             let result = self.precompiled_result(inst);
             CompiledInst::with_result(result)
         } else {
@@ -755,7 +747,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_extractvalue(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::ExtractValue(agg, idx) = inst {
+        if let OxInstruction::ExtractValue { agg, idx } = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             match types[agg_ty] {
@@ -856,13 +848,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_insertvalue(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::InsertValue(agg, v, idx) = inst {
+        if let OxInstruction::InsertValue { agg, elt, idx } = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             match types[agg_ty] {
                 OxType::StructType { .. } => {
                     let agg_dst = self.precompiled_result(inst);
-                    self.codegen_insertvalue_struct(agg_dst, *agg, *v, *idx)
+                    self.codegen_insertvalue_struct(agg_dst, *agg, *elt, *idx)
                 }
                 ref ty => unimplemented!("Insert into ty {:?}", ty),
             }
@@ -872,19 +864,17 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_structgep(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::StructGep(agg, idx) = inst {
+        if let OxInstruction::StructGep { ptr: agg, idx } = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             // Agg is a pointer to a struct. To get its members, we must get the
             // pointee of the pointer (the pointee is the struct itself).
             let offset = types[agg_ty.pointee_ty(&types)].offset(*idx, &types);
 
-            ////eprintln!("agg {:?} idx {:?} offset {:?}", agg_ty, idx, offset);
             assert!(offset % 8 == 0);
             let offset = offset / 8;
             let agg_val = self.codegen_value(*agg).result.unwrap();
             let stack_loc = self.precompiled_result(inst);
-            //eprintln!("Storing struct gep at {:?}", stack_loc);
             // FIXME:
             let asm = vec![
                 MachineInst::NOP,
@@ -905,7 +895,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_gep(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Gep(agg, indices, _inbounds) = inst {
+        if let OxInstruction::Gep { ptr: agg, indices, inbounds } = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             // FIXME: normally, the indices of a GEP must be constants (they need
@@ -919,7 +909,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let index_val = self.codegen_value(*idx_val);
                 asm.extend(index_val.asm);
                 cur_agg_ty = cur_agg_ty.ty_at_idx(i as u64, &types);
-                //eprintln!("{}: {:?}", i, cur_agg_ty);
                 (cur_agg_ty, index_val.result.unwrap())
 
             }).collect();
@@ -938,8 +927,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     for (ty, index_val) in indices {
                         // Find out the size of the struct:
                         let ty_size = ty.size(&types);
-                        //eprintln!("agg {:?} idx {:?} offset {:?}", ty,
-                                  //0, ty_size);
                         assert!(ty_size % 8 == 0);
                         let ty_size = ty_size as u64 / 8;
                         // %rcx initially contains the base address of the array.
@@ -967,8 +954,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     assert_eq!(indices.len(), 1);
                     let (ty, ref index_val) = indices[0];
                     let ty_size = ty.size(&types);
-                    //eprintln!("other gep {:?} idx {:?} offset {:?}", ty,
-                              //0, ty_size);
                     assert!(ty_size % 8 == 0);
                     let ty_size = ty_size as u64 / 8;
                     // %rcx initially contains the base address of the array.
@@ -1026,7 +1011,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_mul(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Mul(lhs, rhs, signed) = inst {
+        if let OxInstruction::Mul { lhs, rhs, signed } = inst {
             let mut asm = vec![];
             let mut instr_asm1 = self.codegen_value(*lhs);
             asm.append(&mut instr_asm1.asm);
@@ -1092,7 +1077,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_select(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Select(cond, then_val, else_val) = inst {
+        if let OxInstruction::Select { cond, then_val, else_val } = inst {
             match cond {
                 // FIXME: assert that the condition is either an i1 or a vector
                 // of i1.
@@ -1152,33 +1137,32 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let Some(instr_asm) = self.compiled_insts.borrow().get(&inst_v) {
             return instr_asm.clone();
         }
-        //eprintln!("instruction is {:?}", inst);
         let instr_asm = match inst {
             OxInstruction::Br(..) => self.codegen_br(inst),
             OxInstruction::Ret(..) => self.codegen_ret(inst),
-            OxInstruction::Store(..) => self.codegen_store(inst),
-            OxInstruction::Add(..) => self.codegen_add(inst),
-            OxInstruction::Sub(..) => self.codegen_sub(inst),
-            OxInstruction::Mul(..) => self.codegen_mul(inst),
-            OxInstruction::Call(..) => self.codegen_call(inst),
-            OxInstruction::Alloca(..) => self.codegen_alloca(inst),
-            OxInstruction::Icmp(..) => self.codegen_icmp(inst),
-            OxInstruction::CondBr(..) => self.codegen_condbr(inst),
-            OxInstruction::Load(..) => self.codegen_load(inst),
-            OxInstruction::CheckOverflow(..) => self.codegen_checkoverflow(inst),
-            OxInstruction::Cast(..) => self.codegen_cast(inst),
+            OxInstruction::Store { .. } => self.codegen_store(inst),
+            OxInstruction::Add { .. } => self.codegen_add(inst),
+            OxInstruction::Sub { .. } => self.codegen_sub(inst),
+            OxInstruction::Mul { .. } => self.codegen_mul(inst),
+            OxInstruction::Call { .. }=> self.codegen_call(inst),
+            OxInstruction::Alloca { .. } => self.codegen_alloca(inst),
+            OxInstruction::Icmp { .. } => self.codegen_icmp(inst),
+            OxInstruction::CondBr { .. } => self.codegen_condbr(inst),
+            OxInstruction::Load { .. } => self.codegen_load(inst),
+            OxInstruction::CheckOverflow { .. } => self.codegen_checkoverflow(inst),
+            OxInstruction::Cast { .. }=> self.codegen_cast(inst),
             OxInstruction::Unreachable => self.codegen_unreachable(inst),
-            OxInstruction::ExtractValue(..) => self.codegen_extractvalue(inst),
-            OxInstruction::InsertValue(..) => self.codegen_insertvalue(inst),
-            OxInstruction::StructGep(..) => self.codegen_structgep(inst),
+            OxInstruction::ExtractValue { .. } => self.codegen_extractvalue(inst),
+            OxInstruction::InsertValue { .. } => self.codegen_insertvalue(inst),
+            OxInstruction::StructGep { .. } => self.codegen_structgep(inst),
             OxInstruction::Not(..) => self.codegen_not(inst),
-            OxInstruction::And(..) => self.codegen_and(inst),
+            OxInstruction::And { .. } => self.codegen_and(inst),
             OxInstruction::Invoke {..} => self.codegen_invoke(inst),
             OxInstruction::Resume(..)=> self.codegen_resume(inst),
             OxInstruction::LandingPad { .. } => self.codegen_landingpad(inst),
-            OxInstruction::Select(..)=> self.codegen_select(inst),
+            OxInstruction::Select { .. } => self.codegen_select(inst),
             OxInstruction::Switch { .. } => self.codegen_switch(inst),
-            OxInstruction::Gep(..) => self.codegen_gep(inst),
+            OxInstruction::Gep { .. } => self.codegen_gep(inst),
         };
         let compiled_inst = if let Some(ref result) = instr_asm.result {
             CompiledInst::new(instr_asm.asm.clone(), result.clone())
@@ -1269,25 +1253,22 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
 
         for bb in &f.basic_blocks {
-            //eprintln!("compiling bb: {:?}", bb);
             for inst in &bb.instrs {
                 let instr_asm = match inst {
-                    OxInstruction::Add(..) |
-                    OxInstruction::Sub(..) |
-                    OxInstruction::Mul(..) |
-                    OxInstruction::And(..) |
-                    OxInstruction::Load(..) => {
+                    OxInstruction::Add { .. } |
+                    OxInstruction::Sub { .. } |
+                    OxInstruction::Mul { .. } |
+                    OxInstruction::And { .. } |
+                    OxInstruction::Load { .. } => {
                         let inst_size =
                             inst.val_ty(self.cx).size(&self.cx.types.borrow());
 
                         let acc_mode = access_mode(inst_size as u64);
                         size += (inst_size / 8) as isize;
                         let result = Location::RbpOffset(-size, acc_mode);
-                        //eprintln!("Load to rbp {:?} has acc mode {:?}", size,
-                                  //acc_mode);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    OxInstruction::Call(_, _) | OxInstruction::Invoke { .. } => {
+                    OxInstruction::Call { .. } | OxInstruction::Invoke { .. } => {
                         let ret_ty = inst.val_ty(self.cx);
                         // If the function doesn't return anything, carry on.
                         if let OxType::Void = self.cx.types.borrow()[ret_ty] {
@@ -1310,15 +1291,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         };
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    OxInstruction::Alloca(_, ty, _) => {
+                    OxInstruction::Alloca { ty, .. } => {
                         let types = &self.cx.types.borrow();
                         let inst_size =
                             ty.pointee_ty(types).size(types);
-                        //let acc_mode = access_mode(inst_size as u64);
                         let acc_mode = access_mode(inst_size);
                         size += (inst_size / 8) as isize;
                         let result = Location::RbpOffset(-size, acc_mode);
-                        //eprintln!("Value at {:?} has size {:?}", result, inst_size);
                         size += 8;
                         let result_addr = Location::RbpOffset(-size, AccessMode::Full);
                         let asm = vec![
@@ -1330,7 +1309,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         param_movs.extend(asm.clone());
                         CompiledInst::new(asm.clone(), Operand::from(result_addr))
                     }
-                    OxInstruction::ExtractValue(agg, idx) => {
+                    OxInstruction::ExtractValue { agg, idx } => {
                         let types = self.cx.types.borrow();
                         let agg_ty = self.cx.val_ty(*agg);
                         let elt_size = match types[agg_ty] {
@@ -1344,7 +1323,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let result = Location::RbpOffset(-size, acc_mode);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    OxInstruction::StructGep(..) | OxInstruction::Gep(..) => {
+                    OxInstruction::StructGep { .. }| OxInstruction::Gep { .. } => {
                         // The size of a pointer
                         size += 8;
                         let result = Location::RbpOffset(-size, AccessMode::Full);
@@ -1358,7 +1337,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let result = Location::RbpOffset(-size, AccessMode::Full);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    OxInstruction::InsertValue(agg, _, _) => {
+                    OxInstruction::InsertValue { agg, .. } => {
                         let agg_size = self.cx.val_ty(*agg).
                             size(&self.cx.types.borrow()) as isize;
                         size += agg_size / 8;
@@ -1366,9 +1345,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             Location::RbpOffset(-size, AccessMode::Full);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    OxInstruction::Select(_, v1, v2) => {
-                        let ty = self.cx.val_ty(*v1);
-                        assert_eq!(ty, self.cx.val_ty(*v2));
+                    OxInstruction::Select { then_val, else_val, .. }=> {
+                        let ty = self.cx.val_ty(*then_val);
+                        assert_eq!(ty, self.cx.val_ty(*else_val));
                         let val_size = ty.size(&self.cx.types.borrow()) as isize;
                         let acc_mode = access_mode(val_size as u64);
                         size += val_size / 8;
@@ -1384,7 +1363,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             Location::RbpOffset(-size, acc_mode);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    OxInstruction::Icmp(..) | OxInstruction::CheckOverflow(..) => {
+                    OxInstruction::Icmp { .. } |
+                    OxInstruction::CheckOverflow { .. } => {
                         // allocate a bool:
                         let inst_size = 8;
                         let acc_mode = access_mode(inst_size);
@@ -1393,7 +1373,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             Location::RbpOffset(-size, acc_mode);
                         CompiledInst::with_result(Operand::from(result))
                     }
-                    OxInstruction::Cast(_, ty) => {
+                    OxInstruction::Cast { ty, .. } => {
                         let inst_size = ty.size(&self.cx.types.borrow());
                         let acc_mode = access_mode(inst_size);
                         size += inst_size as isize / 8;
@@ -1433,7 +1413,6 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             Value::ConstGep { ptr_idx, offset } if offset == 0 => {
                 // FIXME: handle non-zero offsets
                 let name = self.cx.const_structs.borrow()[ptr_idx].name.clone();
-                eprintln!("Name of gep {} is {}", ptr_idx, name);
                 name
             }
             _ => unimplemented!("value of {:?}", v),
@@ -1524,16 +1503,13 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         let mut asm = vec![
             MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
         for global in self.cx.globals.borrow().iter().rev() {
-            eprintln!("Compiling global {:?} {:?}", global.name, global);
             asm.push(MachineInst::Label(global.name.clone()));
             match global.initializer {
                 Some(v) => {
                     let codegen = {
                         !self.codegenned_consts.borrow().contains(&v)
                     };
-                    eprintln!("codegen {:?} is {}", v, codegen);
                     if codegen {
-                        eprintln!("initializer{:?}", v);
                         asm.extend(self.codegen_const_global(v));
                         self.codegenned_consts.borrow_mut().push(v);
                     }
@@ -1546,9 +1522,7 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             let codegen = {
                 !self.codegenned_consts.borrow().contains(&v)
             };
-            eprintln!("codegen {:?} is {}", v, codegen);
             if codegen {
-                eprintln!("Compiling const struct {:?}", v);
                 asm.extend(self.codegen_const_global(v));
                 self.codegenned_consts.borrow_mut().push(v);
             }
@@ -1582,33 +1556,6 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             }
         }
         asm
-    }
-
-    pub fn pprint(&self) {
-        for (i, c) in self.cx.const_structs.borrow().iter().enumerate() {
-            eprintln!("Const structs {}: {}, {:?}", i, c.name, c.components);
-        }
-
-        for (i, c) in self.cx.u_consts.borrow().iter().enumerate() {
-            eprintln!("uconst {}: {}", i, c.value);
-        }
-
-        for (i, c) in self.cx.const_casts.borrow().iter().enumerate() {
-            eprintln!("cast {}: {:?}", i, c);
-        }
-
-        for (i, c) in self.cx.types.borrow().iter().enumerate() {
-            eprintln!("Type {}: {:?}", i, c);
-        }
-        for (i, f) in self.cx.module.borrow().functions.iter().enumerate() {
-            eprintln!("fn[{}] {} {:?}", i, f.name, f.ironox_type);
-            for bb in &f.basic_blocks {
-                eprintln!("\tbb: {}", bb.label);
-                for (i, inst) in bb.instrs.iter().enumerate() {
-                    eprintln!("\t\t{}: {:?}", i, inst);
-                }
-            }
-        }
     }
 
     /// Consume the printer, and return the codegen result.
