@@ -45,7 +45,8 @@ fn codegen_ironox_module<'ll, 'tcx>(
             mono_item.define::<Builder>(&cx);
         }
         maybe_create_entry_wrapper::<Builder>(&cx);
-        AsmPrinter::new(cx).codegen()
+        let asm = AsmPrinter::new(&cx).codegen();
+        (cx.consume_stats().into_inner(), asm)
     };
     ironox_module.asm = Some(asm);
     (stats, ModuleCodegen {

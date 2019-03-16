@@ -15,7 +15,7 @@ pub(crate) fn codegen<'ll, 'tcx: 'll>(
     tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     module: &'ll mut ModuleIronOx,
     kind: AllocatorKind) {
-    let (_, asm) = {
+    let asm = {
         let cx = CodegenCx::new(tcx, None, module);
         let target_usize = match &tcx.sess.target.target.target_pointer_width[..] {
             "64" => cx.type_i64(),
@@ -62,7 +62,7 @@ pub(crate) fn codegen<'ll, 'tcx: 'll>(
                 builder.ret_void()
             }
         }
-        AsmPrinter::new(cx).codegen()
+        AsmPrinter::new(&cx).codegen()
     };
     module.asm = Some(asm);
 }
