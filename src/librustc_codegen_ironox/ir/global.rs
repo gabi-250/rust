@@ -2,16 +2,16 @@ use ir::type_::Type;
 use ir::value::Value;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Global {
+pub struct OxGlobal {
     pub ty: Type,
     pub name: String,
     pub constant: bool,
     pub initializer: Option<Value>,
 }
 
-impl Global {
-    pub fn new(ty: Type, name: String) -> Global {
-        Global { ty, name, constant: false, initializer: None }
+impl OxGlobal {
+    pub fn new(ty: Type, name: String) -> OxGlobal {
+        OxGlobal { ty, name, constant: false, initializer: None }
     }
 
     pub fn set_initializer(&mut self, value: Value) {

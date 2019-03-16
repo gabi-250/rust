@@ -8,7 +8,7 @@ use rustc_codegen_ssa::traits::{BaseTypeMethods, DerivedTypeMethods};
 
 /// An IronOx instruction.
 #[derive(PartialEq, Clone, Debug, Eq, Hash)]
-pub enum Instruction {
+pub enum OxInstruction {
     /// Store (ptr, value).
     Store(Value, Value),
     /// Load the value of a pointer.
@@ -80,26 +80,26 @@ impl ConstCast {
     }
 }
 
-impl Instruction {
+impl OxInstruction {
     fn load_ty(val: Value, cx: &CodegenCx) -> Type {
         if let Value::Instruction(fn_idx, bb_idx, inst_idx) = val {
             let inst = &cx.module.borrow().functions[fn_idx].
                 basic_blocks[bb_idx].instrs[inst_idx];
             match inst {
-                Instruction::Alloca(_, ty, _) |
-                Instruction::Cast(_, ty) => ty.pointee_ty(&cx.types.borrow()),
-                Instruction::StructGep(_, _) => {
+                OxInstruction::Alloca(_, ty, _) |
+                OxInstruction::Cast(_, ty) => ty.pointee_ty(&cx.types.borrow()),
+                OxInstruction::StructGep(_, _) => {
                     let ty = inst.val_ty(cx);
                     match cx.types.borrow()[ty] {
                         OxType::PtrTo { pointee } => pointee,
                         _ => unimplemented!("Load from non-pointer ty {:?}", ty),
                     }
                 },
-                Instruction::Load(ptr, _) => {
-                    let ty = Instruction::load_ty(*ptr, cx);
+                OxInstruction::Load(ptr, _) => {
+                    let ty = OxInstruction::load_ty(*ptr, cx);
                     ty.pointee_ty(&cx.types.borrow())
                 },
-                Instruction::Call(llfn, ..) => {
+                OxInstruction::Call(llfn, ..) => {
                     if let Value::Function(idx) = llfn {
                         let fn_ty = cx.module.borrow().functions[*idx].ret;
                         fn_ty.pointee_ty(&cx.types.borrow())
@@ -107,7 +107,7 @@ impl Instruction {
                         unimplemented!("Call to {:?}", llfn);
                     }
                 },
-                Instruction::Gep(..) => {
+                OxInstruction::Gep(..) => {
                     let ty = cx.val_ty(val);
                     ty.pointee_ty(&cx.types.borrow())
                 }
@@ -128,17 +128,17 @@ impl Instruction {
     /// instruction.
     pub fn val_ty(&self, cx: &CodegenCx) -> Type {
         match *self {
-            Instruction::Alloca(_, ty, _) => ty,
-            Instruction::Cast(_, ty) => ty,
-            Instruction::Ret(Some(v)) => cx.val_ty(v),
-            Instruction::Add(v1, v2) | Instruction::Sub(v1, v2) |
-            Instruction::Mul(v1, v2, _) | Instruction::And(v1, v2) => {
+            OxInstruction::Alloca(_, ty, _) => ty,
+            OxInstruction::Cast(_, ty) => ty,
+            OxInstruction::Ret(Some(v)) => cx.val_ty(v),
+            OxInstruction::Add(v1, v2) | OxInstruction::Sub(v1, v2) |
+            OxInstruction::Mul(v1, v2, _) | OxInstruction::And(v1, v2) => {
                 let ty1 = cx.val_ty(v1);
                 let ty2 = cx.val_ty(v2);
                 assert_eq!(ty1, ty2);
                 ty1
             },
-            Instruction::Call(value, _) => {
+            OxInstruction::Call(value, _) => {
                 let fn_ty = cx.val_ty(value);
                 match cx.types.borrow()[fn_ty] {
                     OxType::FnType { ref ret, .. } => *ret,
@@ -154,8 +154,8 @@ impl Instruction {
                     }
                 }
             }
-            Instruction::Load(ptr, _) => Instruction::load_ty(ptr, cx),
-            Instruction::StructGep(ptr, idx) => {
+            OxInstruction::Load(ptr, _) => OxInstruction::load_ty(ptr, cx),
+            OxInstruction::StructGep(ptr, idx) => {
                 let member_ty = {
                     let types = cx.types.borrow();
                     let struct_ptr = cx.val_ty(ptr);
@@ -173,14 +173,14 @@ impl Instruction {
                 };
                 cx.type_ptr_to(member_ty)
             },
-            Instruction::ExtractValue(ptr, idx) => {
+            OxInstruction::ExtractValue(ptr, idx) => {
                 let agg_ty = cx.val_ty(ptr);
                 agg_ty.ty_at_idx(idx, &cx.types.borrow())
             },
             // FIXME: is that right?
-            Instruction::LandingPad { ty, .. } => ty,
+            OxInstruction::LandingPad { ty, .. } => ty,
             // FIXME: is that right?
-            Instruction::Invoke { callee, .. } => {
+            OxInstruction::Invoke { callee, .. } => {
                 match cx.types.borrow()[cx.val_ty(callee)] {
                     OxType::FnType { ref ret, .. } => *ret,
                     OxType::PtrTo { ref pointee } => {
@@ -195,15 +195,15 @@ impl Instruction {
                     }
                 }
             },
-            Instruction::Not(v) => cx.val_ty(v),
-            Instruction::InsertValue(agg, ..) => cx.val_ty(agg),
-            Instruction::Select(_, v1, v2) => {
+            OxInstruction::Not(v) => cx.val_ty(v),
+            OxInstruction::InsertValue(agg, ..) => cx.val_ty(agg),
+            OxInstruction::Select(_, v1, v2) => {
                 let ty = cx.val_ty(v1);
                 assert_eq!(ty, cx.val_ty(v2));
                 ty
             },
-            Instruction::Icmp(..) => cx.type_bool(),
-            Instruction::Gep(agg, ref indices, _inbounds) => {
+            OxInstruction::Icmp(..) => cx.type_bool(),
+            OxInstruction::Gep(agg, ref indices, _inbounds) => {
                 let ty = cx.val_ty(agg);
                 let ty = ty.pointee_ty(&cx.types.borrow());
                 let arr_ty = match cx.types.borrow()[ty] {
@@ -230,7 +230,7 @@ impl Instruction {
 
     pub fn is_branch(&self) -> bool {
         match *self {
-            Instruction::Br(..) | Instruction::CondBr(..) => true,
+            OxInstruction::Br(..) | OxInstruction::CondBr(..) => true,
             _ => false,
         }
     }
