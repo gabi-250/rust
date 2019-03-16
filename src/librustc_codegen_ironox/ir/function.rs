@@ -1,7 +1,7 @@
 use context::CodegenCx;
 use ir::type_::{OxType, Type};
 use ir::value::Value;
-use ir::instruction::Instruction;
+use ir::instruction::OxInstruction;
 use super::basic_block::{BasicBlock, OxBasicBlock};
 
 use rustc::mir::mono::Visibility;
@@ -58,7 +58,7 @@ impl OxFunction {
         &mut self,
         bb_idx: usize,
         inst_idx: usize,
-        inst: Instruction) {
+        inst: OxInstruction) {
         assert!(
             bb_idx < self.basic_blocks.len()
                 && inst_idx <= self.basic_blocks[bb_idx].instrs.len(),

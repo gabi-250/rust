@@ -22,13 +22,14 @@ use std::sync::Arc;
 use syntax::ast::Mutability;
 use syntax::symbol::LocalInternedString;
 
-use bytes::ConstBytes;
 use consts::{self};
-use const_cstr::ConstCstr;
 use debuginfo::DIScope;
-use global::Global;
+
 use ir::basic_block::BasicBlock;
-use ir::constant::{UnsignedConst, SignedConst};
+use ir::bytes::OxConstBytes;
+use ir::constant::{OxUnsignedConst, OxSignedConst};
+use ir::const_cstr::OxConstStr;
+use ir::global::OxGlobal;
 use ir::instruction::ConstCast;
 use ir::struct_::OxStruct;
 use ir::type_::{OxType, Type, IxLlcx};
@@ -65,23 +66,23 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     /// The index of an `OxType` in `types`.
     pub type_cache: RefCell<FxHashMap<OxType, Type>>,
     /// The unsigned constants defined in this context.
-    pub u_consts: RefCell<Vec<UnsignedConst>>,
+    pub u_consts: RefCell<Vec<OxUnsignedConst>>,
     /// The signed constants defined in this context.
-    pub i_consts: RefCell<Vec<SignedConst>>,
-    pub globals: RefCell<Vec<Global>>,
+    pub i_consts: RefCell<Vec<OxSignedConst>>,
+    pub globals: RefCell<Vec<OxGlobal>>,
     pub globals_cache: RefCell<FxHashMap<String, usize>>,
     /// The constant globals (which have a static address).
     pub const_structs: RefCell<Vec<OxStruct>>,
     pub const_structs_cache: RefCell<FxHashMap<(Vec<Value>, bool), Value>>,
     pub const_globals_cache: RefCell<FxHashMap<Value, usize>>,
     pub const_cstr_cache: RefCell<FxHashMap<LocalInternedString, Value>>,
-    pub const_cstrs: RefCell<Vec<ConstCstr>>,
+    pub const_cstrs: RefCell<Vec<OxConstStr>>,
     pub const_casts: RefCell<Vec<ConstCast>>,
     pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
     pub ty_map: RefCell<FxHashMap<Value, Type>>,
     pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, Type>>,
     pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), Type>>,
-    pub bytes: RefCell<Vec<ConstBytes>>,
+    pub bytes: RefCell<Vec<OxConstBytes>>,
     sym_count: Cell<usize>,
     eh_personality: Cell<Option<Value>>,
 }
@@ -131,7 +132,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
         let idx = const_cstrs.len();
         // A C string is a char*.
         let ty = self.type_ptr_to(self.type_i8());
-        const_cstrs.push(ConstCstr::new(name.to_string(),
+        const_cstrs.push(OxConstStr::new(name.to_string(),
                                         ty,
                                         c_str,
                                         len,
@@ -296,7 +297,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 impl CodegenCx<'ll, 'tcx> {
     /// Return a signed constant which has the specified type, and value.
     fn const_signed(&self, ty: Type, value: i128) -> Value {
-        let iconst = SignedConst {
+        let iconst = OxSignedConst {
             ty,
             value,
         };
@@ -307,7 +308,7 @@ impl CodegenCx<'ll, 'tcx> {
 
     /// Return an unsigned constant which has the specified type, and value.
     fn const_unsigned(&self, ty: Type, value: u128) -> Value {
-        let uconst = UnsignedConst {
+        let uconst = OxUnsignedConst {
             ty,
             value,
         };
@@ -501,7 +502,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn const_bytes(&self, bytes: &[u8]) -> Value {
         let mut c_bytes = self.bytes.borrow_mut();
         let name = self.get_sym_name("const_bytes");
-        c_bytes.push(ConstBytes::new(name, bytes));
+        c_bytes.push(OxConstBytes::new(name, bytes));
         Value::ConstBytes(c_bytes.len() - 1)
     }
 

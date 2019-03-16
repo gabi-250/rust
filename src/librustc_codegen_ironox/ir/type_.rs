@@ -242,7 +242,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn type_i128(&self) -> Type {
-        unimplemented!("type_i128");
+        self.add_type(OxType::Scalar(ScalarType::Ix(128)))
     }
 
     fn type_ix(&self, num_bits: u64) -> Type {

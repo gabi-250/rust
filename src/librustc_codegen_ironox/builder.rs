@@ -15,7 +15,7 @@ use syntax;
 
 use context::CodegenCx;
 use ir::basic_block::BasicBlock;
-use ir::instruction::{CompOp, Instruction};
+use ir::instruction::{CompOp, OxInstruction};
 use ir::type_::Type;
 use ir::value::Value;
 use type_of::LayoutIronOxExt;
@@ -96,7 +96,7 @@ impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 
 impl Builder<'a, 'll, 'tcx> {
     /// Add the instruction at the current `BuilderPosition`.
-    fn emit_instr(&mut self, inst: Instruction) -> Value {
+    fn emit_instr(&mut self, inst: OxInstruction) -> Value {
         let mut module = self.cx.module.borrow_mut();
         module.get_function(self.build_pos.fn_idx)
             .insert_inst(self.build_pos.bb_idx, self.build_pos.inst_idx, inst);
@@ -132,23 +132,23 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             Uint(U16) => (self.type_i16(), false),
             Uint(U32) => (self.type_i32(), false),
             Uint(U64) => (self.type_i64(), false),
-            Uint(U128) => unimplemented!("u128"),
+            Uint(U128) => (self.type_i128(), false),
 
             Int(I8) => (self.type_i8(), true),
             Int(I16) => (self.type_i16(), true),
             Int(I32) => (self.type_i32(), true),
             Int(I64) => (self.type_i64(), true),
-            Int(I128) => unimplemented!("I128"),
+            Int(I128) => (self.type_i128(), true),
 
             _ => unreachable!()
         };
         let inst = match oop {
-            OverflowOp::Add => Instruction::Add(lhs, rhs),
-            OverflowOp::Sub => Instruction::Sub(lhs, rhs),
-            OverflowOp::Mul => Instruction::Mul(lhs, rhs, signed),
+            OverflowOp::Add => OxInstruction::Add { lhs, rhs },
+            OverflowOp::Sub => OxInstruction::Sub { lhs, rhs },
+            OverflowOp::Mul => OxInstruction::Mul { lhs, rhs, signed },
         };
         let inst = self.emit_instr(inst);
-        (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty, signed)))
+        (inst, self.emit_instr(OxInstruction::CheckOverflow { inst, ty, signed }))
     }
 
     fn new_block<'b>(
@@ -221,19 +221,19 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn ret_void(&mut self) {
-        let _ = self.emit_instr(Instruction::Ret(None));
+        let _ = self.emit_instr(OxInstruction::Ret(None));
     }
 
     fn ret(&mut self, v: Value) {
-        let _ = self.emit_instr(Instruction::Ret(Some(v)));
+        let _ = self.emit_instr(OxInstruction::Ret(Some(v)));
     }
 
     fn br(&mut self, dest: BasicBlock) {
         let label = {
             let module = self.cx.module.borrow();
-            module.functions[dest.0].basic_blocks[dest.1].label.clone()
-        };
-        let _ = self.emit_instr(Instruction::Br(label));
+            label = module.functions[dest.0].basic_blocks[dest.1].label.clone();
+        }
+        let _ = self.emit_instr(OxInstruction::Br(label));
     }
 
     fn cond_br(
@@ -242,13 +242,13 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         then_llbb: BasicBlock,
         else_llbb: BasicBlock,
     ) {
-        let (true_label, false_label) = {
+        let (then_bb, else_bb) = {
             let module = self.cx.module.borrow();
             (module.functions[then_llbb.0].basic_blocks[then_llbb.1].label.clone(),
              module.functions[else_llbb.0].basic_blocks[else_llbb.1].label.clone())
         };
         // FIXME: pass basic blocks not labels
-        self.emit_instr(Instruction::CondBr(cond, true_label, false_label));
+        self.emit_instr(OxInstruction::CondBr { cond, then_bb, else_bb });
     }
 
     fn switch(
@@ -257,7 +257,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         else_llbb: BasicBlock,
         num_cases: usize,
     )-> Value {
-        self.emit_instr(Instruction::Switch {
+        self.emit_instr(OxInstruction::Switch {
             value: v,
             default: else_llbb,
             cases: Vec::with_capacity(num_cases)
@@ -272,7 +272,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         catch: BasicBlock,
         _funclet: Option<&Self::Funclet>,
     )-> Value {
-        let invoke = self.emit_instr(Instruction::Invoke {
+        let invoke = self.emit_instr(OxInstruction::Invoke {
             callee: llfn, args: args.to_vec(), then, catch
         });
         // Branch to 'then' if the invoke returns
@@ -281,12 +281,12 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             let module = self.cx.module.borrow();
             label = module.functions[then.0].basic_blocks[then.1].label.clone();
         }
-        let _ = self.emit_instr(Instruction::Br(label));
+        let _ = self.emit_instr(OxInstruction::Br(label));
         invoke
     }
 
     fn unreachable(&mut self) {
-        self.emit_instr(Instruction::Unreachable);
+        self.emit_instr(OxInstruction::Unreachable);
     }
 
     fn add(
@@ -294,7 +294,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        self.emit_instr(Instruction::Add(lhs, rhs))
+        self.emit_instr(OxInstruction::Add { lhs, rhs })
     }
 
     fn fadd(
@@ -318,7 +318,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        self.emit_instr(Instruction::Sub(lhs, rhs))
+        self.emit_instr(OxInstruction::Sub { lhs, rhs })
     }
 
     fn fsub(
@@ -343,7 +343,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         rhs: Value
     )-> Value {
         // Unsigned mul.
-        self.emit_instr(Instruction::Mul(lhs, rhs, false))
+        self.emit_instr(OxInstruction::Mul { lhs, rhs, signed: false })
     }
 
     fn fmul(
@@ -471,7 +471,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        self.emit_instr(Instruction::And(lhs, rhs))
+        self.emit_instr(OxInstruction::And { lhs, rhs })
     }
 
     fn or(
@@ -508,7 +508,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         v: Value
     )-> Value {
-        self.emit_instr(Instruction::Not(v))
+        self.emit_instr(OxInstruction::Not(v))
     }
 
     fn alloca(
@@ -518,7 +518,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align
     )-> Value {
         let ty = self.type_ptr_to(ty);
-        self.emit_instr(Instruction::Alloca(name.to_string(), ty, align))
+        self.emit_instr(OxInstruction::Alloca { name: name.to_string(), ty, align })
     }
 
     fn dynamic_alloca(
@@ -545,7 +545,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         align: Align
     )-> Value {
-        self.emit_instr(Instruction::Load(ptr, align))
+        self.emit_instr(OxInstruction::Load { ptr, align })
     }
 
     fn volatile_load(
@@ -603,7 +603,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         _flags: MemFlags,
     )-> Value {
         // FIXME: ignore the flags for now
-        self.emit_instr(Instruction::Store(ptr, val))
+        self.emit_instr(OxInstruction::Store { ptr, val })
     }
 
     fn gep(
@@ -611,7 +611,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         indices: &[Value]
     )-> Value {
-        self.emit_instr(Instruction::Gep(ptr, indices.to_vec(), false))
+        self.emit_instr(
+            OxInstruction::Gep { ptr, indices: indices.to_vec(), inbounds: false })
     }
 
     fn inbounds_gep(
@@ -619,7 +620,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         indices: &[Value]
     )-> Value {
-        self.emit_instr(Instruction::Gep(ptr, indices.to_vec(), true))
+        self.emit_instr(
+            OxInstruction::Gep { ptr, indices: indices.to_vec(), inbounds: true })
     }
 
     fn struct_gep(
@@ -627,7 +629,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         idx: u64
     )-> Value {
-        self.emit_instr(Instruction::StructGep(ptr, idx))
+        self.emit_instr(OxInstruction::StructGep { ptr, idx })
     }
 
     fn trunc(
@@ -635,7 +637,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        self.emit_instr(Instruction::Cast(val, dest_ty))
+        self.emit_instr(OxInstruction::Cast { val, ty: dest_ty })
     }
 
     fn sext(
@@ -707,7 +709,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        self.emit_instr(Instruction::Cast(val, dest_ty))
+        self.emit_instr(OxInstruction::Cast { val, ty: dest_ty })
     }
 
     fn bitcast(
@@ -715,7 +717,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        self.emit_instr(Instruction::Cast(val, dest_ty))
+        self.emit_instr(OxInstruction::Cast { val, ty: dest_ty })
     }
 
     fn intcast(
@@ -724,7 +726,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         dest_ty: Type,
         _is_signed: bool
     )-> Value {
-        self.emit_instr(Instruction::Cast(val, dest_ty))
+        self.emit_instr(OxInstruction::Cast { val, ty: dest_ty })
     }
 
     fn pointercast(
@@ -732,7 +734,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        self.emit_instr(Instruction::Cast(val, dest_ty))
+        self.emit_instr(OxInstruction::Cast { val, ty: dest_ty })
     }
 
     fn icmp(
@@ -752,7 +754,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             IntPredicate::IntULE => CompOp::Ule,
             IntPredicate::IntSLE => CompOp::Sle,
         };
-        self.emit_instr(Instruction::Icmp(lhs, rhs, op))
+        self.emit_instr(OxInstruction::Icmp { lhs, rhs, op })
     }
 
     fn fcmp(
@@ -814,7 +816,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         then_val: Value,
         else_val: Value,
     )-> Value {
-        self.emit_instr(Instruction::Select(cond, then_val, else_val))
+        self.emit_instr(OxInstruction::Select { cond, then_val, else_val })
     }
 
     fn va_arg(
@@ -959,7 +961,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         idx: u64
     )-> Value {
         // Extract the value at position `idx` in aggregate `agg_val`.
-        self.emit_instr(Instruction::ExtractValue(agg_val, idx))
+        self.emit_instr(OxInstruction::ExtractValue { agg: agg_val, idx })
     }
 
     fn insert_value(
@@ -969,7 +971,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         idx: u64
     )-> Value {
         // Insert `elt` into aggregate`agg_val` at `idx`.
-        self.emit_instr(Instruction::InsertValue(agg_val, elt, idx))
+        self.emit_instr(OxInstruction::InsertValue { agg: agg_val, elt, idx })
     }
 
     fn landing_pad(
@@ -978,7 +980,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         pers_fn: Value,
         num_clauses: usize
     )-> Value {
-        self.emit_instr(Instruction::LandingPad {
+        self.emit_instr(OxInstruction::LandingPad {
             ty,
             pers_fn,
             num_clauses,
@@ -1003,10 +1005,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
                 let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
                     basic_blocks[bb_idx].instrs[idx];
                 match inst {
-                    Instruction::LandingPad{ ref mut cleanup, .. } => {
+                    OxInstruction::LandingPad{ ref mut cleanup, .. } => {
                         *cleanup = true;
                     },
-                    _ => bug!("Expected Instruction::LandingPad, found {:?}", inst),
+                    _ => bug!("Expected OxInstruction::LandingPad, found {:?}", inst),
                 }
             },
             _ => bug!("Expected Value::Instruction, found {:?}", landing_pad),
@@ -1017,7 +1019,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         &mut self,
         exn: Value
     )-> Value {
-        self.emit_instr(Instruction::Resume(exn))
+        self.emit_instr(OxInstruction::Resume(exn))
     }
 
     fn cleanup_pad(
@@ -1114,10 +1116,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
                 let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
                     basic_blocks[bb_idx].instrs[idx];
                 match inst {
-                    Instruction::Switch { ref mut cases, .. } => {
+                    OxInstruction::Switch { ref mut cases, .. } => {
                         cases.push((on_val, dest));
                     },
-                    _ => bug!("Expected Instruction::Switch, found {:?}", inst),
+                    _ => bug!("Expected OxInstruction::Switch, found {:?}", inst),
                 }
             },
             _ => bug!("Expected Value::Instruction, found {:?}", s)
@@ -1173,7 +1175,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         if funclet.is_some() {
             unimplemented!("call funclet: {:?}", funclet);
         }
-        self.emit_instr(Instruction::Call(llfn, args.to_vec()))
+        self.emit_instr(OxInstruction::Call { callee: llfn, args: args.to_vec() })
     }
 
     fn zext(
@@ -1181,7 +1183,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        self.emit_instr(Instruction::Cast(val, dest_ty))
+        self.emit_instr(OxInstruction::Cast { val, ty: dest_ty })
     }
 
     unsafe fn delete_basic_block(&mut self, _bb: BasicBlock) {
