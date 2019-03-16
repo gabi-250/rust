@@ -59,8 +59,11 @@ mod back {
 
 mod ir {
     pub mod basic_block;
+    pub mod bytes;
     pub mod constant;
+    pub mod const_cstr;
     pub mod function;
+    pub mod global;
     pub mod instruction;
     pub mod struct_;
     pub mod type_;
@@ -72,13 +75,10 @@ mod allocator;
 mod asm;
 mod base;
 mod builder;
-mod bytes;
 mod consts;
-mod const_cstr;
 mod context;
 mod debuginfo;
 mod declare;
-mod global;
 mod intrinsic;
 mod type_of;
 mod metadata;
