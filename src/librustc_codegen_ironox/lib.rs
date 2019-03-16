@@ -91,6 +91,7 @@ mod x86_64 {
 }
 
 use context::CodegenCx;
+use ir::basic_block::BasicBlock;
 use ir::type_::Type;
 use ir::value::Value;
 use ir::function::OxFunction;
@@ -175,6 +176,10 @@ impl ModuleIronOx {
             functions: Default::default(),
             asm: None,
         }
+    }
+
+    pub fn bb_label(&self, bb: BasicBlock) -> String {
+        self.functions[bb.0].basic_blocks[bb.1].label.to_string()
     }
 
     /// Get the function at index `fn_idx`.

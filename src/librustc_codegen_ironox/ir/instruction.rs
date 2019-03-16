@@ -13,10 +13,10 @@ pub enum OxInstruction {
     Store { ptr: Value, val: Value },
     /// Return the value `ptr` points to.
     Load { ptr: Value, align: Align },
-    /// An unconditional branch to a label.
-    Br(String),
+    /// An unconditional branch to a basic block.
+    Br(BasicBlock),
     /// Branch to `then_bb` if `cond` is true, otherwise branch to `else_bb`.
-    CondBr { cond: Value, then_bb: String, else_bb: String },
+    CondBr { cond: Value, then_bb: BasicBlock, else_bb: BasicBlock },
     /// If `cond` is true, return `then_val` else return `else_val`.
     Select { cond: Value, then_val: Value, else_val: Value },
     /// Return from the current function.

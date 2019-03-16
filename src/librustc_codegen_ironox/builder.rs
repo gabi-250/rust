@@ -229,12 +229,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        let label;
-        {
-            let module = self.cx.module.borrow();
-            label = module.functions[dest.0].basic_blocks[dest.1].label.clone();
-        }
-        let _ = self.emit_instr(OxInstruction::Br(label));
+        let _ = self.emit_instr(OxInstruction::Br(dest));
     }
 
     fn cond_br(
@@ -243,13 +238,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         then_llbb: BasicBlock,
         else_llbb: BasicBlock,
     ) {
-        let (then_bb, else_bb) = {
-            let module = self.cx.module.borrow();
-            (module.functions[then_llbb.0].basic_blocks[then_llbb.1].label.clone(),
-             module.functions[else_llbb.0].basic_blocks[else_llbb.1].label.clone())
-        };
-        // FIXME: pass basic blocks not labels
-        self.emit_instr(OxInstruction::CondBr { cond, then_bb, else_bb });
+        self.emit_instr(
+            OxInstruction::CondBr { cond, then_bb: then_llbb, else_bb: else_llbb });
     }
 
     fn switch(
@@ -277,12 +267,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             callee: llfn, args: args.to_vec(), then, catch
         });
         // Branch to 'then' if the invoke returns
-        let label;
-        {
-            let module = self.cx.module.borrow();
-            label = module.functions[then.0].basic_blocks[then.1].label.clone();
-        }
-        let _ = self.emit_instr(OxInstruction::Br(label));
+        let _ = self.emit_instr(OxInstruction::Br(then));
         invoke
     }
 
