@@ -92,7 +92,7 @@ impl ConstCast {
 }
 
 impl OxInstruction {
-    fn load_ty(val: Value, cx: &CodegenCx) -> Type {
+    fn load_ty(cx: &CodegenCx, val: Value) -> Type {
         if let Value::Instruction(fn_idx, bb_idx, inst_idx) = val {
             let inst = &cx.module.borrow().functions[fn_idx].
                 basic_blocks[bb_idx].instrs[inst_idx];
@@ -107,7 +107,7 @@ impl OxInstruction {
                     }
                 },
                 OxInstruction::Load { ptr, .. } => {
-                    let ty = OxInstruction::load_ty(*ptr, cx);
+                    let ty = OxInstruction::load_ty(cx, *ptr);
                     ty.pointee_ty(&cx.types.borrow())
                 },
                 OxInstruction::Call { callee, .. } => {
@@ -166,7 +166,7 @@ impl OxInstruction {
                     }
                 }
             }
-            OxInstruction::Load { ptr, .. } => OxInstruction::load_ty(ptr, cx),
+            OxInstruction::Load { ptr, .. } => OxInstruction::load_ty(cx, ptr),
             OxInstruction::StructGep { ptr, idx } => {
                 let member_ty = {
                     let types = cx.types.borrow();
