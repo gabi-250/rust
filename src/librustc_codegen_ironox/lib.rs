@@ -85,6 +85,7 @@ mod metadata;
 mod mono_item;
 mod x86_64 {
     pub mod asm_printer;
+    pub mod fn_printer;
     pub mod gas_directive;
     pub mod instruction;
     pub mod register;
