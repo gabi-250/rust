@@ -3,7 +3,7 @@
 //! Generally, we use `Pointer` to denote memory addresses. However, some operations
 //! have a "size"-like parameter, and they take `Scalar` for the address because
 //! if the size is 0, then the pointer can also be a (properly aligned, non-NULL)
-//! integer.  It is crucial that these operations call `check_align` *before*
+//! integer. It is crucial that these operations call `check_align` *before*
 //! short-circuiting the empty case!
 
 use std::collections::VecDeque;
@@ -47,10 +47,10 @@ impl<T: MayLeak> MayLeak for MemoryKind<T> {
 // `Memory` has to depend on the `Machine` because some of its operations
 // (e.g., `get`) call a `Machine` hook.
 pub struct Memory<'a, 'mir, 'tcx: 'a + 'mir, M: Machine<'a, 'mir, 'tcx>> {
-    /// Allocations local to this instance of the miri engine.  The kind
+    /// Allocations local to this instance of the miri engine. The kind
     /// helps ensure that the same mechanism is used for allocation and
-    /// deallocation.  When an allocation is not found here, it is a
-    /// static and looked up in the `tcx` for read access.  Some machines may
+    /// deallocation. When an allocation is not found here, it is a
+    /// static and looked up in the `tcx` for read access. Some machines may
     /// have to mutate this map even on a read-only access to a static (because
     /// they do pointer provenance tracking and the allocations in `tcx` have
     /// the wrong type), so we let the machine override this type.
@@ -240,7 +240,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> Memory<'a, 'mir, 'tcx, M> {
         Ok(())
     }
 
-    /// Check that the pointer is aligned AND non-NULL. This supports ZSTs in two ways:
+    /// Checks that the pointer is aligned AND non-NULL. This supports ZSTs in two ways:
     /// You can pass a scalar, and a `Pointer` does not have to actually still be allocated.
     pub fn check_align(
         &self,
@@ -284,7 +284,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> Memory<'a, 'mir, 'tcx, M> {
         }
     }
 
-    /// Check if the pointer is "in-bounds". Notice that a pointer pointing at the end
+    /// Checks if the pointer is "in-bounds". Notice that a pointer pointing at the end
     /// of an allocation (i.e., at the first *inaccessible* location) *is* considered
     /// in-bounds!  This follows C's/LLVM's rules.
     /// If you want to check bounds before doing a memory access, better first obtain
@@ -659,7 +659,7 @@ where
     }
 }
 
-/// Reading and writing
+/// Reading and writing.
 impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> Memory<'a, 'mir, 'tcx, M> {
     pub fn copy(
         &mut self,
@@ -700,24 +700,29 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> Memory<'a, 'mir, 'tcx, M> {
         // relocations overlapping the edges; those would not be handled correctly).
         let relocations = {
             let relocations = self.get(src.alloc_id)?.relocations(self, src, size);
-            let mut new_relocations = Vec::with_capacity(relocations.len() * (length as usize));
-            for i in 0..length {
-                new_relocations.extend(
-                    relocations
-                    .iter()
-                    .map(|&(offset, reloc)| {
-                        // compute offset for current repetition
-                        let dest_offset = dest.offset + (i * size);
-                        (
-                            // shift offsets from source allocation to destination allocation
-                            offset + dest_offset - src.offset,
-                            reloc,
-                        )
-                    })
-                );
-            }
+            if relocations.is_empty() {
+                // nothing to copy, ignore even the `length` loop
+                Vec::new()
+            } else {
+                let mut new_relocations = Vec::with_capacity(relocations.len() * (length as usize));
+                for i in 0..length {
+                    new_relocations.extend(
+                        relocations
+                        .iter()
+                        .map(|&(offset, reloc)| {
+                            // compute offset for current repetition
+                            let dest_offset = dest.offset + (i * size);
+                            (
+                                // shift offsets from source allocation to destination allocation
+                                offset + dest_offset - src.offset,
+                                reloc,
+                            )
+                        })
+                    );
+                }
 
-            new_relocations
+                new_relocations
+            }
         };
 
         let tcx = self.tcx.tcx;
@@ -784,20 +789,65 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> Memory<'a, 'mir, 'tcx, M> {
         // The bits have to be saved locally before writing to dest in case src and dest overlap.
         assert_eq!(size.bytes() as usize as u64, size.bytes());
 
-        let undef_mask = self.get(src.alloc_id)?.undef_mask.clone();
-        let dest_allocation = self.get_mut(dest.alloc_id)?;
+        let undef_mask = &self.get(src.alloc_id)?.undef_mask;
 
-        for i in 0..size.bytes() {
-            let defined = undef_mask.get(src.offset + Size::from_bytes(i));
+        // Since we are copying `size` bytes from `src` to `dest + i * size` (`for i in 0..repeat`),
+        // a naive undef mask copying algorithm would repeatedly have to read the undef mask from
+        // the source and write it to the destination. Even if we optimized the memory accesses,
+        // we'd be doing all of this `repeat` times.
+        // Therefor we precompute a compressed version of the undef mask of the source value and
+        // then write it back `repeat` times without computing any more information from the source.
 
-            for j in 0..repeat {
-                dest_allocation.undef_mask.set(
-                    dest.offset + Size::from_bytes(i + (size.bytes() * j)),
-                    defined
-                );
+        // a precomputed cache for ranges of defined/undefined bits
+        // 0000010010001110 will become
+        // [5, 1, 2, 1, 3, 3, 1]
+        // where each element toggles the state
+        let mut ranges = smallvec::SmallVec::<[u64; 1]>::new();
+        let first = undef_mask.get(src.offset);
+        let mut cur_len = 1;
+        let mut cur = first;
+        for i in 1..size.bytes() {
+            // FIXME: optimize to bitshift the current undef block's bits and read the top bit
+            if undef_mask.get(src.offset + Size::from_bytes(i)) == cur {
+                cur_len += 1;
+            } else {
+                ranges.push(cur_len);
+                cur_len = 1;
+                cur = !cur;
             }
         }
 
+        // now fill in all the data
+        let dest_allocation = self.get_mut(dest.alloc_id)?;
+        // an optimization where we can just overwrite an entire range of definedness bits if
+        // they are going to be uniformly `1` or `0`.
+        if ranges.is_empty() {
+            dest_allocation.undef_mask.set_range_inbounds(
+                dest.offset,
+                dest.offset + size * repeat,
+                first,
+            );
+            return Ok(())
+        }
+
+        // remember to fill in the trailing bits
+        ranges.push(cur_len);
+
+        for mut j in 0..repeat {
+            j *= size.bytes();
+            j += dest.offset.bytes();
+            let mut cur = first;
+            for range in &ranges {
+                let old_j = j;
+                j += range;
+                dest_allocation.undef_mask.set_range_inbounds(
+                    Size::from_bytes(old_j),
+                    Size::from_bytes(j),
+                    cur,
+                );
+                cur = !cur;
+            }
+        }
         Ok(())
     }
 }

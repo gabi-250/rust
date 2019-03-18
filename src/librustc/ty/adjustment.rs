@@ -1,7 +1,8 @@
-use hir;
-use hir::def_id::DefId;
-use ty::{self, Ty, TyCtxt};
-use ty::subst::Substs;
+use crate::hir;
+use crate::hir::def_id::DefId;
+use crate::ty::{self, Ty, TyCtxt};
+use crate::ty::subst::SubstsRef;
+use rustc_macros::HashStable;
 
 
 /// Represents coercing a value to a different type of value.
@@ -15,7 +16,7 @@ use ty::subst::Substs;
 ///    Here the pointer will be dereferenced N times (where a dereference can
 ///    happen to raw or borrowed pointers or any smart pointer which implements
 ///    Deref, including Box<_>). The types of dereferences is given by
-///    `autoderefs`.  It can then be auto-referenced zero or one times, indicated
+///    `autoderefs`. It can then be auto-referenced zero or one times, indicated
 ///    by `autoref`, to either a raw or borrowed pointer. In these cases unsize is
 ///    `false`.
 ///
@@ -38,19 +39,19 @@ use ty::subst::Substs;
 ///    stored in `unsize` is `Foo<[i32]>`, we don't store any further detail about
 ///    the underlying conversions from `[i32; 4]` to `[i32]`.
 ///
-/// 3. Coercing a `Box<T>` to `Box<dyn Trait>` is an interesting special case.  In
+/// 3. Coercing a `Box<T>` to `Box<dyn Trait>` is an interesting special case. In
 ///    that case, we have the pointer we need coming in, so there are no
 ///    autoderefs, and no autoref. Instead we just do the `Unsize` transformation.
 ///    At some point, of course, `Box` should move out of the compiler, in which
 ///    case this is analogous to transforming a struct. E.g., Box<[i32; 4]> ->
 ///    Box<[i32]> is an `Adjust::Unsize` with the target `Box<[i32]>`.
-#[derive(Clone, RustcEncodable, RustcDecodable)]
+#[derive(Clone, RustcEncodable, RustcDecodable, HashStable)]
 pub struct Adjustment<'tcx> {
     pub kind: Adjust<'tcx>,
     pub target: Ty<'tcx>,
 }
 
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub enum Adjust<'tcx> {
     /// Go from ! to any type.
     NeverToAny,
@@ -78,7 +79,7 @@ pub enum Adjust<'tcx> {
     /// This will do things like convert thin pointers to fat
     /// pointers, or convert structs containing thin pointers to
     /// structs containing fat pointers, or convert between fat
-    /// pointers.  We don't store the details of how the transform is
+    /// pointers. We don't store the details of how the transform is
     /// done (in fact, we don't know that, because it might depend on
     /// the precise type parameters). We just store the target
     /// type. Codegen backends and miri figure out what has to be done
@@ -90,7 +91,7 @@ pub enum Adjust<'tcx> {
 /// call, with the signature `&'a T -> &'a U` or `&'a mut T -> &'a mut U`.
 /// The target type is `U` in both cases, with the region and mutability
 /// being those shared by both the receiver and the returned reference.
-#[derive(Copy, Clone, PartialEq, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, PartialEq, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct OverloadedDeref<'tcx> {
     pub region: ty::Region<'tcx>,
     pub mutbl: hir::Mutability,
@@ -98,7 +99,7 @@ pub struct OverloadedDeref<'tcx> {
 
 impl<'a, 'gcx, 'tcx> OverloadedDeref<'tcx> {
     pub fn method_call(&self, tcx: TyCtxt<'a, 'gcx, 'tcx>, source: Ty<'tcx>)
-                       -> (DefId, &'tcx Substs<'tcx>) {
+                       -> (DefId, SubstsRef<'tcx>) {
         let trait_def_id = match self.mutbl {
             hir::MutImmutable => tcx.lang_items().deref_trait(),
             hir::MutMutable => tcx.lang_items().deref_mut_trait()
@@ -110,24 +111,24 @@ impl<'a, 'gcx, 'tcx> OverloadedDeref<'tcx> {
 }
 
 /// At least for initial deployment, we want to limit two-phase borrows to
-/// only a few specific cases. Right now, those mostly "things that desugar"
-/// into method calls
-///     - using x.some_method() syntax, where some_method takes &mut self
-///     - using Foo::some_method(&mut x, ...) syntax
-///     - binary assignment operators (+=, -=, *=, etc.)
-/// Anything else should be rejected until generalized two phase borrow support
+/// only a few specific cases. Right now, those are mostly "things that desugar"
+/// into method calls:
+/// - using `x.some_method()` syntax, where some_method takes `&mut self`,
+/// - using `Foo::some_method(&mut x, ...)` syntax,
+/// - binary assignment operators (`+=`, `-=`, `*=`, etc.).
+/// Anything else should be rejected until generalized two-phase borrow support
 /// is implemented. Right now, dataflow can't handle the general case where there
 /// is more than one use of a mutable borrow, and we don't want to accept too much
 /// new code via two-phase borrows, so we try to limit where we create two-phase
 /// capable mutable borrows.
 /// See #49434 for tracking.
-#[derive(Copy, Clone, PartialEq, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, PartialEq, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub enum AllowTwoPhase {
     Yes,
     No
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, PartialEq, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub enum AutoBorrowMutability {
     Mutable { allow_two_phase_borrow: AllowTwoPhase },
     Immutable,
@@ -142,12 +143,12 @@ impl From<AutoBorrowMutability> for hir::Mutability {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, PartialEq, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub enum AutoBorrow<'tcx> {
-    /// Convert from T to &T.
+    /// Converts from T to &T.
     Ref(ty::Region<'tcx>, AutoBorrowMutability),
 
-    /// Convert from T to *T.
+    /// Converts from T to *T.
     RawPtr(hir::Mutability),
 }
 
@@ -157,7 +158,7 @@ pub enum AutoBorrow<'tcx> {
 /// This struct can be obtained via the `coerce_impl_info` query.
 /// Demanding this struct also has the side-effect of reporting errors
 /// for inappropriate impls.
-#[derive(Clone, Copy, RustcEncodable, RustcDecodable, Debug)]
+#[derive(Clone, Copy, RustcEncodable, RustcDecodable, Debug, HashStable)]
 pub struct CoerceUnsizedInfo {
     /// If this is a "custom coerce" impl, then what kind of custom
     /// coercion is it? This applies to impls of `CoerceUnsized` for
@@ -166,7 +167,7 @@ pub struct CoerceUnsizedInfo {
     pub custom_kind: Option<CustomCoerceUnsized>
 }
 
-#[derive(Clone, Copy, RustcEncodable, RustcDecodable, Debug)]
+#[derive(Clone, Copy, RustcEncodable, RustcDecodable, Debug, HashStable)]
 pub enum CustomCoerceUnsized {
     /// Records the index of the field being coerced.
     Struct(usize)

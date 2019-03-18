@@ -1,6 +1,5 @@
 use std::fs;
 use std::env;
-use std::iter;
 use std::path::PathBuf;
 use std::process::{Command, exit};
 use std::collections::HashSet;
@@ -37,15 +36,15 @@ struct ToolBuild {
 impl Step for ToolBuild {
     type Output = Option<PathBuf>;
 
-    fn should_run(run: ShouldRun) -> ShouldRun {
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         run.never()
     }
 
-    /// Build a tool in `src/tools`
+    /// Builds a tool in `src/tools`
     ///
     /// This will build the specified tool with the specified `host` compiler in
     /// `stage` into the normal cargo output directory.
-    fn run(self, builder: &Builder) -> Option<PathBuf> {
+    fn run(self, builder: &Builder<'_>) -> Option<PathBuf> {
         let compiler = self.compiler;
         let target = self.target;
         let tool = self.tool;
@@ -92,7 +91,8 @@ impl Step for ToolBuild {
                 compile::CargoMessage::CompilerArtifact {
                     package_id,
                     features,
-                    filenames
+                    filenames,
+                    target: _,
                 } => {
                     (package_id, features, filenames)
                 }
@@ -193,7 +193,7 @@ impl Step for ToolBuild {
 }
 
 pub fn prepare_tool_cargo(
-    builder: &Builder,
+    builder: &Builder<'_>,
     compiler: Compiler,
     mode: Mode,
     target: Interned<String>,
@@ -316,18 +316,18 @@ macro_rules! tool {
         impl Step for $name {
             type Output = PathBuf;
 
-            fn should_run(run: ShouldRun) -> ShouldRun {
+            fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
                 run.path($path)
             }
 
-            fn make_run(run: RunConfig) {
+            fn make_run(run: RunConfig<'_>) {
                 run.builder.ensure($name {
                     compiler: run.builder.compiler(run.builder.top_stage, run.builder.config.build),
                     target: run.target,
                 });
             }
 
-            fn run(self, builder: &Builder) -> PathBuf {
+            fn run(self, builder: &Builder<'_>) -> PathBuf {
                 builder.ensure(ToolBuild {
                     compiler: self.compiler,
                     target: self.target,
@@ -372,18 +372,18 @@ pub struct RemoteTestServer {
 impl Step for RemoteTestServer {
     type Output = PathBuf;
 
-    fn should_run(run: ShouldRun) -> ShouldRun {
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         run.path("src/tools/remote-test-server")
     }
 
-    fn make_run(run: RunConfig) {
+    fn make_run(run: RunConfig<'_>) {
         run.builder.ensure(RemoteTestServer {
             compiler: run.builder.compiler(run.builder.top_stage, run.builder.config.build),
             target: run.target,
         });
     }
 
-    fn run(self, builder: &Builder) -> PathBuf {
+    fn run(self, builder: &Builder<'_>) -> PathBuf {
         builder.ensure(ToolBuild {
             compiler: self.compiler,
             target: self.target,
@@ -407,37 +407,37 @@ impl Step for Rustdoc {
     const DEFAULT: bool = true;
     const ONLY_HOSTS: bool = true;
 
-    fn should_run(run: ShouldRun) -> ShouldRun {
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         run.path("src/tools/rustdoc")
     }
 
-    fn make_run(run: RunConfig) {
+    fn make_run(run: RunConfig<'_>) {
         run.builder.ensure(Rustdoc {
             host: run.host,
         });
     }
 
-    fn run(self, builder: &Builder) -> PathBuf {
+    fn run(self, builder: &Builder<'_>) -> PathBuf {
         let target_compiler = builder.compiler(builder.top_stage, self.host);
+        if target_compiler.stage == 0 {
+            if !target_compiler.is_snapshot(builder) {
+                panic!("rustdoc in stage 0 must be snapshot rustdoc");
+            }
+            return builder.initial_rustc.with_file_name(exe("rustdoc", &target_compiler.host));
+        }
         let target = target_compiler.host;
-        let build_compiler = if target_compiler.stage == 0 {
-            builder.compiler(0, builder.config.build)
-        } else if target_compiler.stage >= 2 {
-            // Past stage 2, we consider the compiler to be ABI-compatible and hence capable of
-            // building rustdoc itself.
-            builder.compiler(target_compiler.stage, builder.config.build)
-        } else {
-            // Similar to `compile::Assemble`, build with the previous stage's compiler. Otherwise
-            // we'd have stageN/bin/rustc and stageN/bin/rustdoc be effectively different stage
-            // compilers, which isn't what we want.
-            builder.compiler(target_compiler.stage - 1, builder.config.build)
-        };
+        // Similar to `compile::Assemble`, build with the previous stage's compiler. Otherwise
+        // we'd have stageN/bin/rustc and stageN/bin/rustdoc be effectively different stage
+        // compilers, which isn't what we want. Rustdoc should be linked in the same way as the
+        // rustc compiler it's paired with, so it must be built with the previous stage compiler.
+        let build_compiler = builder.compiler(target_compiler.stage - 1, builder.config.build);
 
-        builder.ensure(compile::Rustc { compiler: build_compiler, target });
-        builder.ensure(compile::Rustc {
-            compiler: build_compiler,
-            target: builder.config.build,
-        });
+        // The presence of `target_compiler` ensures that the necessary libraries (codegen backends,
+        // compiler libraries, ...) are built. Rustdoc does not require the presence of any
+        // libraries within sysroot_libdir (i.e., rustlib), though doctests may want it (since
+        // they'll be linked to those libraries). As such, don't explicitly `ensure` any additional
+        // libraries here. The intuition here is that If we've built a compiler, we should be able
+        // to build rustdoc.
 
         let mut cargo = prepare_tool_cargo(
             builder,
@@ -491,19 +491,19 @@ impl Step for Cargo {
     const DEFAULT: bool = true;
     const ONLY_HOSTS: bool = true;
 
-    fn should_run(run: ShouldRun) -> ShouldRun {
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         let builder = run.builder;
         run.path("src/tools/cargo").default_condition(builder.config.extended)
     }
 
-    fn make_run(run: RunConfig) {
+    fn make_run(run: RunConfig<'_>) {
         run.builder.ensure(Cargo {
             compiler: run.builder.compiler(run.builder.top_stage, run.builder.config.build),
             target: run.target,
         });
     }
 
-    fn run(self, builder: &Builder) -> PathBuf {
+    fn run(self, builder: &Builder<'_>) -> PathBuf {
         // Cargo depends on procedural macros, which requires a full host
         // compiler to be available, so we need to depend on that.
         builder.ensure(compile::Rustc {
@@ -543,12 +543,12 @@ macro_rules! tool_extended {
             const DEFAULT: bool = true;
             const ONLY_HOSTS: bool = true;
 
-            fn should_run(run: ShouldRun) -> ShouldRun {
+            fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
                 let builder = run.builder;
                 run.path($path).default_condition(builder.config.extended)
             }
 
-            fn make_run(run: RunConfig) {
+            fn make_run(run: RunConfig<'_>) {
                 run.builder.ensure($name {
                     compiler: run.builder.compiler(run.builder.top_stage, run.builder.config.build),
                     target: run.target,
@@ -557,7 +557,7 @@ macro_rules! tool_extended {
             }
 
             #[allow(unused_mut)]
-            fn run(mut $sel, $builder: &Builder) -> Option<PathBuf> {
+            fn run(mut $sel, $builder: &Builder<'_>) -> Option<PathBuf> {
                 $extra_deps
                 $builder.ensure(ToolBuild {
                     compiler: $sel.compiler,
@@ -622,7 +622,7 @@ tool_extended!((self, builder),
 );
 
 impl<'a> Builder<'a> {
-    /// Get a `Command` which is ready to run `tool` in `stage` built for
+    /// Gets a `Command` which is ready to run `tool` in `stage` built for
     /// `host`.
     pub fn tool_cmd(&self, tool: Tool) -> Command {
         let mut cmd = Command::new(self.tool_exe(tool));
@@ -666,19 +666,33 @@ impl<'a> Builder<'a> {
 
         // Add the llvm/bin directory to PATH since it contains lots of
         // useful, platform-independent tools
-        if tool.uses_llvm_tools() {
+        if tool.uses_llvm_tools() && !self.config.dry_run {
+            let mut additional_paths = vec![];
+
             if let Some(llvm_bin_path) = self.llvm_bin_path() {
-                if host.contains("windows") {
-                    // On Windows, PATH and the dynamic library path are the same,
-                    // so we just add the LLVM bin path to lib_path
-                    lib_paths.push(llvm_bin_path);
-                } else {
-                    let old_path = env::var_os("PATH").unwrap_or_default();
-                    let new_path = env::join_paths(iter::once(llvm_bin_path)
-                            .chain(env::split_paths(&old_path)))
-                        .expect("Could not add LLVM bin path to PATH");
-                    cmd.env("PATH", new_path);
-                }
+                additional_paths.push(llvm_bin_path);
+            }
+
+            // If LLD is available, add that too.
+            if self.config.lld_enabled {
+                let lld_install_root = self.ensure(native::Lld {
+                    target: self.config.build,
+                });
+
+                let lld_bin_path = lld_install_root.join("bin");
+                additional_paths.push(lld_bin_path);
+            }
+
+            if host.contains("windows") {
+                // On Windows, PATH and the dynamic library path are the same,
+                // so we just add the LLVM bin path to lib_path
+                lib_paths.extend(additional_paths);
+            } else {
+                let old_path = env::var_os("PATH").unwrap_or_default();
+                let new_path = env::join_paths(additional_paths.into_iter()
+                        .chain(env::split_paths(&old_path)))
+                    .expect("Could not add LLVM bin path to PATH");
+                cmd.env("PATH", new_path);
             }
         }
 
@@ -686,7 +700,7 @@ impl<'a> Builder<'a> {
     }
 
     fn llvm_bin_path(&self) -> Option<PathBuf> {
-        if self.config.llvm_enabled && !self.config.dry_run {
+        if self.config.llvm_enabled() {
             let llvm_config = self.ensure(native::Llvm {
                 target: self.config.build,
                 emscripten: false,

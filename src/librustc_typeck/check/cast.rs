@@ -31,19 +31,19 @@
 use super::FnCtxt;
 
 use errors::{DiagnosticBuilder,Applicability};
-use hir::def_id::DefId;
-use lint;
+use crate::hir::def_id::DefId;
+use crate::lint;
 use rustc::hir;
 use rustc::session::Session;
 use rustc::traits;
 use rustc::ty::{self, Ty, TypeFoldable, TypeAndMut};
+use rustc::ty::subst::SubstsRef;
 use rustc::ty::adjustment::AllowTwoPhase;
 use rustc::ty::cast::{CastKind, CastTy};
-use rustc::ty::subst::Substs;
 use rustc::middle::lang_items;
 use syntax::ast;
 use syntax_pos::Span;
-use util::common::ErrorReported;
+use crate::util::common::ErrorReported;
 
 /// Reifies a cast check to be checked once we have full type information for
 /// a function context.
@@ -69,7 +69,7 @@ enum PointerKind<'tcx> {
     /// The unsize info of this projection
     OfProjection(&'tcx ty::ProjectionTy<'tcx>),
     /// The unsize info of this opaque ty
-    OfOpaque(DefId, &'tcx Substs<'tcx>),
+    OfOpaque(DefId, SubstsRef<'tcx>),
     /// The unsize info of this parameter
     OfParam(&'tcx ty::ParamTy),
 }
@@ -140,7 +140,7 @@ enum CastError {
     CastToBool,
     CastToChar,
     DifferingKinds,
-    /// Cast of thin to fat raw ptr (eg. `*const () as *const [u8]`)
+    /// Cast of thin to fat raw ptr (e.g., `*const () as *const [u8]`).
     SizedUnsizedCast,
     IllegalCast,
     NeedDeref,
@@ -213,7 +213,7 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
                                        fcx.ty_to_string(self.expr_ty),
                                        cast_ty));
                 if let Ok(snippet) = fcx.sess().source_map().span_to_snippet(self.expr.span) {
-                    err.span_suggestion_with_applicability(
+                    err.span_suggestion(
                         self.expr.span,
                         "dereference the expression",
                         format!("*{}", snippet),
@@ -263,7 +263,7 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
                 if self.expr_ty.is_numeric() {
                     match fcx.tcx.sess.source_map().span_to_snippet(self.expr.span) {
                         Ok(snippet) => {
-                            err.span_suggestion_with_applicability(
+                            err.span_suggestion(
                                 self.span,
                                 "compare with zero instead",
                                 format!("{} != 0", snippet),
@@ -294,7 +294,7 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
                                   .emit();
             }
             CastError::SizedUnsizedCast => {
-                use structured_errors::{SizedUnsizedCastError, StructuredDiagnostic};
+                use crate::structured_errors::{SizedUnsizedCastError, StructuredDiagnostic};
                 SizedUnsizedCastError::new(&fcx.tcx.sess,
                                            self.span,
                                            self.expr_ty,
@@ -314,7 +314,7 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
                 err.note("The type information given here is insufficient to check whether \
                           the pointer cast is valid");
                 if unknown_cast_to {
-                    err.span_suggestion_short_with_applicability(
+                    err.span_suggestion_short(
                         self.cast_span,
                         "consider giving more type information",
                         String::new(),
@@ -345,7 +345,7 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
                 if self.cast_ty.is_trait() {
                     match fcx.tcx.sess.source_map().span_to_snippet(self.cast_span) {
                         Ok(s) => {
-                            err.span_suggestion_with_applicability(
+                            err.span_suggestion(
                                 self.cast_span,
                                 "try casting to a reference instead",
                                 format!("&{}{}", mtstr, s),
@@ -367,7 +367,7 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
             ty::Adt(def, ..) if def.is_box() => {
                 match fcx.tcx.sess.source_map().span_to_snippet(self.cast_span) {
                     Ok(s) => {
-                        err.span_suggestion_with_applicability(
+                        err.span_suggestion(
                             self.cast_span,
                             "try casting to a `Box` instead",
                             format!("Box<{}>", s),
@@ -399,9 +399,9 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
         } else {
             ("", lint::builtin::TRIVIAL_CASTS)
         };
-        let mut err = fcx.tcx.struct_span_lint_node(
+        let mut err = fcx.tcx.struct_span_lint_hir(
             lint,
-            self.expr.id,
+            self.expr.hir_id,
             self.span,
             &format!("trivial {}cast: `{}` as `{}`",
                      adjective,
@@ -417,7 +417,7 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
         self.cast_ty = fcx.structurally_resolved_type(self.span, self.cast_ty);
 
         debug!("check_cast({}, {:?} as {:?})",
-               self.expr.id,
+               self.expr.hir_id,
                self.expr_ty,
                self.cast_ty);
 
@@ -428,20 +428,19 @@ impl<'a, 'gcx, 'tcx> CastCheck<'tcx> {
         } else if self.try_coercion_cast(fcx) {
             self.trivial_cast_lint(fcx);
             debug!(" -> CoercionCast");
-            fcx.tables.borrow_mut().cast_kinds_mut().insert(self.expr.hir_id,
-                                                            CastKind::CoercionCast);
+            fcx.tables.borrow_mut().set_coercion_cast(self.expr.hir_id.local_id);
+
         } else {
             match self.do_check(fcx) {
                 Ok(k) => {
                     debug!(" -> {:?}", k);
-                    fcx.tables.borrow_mut().cast_kinds_mut().insert(self.expr.hir_id, k);
                 }
                 Err(e) => self.report_cast_error(fcx, e),
             };
         }
     }
 
-    /// Check a cast, and report an error if one exists. In some cases, this
+    /// Checks a cast, and report an error if one exists. In some cases, this
     /// can return Ok and create type errors in the fcx rather than returning
     /// directly. coercion-cast is handled in check instead of here.
     fn do_check(&self, fcx: &FnCtxt<'a, 'gcx, 'tcx>) -> Result<CastKind, CastError> {

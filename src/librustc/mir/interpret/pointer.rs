@@ -1,5 +1,6 @@
-use mir;
-use ty::layout::{self, HasDataLayout, Size};
+use crate::mir;
+use crate::ty::layout::{self, HasDataLayout, Size};
+use rustc_macros::HashStable;
 
 use super::{
     AllocId, EvalResult, InboundsCheck,
@@ -69,12 +70,15 @@ impl<T: layout::HasDataLayout> PointerArithmetic for T {}
 ///
 /// Pointer is also generic over the `Tag` associated with each pointer,
 /// which is used to do provenance tracking during execution.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, RustcEncodable, RustcDecodable, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd,
+         RustcEncodable, RustcDecodable, Hash, HashStable)]
 pub struct Pointer<Tag=(),Id=AllocId> {
     pub alloc_id: Id,
     pub offset: Size,
     pub tag: Tag,
 }
+
+static_assert!(POINTER_SIZE: ::std::mem::size_of::<Pointer>() == 16);
 
 /// Produces a `Pointer` which points to the beginning of the Allocation
 impl From<AllocId> for Pointer {

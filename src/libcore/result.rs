@@ -369,7 +369,7 @@ impl<T, E> Result<T, E> {
     // Adapter for working with references
     /////////////////////////////////////////////////////////////////////////
 
-    /// Converts from `Result<T, E>` to `Result<&T, &E>`.
+    /// Converts from `&Result<T, E>` to `Result<&T, &E>`.
     ///
     /// Produces a new `Result`, containing a reference
     /// into the original, leaving the original in place.
@@ -394,7 +394,7 @@ impl<T, E> Result<T, E> {
         }
     }
 
-    /// Converts from `Result<T, E>` to `Result<&mut T, &mut E>`.
+    /// Converts from `&mut Result<T, E>` to `Result<&mut T, &mut E>`.
     ///
     /// # Examples
     ///
@@ -896,7 +896,7 @@ impl<T: Default, E> Result<T, E> {
     ///
     /// # Examples
     ///
-    /// Convert a string to an integer, turning poorly-formed strings
+    /// Converts a string to an integer, turning poorly-formed strings
     /// into 0 (the default value for integers). [`parse`] converts
     /// a string to any other type that implements [`FromStr`], returning an
     /// [`Err`] on error.
@@ -1200,7 +1200,7 @@ impl<A, E, V: FromIterator<A>> FromIterator<Result<A, E>> for Result<V, E> {
     /// let res: Result<Vec<u32>, &'static str> = v.iter().map(|x: &u32|
     ///     x.checked_add(1).ok_or("Overflow!")
     /// ).collect();
-    /// assert!(res == Ok(vec![2, 3]));
+    /// assert_eq!(res, Ok(vec![2, 3]));
     /// ```
     #[inline]
     fn from_iter<I: IntoIterator<Item=Result<A, E>>>(iter: I) -> Result<V, E> {

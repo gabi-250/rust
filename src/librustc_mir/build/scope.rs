@@ -77,12 +77,11 @@ should go to.
 
 */
 
-use build::{BlockAnd, BlockAndExtension, Builder, CFG};
-use hair::LintLevel;
+use crate::build::{BlockAnd, BlockAndExtension, Builder, CFG};
+use crate::hair::LintLevel;
 use rustc::middle::region;
 use rustc::ty::Ty;
 use rustc::hir;
-use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::mir::*;
 use syntax_pos::{Span};
 use rustc_data_structures::fx::FxHashMap;
@@ -210,7 +209,7 @@ impl DropKind {
 }
 
 impl<'tcx> Scope<'tcx> {
-    /// Invalidate all the cached blocks in the scope.
+    /// Invalidates all the cached blocks in the scope.
     ///
     /// Should always be run for all inner scopes when a drop is pushed into some scope enclosing a
     /// larger extent of code.
@@ -308,23 +307,26 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
         debug!("in_scope(region_scope={:?}, block={:?})", region_scope, block);
         let source_scope = self.source_scope;
         let tcx = self.hir.tcx();
-        if let LintLevel::Explicit(node_id) = lint_level {
-            let same_lint_scopes = tcx.dep_graph.with_ignore(|| {
-                let sets = tcx.lint_levels(LOCAL_CRATE);
-                let parent_hir_id =
-                    tcx.hir().definitions().node_to_hir_id(
-                        self.source_scope_local_data[source_scope].lint_root
-                    );
-                let current_hir_id =
-                    tcx.hir().definitions().node_to_hir_id(node_id);
-                sets.lint_level_set(parent_hir_id) ==
-                    sets.lint_level_set(current_hir_id)
-            });
+        if let LintLevel::Explicit(current_hir_id) = lint_level {
+            // Use `maybe_lint_level_root_bounded` with `root_lint_level` as a bound
+            // to avoid adding Hir dependences on our parents.
+            // We estimate the true lint roots here to avoid creating a lot of source scopes.
 
-            if !same_lint_scopes {
-                self.source_scope =
-                    self.new_source_scope(region_scope.1.span, lint_level,
-                                          None);
+            let parent_root = tcx.maybe_lint_level_root_bounded(
+                self.source_scope_local_data[source_scope].lint_root,
+                self.hir.root_lint_level,
+            );
+            let current_root = tcx.maybe_lint_level_root_bounded(
+                current_hir_id,
+                self.hir.root_lint_level
+            );
+
+            if parent_root != current_root {
+                self.source_scope = self.new_source_scope(
+                    region_scope.1.span,
+                    LintLevel::Explicit(current_root),
+                    None
+                );
             }
         }
         self.push_scope(region_scope);
@@ -390,7 +392,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
 
 
     /// Branch out of `block` to `target`, exiting all scopes up to
-    /// and including `region_scope`.  This will insert whatever drops are
+    /// and including `region_scope`. This will insert whatever drops are
     /// needed. See module comment for details.
     pub fn exit_scope(&mut self,
                       span: Span,
@@ -613,6 +615,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             hir::BodyOwnerKind::Static(_) =>
                 // No need to free storage in this context.
                 None,
+            hir::BodyOwnerKind::Closure |
             hir::BodyOwnerKind::Fn =>
                 Some(self.topmost_scope()),
         }
@@ -667,7 +670,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             DropKind::Value { .. } => if !needs_drop { return },
             DropKind::Storage => {
                 match *place {
-                    Place::Local(index) => if index.index() <= self.arg_count {
+                    Place::Base(PlaceBase::Local(index)) => if index.index() <= self.arg_count {
                         span_bug!(
                             span, "`schedule_drop` called with index {} and arg_count {}",
                             index.index(),
@@ -845,7 +848,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
         next_target.unit()
     }
 
-    /// Create an Assert terminator and return the success block.
+    /// Creates an Assert terminator and return the success block.
     /// If the boolean condition operand is not the expected value,
     /// a runtime panic will be caused with the given message.
     pub fn assert(&mut self, block: BasicBlock,
@@ -941,7 +944,7 @@ fn build_scope_drops<'tcx>(
                 // Drop the storage for both value and storage drops.
                 // Only temps and vars need their storage dead.
                 match drop_data.location {
-                    Place::Local(index) if index.index() > arg_count => {
+                    Place::Base(PlaceBase::Local(index)) if index.index() > arg_count => {
                         cfg.push(block, Statement {
                             source_info,
                             kind: StatementKind::StorageDead(index)

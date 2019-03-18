@@ -1,26 +1,27 @@
-use attributes;
-use back::bytecode::{self, RLIB_BYTECODE_EXTENSION};
-use back::lto::ThinBuffer;
+use crate::attributes;
+use crate::back::bytecode::{self, RLIB_BYTECODE_EXTENSION};
+use crate::back::lto::ThinBuffer;
+use crate::base;
+use crate::consts;
+use crate::llvm::{self, DiagnosticInfo, PassManager, SMDiagnostic};
+use crate::llvm_util;
+use crate::ModuleLlvm;
+use crate::type_::Type;
+use crate::context::{is_pie_binary, get_reloc_model};
+use crate::common;
+use crate::LlvmCodegenBackend;
 use rustc_codegen_ssa::back::write::{CodegenContext, ModuleConfig, run_assembler};
 use rustc_codegen_ssa::traits::*;
-use base;
-use consts;
+use rustc::hir::def_id::LOCAL_CRATE;
 use rustc::session::config::{self, OutputType, Passes, Lto};
 use rustc::session::Session;
-use time_graph::Timeline;
-use llvm::{self, DiagnosticInfo, PassManager, SMDiagnostic};
-use llvm_util;
-use ModuleLlvm;
+use rustc::ty::TyCtxt;
 use rustc_codegen_ssa::{ModuleCodegen, CompiledModule};
 use rustc::util::common::time_ext;
+use rustc::util::profiling::ProfileCategory;
 use rustc_fs_util::{path_to_c_string, link_or_copy};
 use rustc_data_structures::small_c_str::SmallCStr;
-use errors::{self, Handler, FatalError};
-use type_::Type;
-use context::{is_pie_binary, get_reloc_model};
-use common;
-use LlvmCodegenBackend;
-use rustc_demangle;
+use errors::{Handler, FatalError};
 
 use std::ffi::{CString, CStr};
 use std::fs;
@@ -81,42 +82,46 @@ pub fn write_output_file(
     }
 }
 
-pub(crate) fn get_llvm_opt_level(optimize: config::OptLevel) -> llvm::CodeGenOptLevel {
-    match optimize {
-      config::OptLevel::No => llvm::CodeGenOptLevel::None,
-      config::OptLevel::Less => llvm::CodeGenOptLevel::Less,
-      config::OptLevel::Default => llvm::CodeGenOptLevel::Default,
-      config::OptLevel::Aggressive => llvm::CodeGenOptLevel::Aggressive,
-      _ => llvm::CodeGenOptLevel::Default,
-    }
-}
-
-pub(crate) fn get_llvm_opt_size(optimize: config::OptLevel) -> llvm::CodeGenOptSize {
-    match optimize {
-      config::OptLevel::Size => llvm::CodeGenOptSizeDefault,
-      config::OptLevel::SizeMin => llvm::CodeGenOptSizeAggressive,
-      _ => llvm::CodeGenOptSizeNone,
-    }
-}
-
 pub fn create_target_machine(
+    tcx: TyCtxt<'_, '_, '_>,
+    find_features: bool,
+) -> &'static mut llvm::TargetMachine {
+    target_machine_factory(tcx.sess, tcx.backend_optimization_level(LOCAL_CRATE), find_features)()
+        .unwrap_or_else(|err| llvm_err(tcx.sess.diagnostic(), &err).raise() )
+}
+
+pub fn create_informational_target_machine(
     sess: &Session,
     find_features: bool,
 ) -> &'static mut llvm::TargetMachine {
-    target_machine_factory(sess, find_features)().unwrap_or_else(|err| {
+    target_machine_factory(sess, config::OptLevel::No, find_features)().unwrap_or_else(|err| {
         llvm_err(sess.diagnostic(), &err).raise()
     })
+}
+
+
+pub fn to_llvm_opt_settings(cfg: config::OptLevel) -> (llvm::CodeGenOptLevel, llvm::CodeGenOptSize)
+{
+    use self::config::OptLevel::*;
+    match cfg {
+        No => (llvm::CodeGenOptLevel::None, llvm::CodeGenOptSizeNone),
+        Less => (llvm::CodeGenOptLevel::Less, llvm::CodeGenOptSizeNone),
+        Default => (llvm::CodeGenOptLevel::Default, llvm::CodeGenOptSizeNone),
+        Aggressive => (llvm::CodeGenOptLevel::Aggressive, llvm::CodeGenOptSizeNone),
+        Size => (llvm::CodeGenOptLevel::Default, llvm::CodeGenOptSizeDefault),
+        SizeMin => (llvm::CodeGenOptLevel::Default, llvm::CodeGenOptSizeAggressive),
+    }
 }
 
 // If find_features is true this won't access `sess.crate_types` by assuming
 // that `is_pie_binary` is false. When we discover LLVM target features
 // `sess.crate_types` is uninitialized so we cannot access it.
-pub fn target_machine_factory(sess: &Session, find_features: bool)
+pub fn target_machine_factory(sess: &Session, optlvl: config::OptLevel, find_features: bool)
     -> Arc<dyn Fn() -> Result<&'static mut llvm::TargetMachine, String> + Send + Sync>
 {
     let reloc_model = get_reloc_model(sess);
 
-    let opt_level = get_llvm_opt_level(sess.opts.optimize);
+    let (opt_level, _) = to_llvm_opt_settings(optlvl);
     let use_softfp = sess.opts.cg.soft_float;
 
     let ffunction_sections = sess.target.target.options.function_sections;
@@ -300,8 +305,7 @@ unsafe extern "C" fn diagnostic_handler(info: &DiagnosticInfo, user: *mut c_void
 pub(crate) unsafe fn optimize(cgcx: &CodegenContext<LlvmCodegenBackend>,
                    diag_handler: &Handler,
                    module: &ModuleCodegen<ModuleLlvm>,
-                   config: &ModuleConfig,
-                   timeline: &mut Timeline)
+                   config: &ModuleConfig)
     -> Result<(), FatalError>
 {
     let llmod = module.module_llvm.llmod();
@@ -357,10 +361,10 @@ pub(crate) unsafe fn optimize(cgcx: &CodegenContext<LlvmCodegenBackend>,
             if !config.no_prepopulate_passes {
                 llvm::LLVMRustAddAnalysisPasses(tm, fpm, llmod);
                 llvm::LLVMRustAddAnalysisPasses(tm, mpm, llmod);
-                let opt_level = config.opt_level.map(get_llvm_opt_level)
+                let opt_level = config.opt_level.map(|x| to_llvm_opt_settings(x).0)
                     .unwrap_or(llvm::CodeGenOptLevel::None);
                 let prepare_for_thin_lto = cgcx.lto == Lto::Thin || cgcx.lto == Lto::ThinLocal ||
-                    (cgcx.lto != Lto::Fat && cgcx.opts.debugging_opts.cross_lang_lto.enabled());
+                    (cgcx.lto != Lto::Fat && cgcx.opts.cg.linker_plugin_lto.enabled());
                 with_llvm_pmb(llmod, &config, opt_level, prepare_for_thin_lto, &mut |b| {
                     llvm::LLVMPassManagerBuilderPopulateFunctionPassManager(b, fpm);
                     llvm::LLVMPassManagerBuilderPopulateModulePassManager(b, mpm);
@@ -410,19 +414,24 @@ pub(crate) unsafe fn optimize(cgcx: &CodegenContext<LlvmCodegenBackend>,
         diag_handler.abort_if_errors();
 
         // Finally, run the actual optimization passes
-        time_ext(config.time_passes,
-                 None,
-                 &format!("llvm function passes [{}]", module_name.unwrap()),
-                 || {
-            llvm::LLVMRustRunFunctionPassManager(fpm, llmod)
-        });
-        timeline.record("fpm");
-        time_ext(config.time_passes,
-                 None,
-                 &format!("llvm module passes [{}]", module_name.unwrap()),
-                 || {
-            llvm::LLVMRunPassManager(mpm, llmod)
-        });
+        {
+            let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_function_passes");
+            time_ext(config.time_passes,
+                        None,
+                        &format!("llvm function passes [{}]", module_name.unwrap()),
+                        || {
+                llvm::LLVMRustRunFunctionPassManager(fpm, llmod)
+            });
+        }
+        {
+            let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_module_passes");
+            time_ext(config.time_passes,
+                    None,
+                    &format!("llvm module passes [{}]", module_name.unwrap()),
+                    || {
+                llvm::LLVMRunPassManager(mpm, llmod)
+            });
+        }
 
         // Deallocate managers that we're now done with
         llvm::LLVMDisposePassManager(fpm);
@@ -434,11 +443,10 @@ pub(crate) unsafe fn optimize(cgcx: &CodegenContext<LlvmCodegenBackend>,
 pub(crate) unsafe fn codegen(cgcx: &CodegenContext<LlvmCodegenBackend>,
                   diag_handler: &Handler,
                   module: ModuleCodegen<ModuleLlvm>,
-                  config: &ModuleConfig,
-                  timeline: &mut Timeline)
+                  config: &ModuleConfig)
     -> Result<CompiledModule, FatalError>
 {
-    timeline.record("codegen");
+    let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "codegen");
     {
         let llmod = module.module_llvm.llmod();
         let llcx = &*module.module_llvm.llcx;
@@ -489,29 +497,30 @@ pub(crate) unsafe fn codegen(cgcx: &CodegenContext<LlvmCodegenBackend>,
 
 
         if write_bc || config.emit_bc_compressed || config.embed_bitcode {
+            let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_make_bitcode");
             let thin = ThinBuffer::new(llmod);
             let data = thin.data();
-            timeline.record("make-bc");
 
             if write_bc {
+                let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_emit_bitcode");
                 if let Err(e) = fs::write(&bc_out, data) {
                     diag_handler.err(&format!("failed to write bytecode: {}", e));
                 }
-                timeline.record("write-bc");
             }
 
             if config.embed_bitcode {
+                let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_embed_bitcode");
                 embed_bitcode(cgcx, llcx, llmod, Some(data));
-                timeline.record("embed-bc");
             }
 
             if config.emit_bc_compressed {
+                let _timer = cgcx.profile_activity(ProfileCategory::Codegen,
+                                                   "LLVM_compress_bitcode");
                 let dst = bc_out.with_extension(RLIB_BYTECODE_EXTENSION);
                 let data = bytecode::encode(&module.name, data);
                 if let Err(e) = fs::write(&dst, data) {
                     diag_handler.err(&format!("failed to write bytecode: {}", e));
                 }
-                timeline.record("compress-bc");
             }
         } else if config.embed_bitcode_marker {
             embed_bitcode(cgcx, llcx, llmod, None);
@@ -520,6 +529,7 @@ pub(crate) unsafe fn codegen(cgcx: &CodegenContext<LlvmCodegenBackend>,
         time_ext(config.time_passes, None, &format!("codegen passes [{}]", module_name.unwrap()),
             || -> Result<(), FatalError> {
             if config.emit_ir {
+                let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_emit_ir");
                 let out = cgcx.output_filenames.temp_path(OutputType::LlvmAssembly, module_name);
                 let out = path_to_c_string(&out);
 
@@ -558,10 +568,10 @@ pub(crate) unsafe fn codegen(cgcx: &CodegenContext<LlvmCodegenBackend>,
                     llvm::LLVMRustPrintModule(cpm, llmod, out.as_ptr(), demangle_callback);
                     llvm::LLVMDisposePassManager(cpm);
                 });
-                timeline.record("ir");
             }
 
             if config.emit_asm || asm_to_obj {
+                let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_emit_asm");
                 let path = cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
 
                 // We can't use the same module for asm and binary output, because that triggers
@@ -576,19 +586,18 @@ pub(crate) unsafe fn codegen(cgcx: &CodegenContext<LlvmCodegenBackend>,
                     write_output_file(diag_handler, tm, cpm, llmod, &path,
                                       llvm::FileType::AssemblyFile)
                 })?;
-                timeline.record("asm");
             }
 
             if write_obj {
+                let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_emit_obj");
                 with_codegen(tm, llmod, config.no_builtins, |cpm| {
                     write_output_file(diag_handler, tm, cpm, llmod, &obj_out,
                                       llvm::FileType::ObjectFile)
                 })?;
-                timeline.record("obj");
             } else if asm_to_obj {
+                let _timer = cgcx.profile_activity(ProfileCategory::Codegen, "LLVM_asm_to_obj");
                 let assembly = cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
                 run_assembler(cgcx, diag_handler, &assembly, &obj_out);
-                timeline.record("asm_to_obj");
 
                 if !config.emit_asm && !cgcx.save_temps {
                     drop(fs::remove_file(&assembly));
@@ -689,7 +698,8 @@ pub unsafe fn with_llvm_pmb(llmod: &llvm::Module,
     // reasonable defaults and prepare it to actually populate the pass
     // manager.
     let builder = llvm::LLVMPassManagerBuilderCreate();
-    let opt_size = config.opt_size.map(get_llvm_opt_size).unwrap_or(llvm::CodeGenOptSizeNone);
+    let opt_size = config.opt_size.map(|x| to_llvm_opt_settings(x).1)
+        .unwrap_or(llvm::CodeGenOptSizeNone);
     let inline_threshold = config.inline_threshold;
 
     let pgo_gen_path = config.pgo_gen.as_ref().map(|s| {

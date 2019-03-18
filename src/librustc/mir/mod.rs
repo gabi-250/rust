@@ -2,11 +2,11 @@
 //!
 //! [rustc guide]: https://rust-lang.github.io/rustc-guide/mir/index.html
 
-use hir::def::CtorKind;
-use hir::def_id::DefId;
-use hir::{self, HirId, InlineAsm};
-use mir::interpret::{ConstValue, EvalErrorKind, Scalar};
-use mir::visit::MirVisitable;
+use crate::hir::def::{CtorKind, Namespace};
+use crate::hir::def_id::DefId;
+use crate::hir::{self, HirId, InlineAsm};
+use crate::mir::interpret::{ConstValue, EvalErrorKind, Scalar};
+use crate::mir::visit::MirVisitable;
 use rustc_apfloat::ieee::{Double, Single};
 use rustc_apfloat::Float;
 use rustc_data_structures::fx::FxHashSet;
@@ -15,7 +15,8 @@ use rustc_data_structures::graph::{self, GraphPredecessors, GraphSuccessors};
 use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 use rustc_data_structures::sync::Lrc;
 use rustc_data_structures::sync::MappedReadGuard;
-use rustc_serialize::{self as serialize};
+use rustc_macros::HashStable;
+use crate::rustc_serialize::{self as serialize};
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::fmt::{self, Debug, Formatter, Write};
@@ -26,16 +27,16 @@ use std::{iter, mem, option, u32};
 use syntax::ast::{self, Name};
 use syntax::symbol::InternedString;
 use syntax_pos::{Span, DUMMY_SP};
-use ty::fold::{TypeFoldable, TypeFolder, TypeVisitor};
-use ty::subst::{Subst, Substs};
-use ty::layout::VariantIdx;
-use ty::{
+use crate::ty::fold::{TypeFoldable, TypeFolder, TypeVisitor};
+use crate::ty::subst::{Subst, SubstsRef};
+use crate::ty::layout::VariantIdx;
+use crate::ty::{
     self, AdtDef, CanonicalUserTypeAnnotations, ClosureSubsts, GeneratorSubsts, Region, Ty, TyCtxt,
-    UserTypeAnnotationIndex, UserTypeAnnotation,
+    UserTypeAnnotationIndex,
 };
-use util::ppaux;
+use crate::ty::print::{FmtPrinter, Printer};
 
-pub use mir::interpret::AssertMessage;
+pub use crate::mir::interpret::AssertMessage;
 
 mod cache;
 pub mod interpret;
@@ -108,7 +109,7 @@ pub struct Mir<'tcx> {
     /// in scope, but a separate set of locals.
     pub promoted: IndexVec<Promoted, Mir<'tcx>>,
 
-    /// Yield type of the function, if it is a generator.
+    /// Yields type of the function, if it is a generator.
     pub yield_ty: Option<Ty<'tcx>>,
 
     /// Generator drop glue
@@ -380,7 +381,7 @@ impl<'tcx> Mir<'tcx> {
         }
     }
 
-    /// Check if `sub` is a sub scope of `sup`
+    /// Checks if `sub` is a sub scope of `sup`
     pub fn is_sub_scope(&self, mut sub: SourceScope, sup: SourceScope) -> bool {
         while sub != sup {
             match self.source_scopes[sub].parent_scope {
@@ -391,12 +392,12 @@ impl<'tcx> Mir<'tcx> {
         true
     }
 
-    /// Return the return type, it always return first element from `local_decls` array
+    /// Returns the return type, it always return first element from `local_decls` array
     pub fn return_ty(&self) -> Ty<'tcx> {
         self.local_decls[RETURN_PLACE].ty
     }
 
-    /// Get the location of the terminator for the given block
+    /// Gets the location of the terminator for the given block
     pub fn terminator_loc(&self, bb: BasicBlock) -> Location {
         Location {
             block: bb,
@@ -405,7 +406,7 @@ impl<'tcx> Mir<'tcx> {
     }
 }
 
-#[derive(Copy, Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub enum Safety {
     Safe,
     /// Unsafe because of a PushUnsafeBlock
@@ -413,7 +414,7 @@ pub enum Safety {
     /// Unsafe because of an unsafe fn
     FnUnsafe,
     /// Unsafe because of an `unsafe` block
-    ExplicitUnsafe(ast::NodeId),
+    ExplicitUnsafe(hir::HirId),
 }
 
 impl_stable_hash_for!(struct Mir<'tcx> {
@@ -451,7 +452,7 @@ impl<'tcx> IndexMut<BasicBlock> for Mir<'tcx> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, HashStable)]
 pub enum ClearCrossCrate<T> {
     Clear,
     Set(T),
@@ -472,7 +473,7 @@ impl<T: serialize::Decodable> serialize::UseSpecializedDecodable for ClearCrossC
 /// Grouped information about the source code origin of a MIR entity.
 /// Intended to be inspected by diagnostics and debuginfo.
 /// Most passes can work with it as a whole, within a single function.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, HashStable)]
 pub struct SourceInfo {
     /// Source span for the AST pertaining to this MIR entity.
     pub span: Span,
@@ -485,7 +486,7 @@ pub struct SourceInfo {
 ///////////////////////////////////////////////////////////////////////////
 // Mutability and borrow kinds
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable, HashStable)]
 pub enum Mutability {
     Mut,
     Not,
@@ -500,7 +501,8 @@ impl From<Mutability> for hir::Mutability {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd,
+         Ord, RustcEncodable, RustcDecodable, HashStable)]
 pub enum BorrowKind {
     /// Data must be immutable and is aliasable.
     Shared,
@@ -526,7 +528,7 @@ pub enum BorrowKind {
     /// We can also report errors with this kind of borrow differently.
     Shallow,
 
-    /// Data must be immutable but not aliasable.  This kind of borrow
+    /// Data must be immutable but not aliasable. This kind of borrow
     /// cannot currently be expressed by the user and is used only in
     /// implicit closure bindings. It is needed when the closure is
     /// borrowing or mutating a mutable referent, e.g.:
@@ -565,8 +567,8 @@ pub enum BorrowKind {
 
     /// Data is mutable and not aliasable.
     Mut {
-        /// True if this borrow arose from method-call auto-ref
-        /// (i.e., `adjustment::Adjust::Borrow`)
+        /// `true` if this borrow arose from method-call auto-ref
+        /// (i.e., `adjustment::Adjust::Borrow`).
         allow_two_phase_borrow: bool,
     },
 }
@@ -585,13 +587,14 @@ impl BorrowKind {
 
 newtype_index! {
     pub struct Local {
+        derive [HashStable]
         DEBUG_FORMAT = "_{}",
         const RETURN_PLACE = 0,
     }
 }
 
 /// Classifies locals into categories. See `Mir::local_kind`.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, HashStable)]
 pub enum LocalKind {
     /// User-declared variable binding
     Var,
@@ -610,7 +613,7 @@ pub struct VarBindingForm<'tcx> {
     /// If an explicit type was provided for this variable binding,
     /// this holds the source Span of that type.
     ///
-    /// NOTE: If you want to change this to a `HirId`, be wary that
+    /// NOTE: if you want to change this to a `HirId`, be wary that
     /// doing so breaks incremental compilation (as of this writing),
     /// while a `Span` does not cause our tests to fail.
     pub opt_ty_info: Option<Span>,
@@ -676,7 +679,7 @@ impl_stable_hash_for!(enum self::MirPhase {
 });
 
 mod binding_form_impl {
-    use ich::StableHashingContext;
+    use crate::ich::StableHashingContext;
     use rustc_data_structures::stable_hasher::{HashStable, StableHasher, StableHasherResult};
 
     impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for super::BindingForm<'tcx> {
@@ -721,7 +724,7 @@ impl_stable_hash_for!(struct BlockTailInfo { tail_result_is_ignored });
 ///
 /// This can be a binding declared by the user, a temporary inserted by the compiler, a function
 /// argument, or the return place.
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct LocalDecl<'tcx> {
     /// `let mut x` vs `let x`.
     ///
@@ -737,7 +740,7 @@ pub struct LocalDecl<'tcx> {
     /// `ClearCrossCrate` as long as it carries as `HirId`.
     pub is_user_variable: Option<ClearCrossCrate<BindingForm<'tcx>>>,
 
-    /// True if this is an internal local
+    /// `true` if this is an internal local.
     ///
     /// These locals are not based on types in the source code and are only used
     /// for a few desugarings at the moment.
@@ -864,7 +867,7 @@ pub struct LocalDecl<'tcx> {
 }
 
 impl<'tcx> LocalDecl<'tcx> {
-    /// Returns true only if local is a binding that can itself be
+    /// Returns `true` only if local is a binding that can itself be
     /// made mutable via the addition of the `mut` keyword, namely
     /// something like the occurrences of `x` in:
     /// - `fn foo(x: Type) { ... }`,
@@ -886,7 +889,7 @@ impl<'tcx> LocalDecl<'tcx> {
         }
     }
 
-    /// Returns true if local is definitely not a `ref ident` or
+    /// Returns `true` if local is definitely not a `ref ident` or
     /// `ref mut ident` binding. (Such bindings cannot be made into
     /// mutable bindings, but the inverse does not necessarily hold).
     pub fn is_nonref_binding(&self) -> bool {
@@ -904,7 +907,7 @@ impl<'tcx> LocalDecl<'tcx> {
         }
     }
 
-    /// Create a new `LocalDecl` for a temporary.
+    /// Creates a new `LocalDecl` for a temporary.
     #[inline]
     pub fn new_temp(ty: Ty<'tcx>, span: Span) -> Self {
         Self::new_local(ty, Mutability::Mut, false, span)
@@ -925,7 +928,7 @@ impl<'tcx> LocalDecl<'tcx> {
         self
     }
 
-    /// Create a new `LocalDecl` for a internal temporary.
+    /// Creates a new `LocalDecl` for a internal temporary.
     #[inline]
     pub fn new_internal(ty: Ty<'tcx>, span: Span) -> Self {
         Self::new_local(ty, Mutability::Mut, true, span)
@@ -977,7 +980,7 @@ impl<'tcx> LocalDecl<'tcx> {
 }
 
 /// A closure capture, with its name and mode.
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct UpvarDecl {
     pub debug_name: Name,
 
@@ -995,6 +998,7 @@ pub struct UpvarDecl {
 
 newtype_index! {
     pub struct BasicBlock {
+        derive [HashStable]
         DEBUG_FORMAT = "bb{}",
         const START_BLOCK = 0,
     }
@@ -1012,14 +1016,14 @@ impl BasicBlock {
 ///////////////////////////////////////////////////////////////////////////
 // BasicBlockData and Terminator
 
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct BasicBlockData<'tcx> {
     /// List of statements in this block.
     pub statements: Vec<Statement<'tcx>>,
 
     /// Terminator for this block.
     ///
-    /// NB. This should generally ONLY be `None` during construction.
+    /// N.B., this should generally ONLY be `None` during construction.
     /// Therefore, you should generally access it via the
     /// `terminator()` or `terminator_mut()` methods. The only
     /// exception is that certain passes, such as `simplify_cfg`, swap
@@ -1034,13 +1038,13 @@ pub struct BasicBlockData<'tcx> {
     pub is_cleanup: bool,
 }
 
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct Terminator<'tcx> {
     pub source_info: SourceInfo,
     pub kind: TerminatorKind<'tcx>,
 }
 
-#[derive(Clone, RustcEncodable, RustcDecodable)]
+#[derive(Clone, RustcEncodable, RustcDecodable, HashStable)]
 pub enum TerminatorKind<'tcx> {
     /// block should have one successor in the graph; we jump there
     Goto { target: BasicBlock },
@@ -1637,7 +1641,7 @@ impl<'tcx> TerminatorKind<'tcx> {
         }
     }
 
-    /// Return the list of labels for the edges to the successor basic blocks.
+    /// Returns the list of labels for the edges to the successor basic blocks.
     pub fn fmt_successor_labels(&self) -> Vec<Cow<'static, str>> {
         use self::TerminatorKind::*;
         match *self {
@@ -1723,7 +1727,7 @@ impl<'tcx> TerminatorKind<'tcx> {
 ///////////////////////////////////////////////////////////////////////////
 // Statements
 
-#[derive(Clone, RustcEncodable, RustcDecodable)]
+#[derive(Clone, RustcEncodable, RustcDecodable, HashStable)]
 pub struct Statement<'tcx> {
     pub source_info: SourceInfo,
     pub kind: StatementKind<'tcx>,
@@ -1749,7 +1753,7 @@ impl<'tcx> Statement<'tcx> {
     }
 }
 
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub enum StatementKind<'tcx> {
     /// Write the RHS Rvalue to the LHS Place.
     Assign(Place<'tcx>, Box<Rvalue<'tcx>>),
@@ -1760,7 +1764,7 @@ pub enum StatementKind<'tcx> {
     /// error messages to these specific patterns.
     ///
     /// Note that this also is emitted for regular `let` bindings to ensure that locals that are
-    /// never accessed still get some sanity checks for e.g. `let x: ! = ..;`
+    /// never accessed still get some sanity checks for, e.g., `let x: ! = ..;`
     FakeRead(FakeReadCause, Place<'tcx>),
 
     /// Write the discriminant for a variant to the enum Place.
@@ -1775,14 +1779,14 @@ pub enum StatementKind<'tcx> {
     /// End the current live range for the storage of the local.
     StorageDead(Local),
 
-    /// Execute a piece of inline Assembly.
+    /// Executes a piece of inline Assembly.
     InlineAsm {
         asm: Box<InlineAsm>,
         outputs: Box<[Place<'tcx>]>,
         inputs: Box<[(Span, Operand<'tcx>)]>,
     },
 
-    /// Retag references in the given place, ensuring they got fresh tags.  This is
+    /// Retag references in the given place, ensuring they got fresh tags. This is
     /// part of the Stacked Borrows model. These statements are currently only interpreted
     /// by miri and only generated when "-Z mir-emit-retag" is passed.
     /// See <https://internals.rust-lang.org/t/stacked-borrows-an-aliasing-model-for-rust/8153/>
@@ -1808,7 +1812,7 @@ pub enum StatementKind<'tcx> {
 }
 
 /// `RetagKind` describes what kind of retag is to be performed.
-#[derive(Copy, Clone, RustcEncodable, RustcDecodable, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, RustcEncodable, RustcDecodable, Debug, PartialEq, Eq, HashStable)]
 pub enum RetagKind {
     /// The initial retag when entering a function
     FnEntry,
@@ -1821,18 +1825,23 @@ pub enum RetagKind {
 }
 
 /// The `FakeReadCause` describes the type of pattern why a `FakeRead` statement exists.
-#[derive(Copy, Clone, RustcEncodable, RustcDecodable, Debug)]
+#[derive(Copy, Clone, RustcEncodable, RustcDecodable, Debug, HashStable)]
 pub enum FakeReadCause {
-    /// Inject a fake read of the borrowed input at the start of each arm's
-    /// pattern testing code.
+    /// Inject a fake read of the borrowed input at the end of each guards
+    /// code.
     ///
-    /// This should ensure that you cannot change the variant for an enum
-    /// while you are in the midst of matching on it.
+    /// This should ensure that you cannot change the variant for an enum while
+    /// you are in the midst of matching on it.
     ForMatchGuard,
 
     /// `let x: !; match x {}` doesn't generate any read of x so we need to
     /// generate a read of x to check that it is initialized and safe.
     ForMatchedPlace,
+
+    /// A fake read of the RefWithinGuard version of a bind-by-value variable
+    /// in a match guard to ensure that it's value hasn't change by the time
+    /// we create the OutsideGuard version.
+    ForGuardBinding,
 
     /// Officially, the semantics of
     ///
@@ -1889,8 +1898,16 @@ impl<'tcx> Debug for Statement<'tcx> {
 
 /// A path to a value; something that can be evaluated without
 /// changing or disturbing program state.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub enum Place<'tcx> {
+    Base(PlaceBase<'tcx>),
+
+    /// projection out of a place (access a field, deref a pointer, etc)
+    Projection(Box<PlaceProjection<'tcx>>),
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable, HashStable)]
+pub enum PlaceBase<'tcx> {
     /// local variable
     Local(Local),
 
@@ -1899,12 +1916,9 @@ pub enum Place<'tcx> {
 
     /// Constant code promoted to an injected static
     Promoted(Box<(Promoted, Ty<'tcx>)>),
-
-    /// projection out of a place (access a field, deref a pointer, etc)
-    Projection(Box<PlaceProjection<'tcx>>),
 }
 
-/// The def-id of a static, along with its normalized type (which is
+/// The `DefId` of a static, along with its normalized type (which is
 /// stored to avoid requiring normalization when reading MIR).
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
 pub struct Static<'tcx> {
@@ -1921,13 +1935,15 @@ impl_stable_hash_for!(struct Static<'tcx> {
 /// or `*B` or `B[index]`. Note that it is parameterized because it is
 /// shared between `Constant` and `Place`. See the aliases
 /// `PlaceProjection` etc below.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord,
+         Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub struct Projection<'tcx, B, V, T> {
     pub base: B,
     pub elem: ProjectionElem<'tcx, V, T>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord,
+         Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub enum ProjectionElem<'tcx, V, T> {
     Deref,
     Field(Field, T),
@@ -1984,11 +2000,14 @@ pub type ProjectionKind<'tcx> = ProjectionElem<'tcx, (), ()>;
 
 newtype_index! {
     pub struct Field {
+        derive [HashStable]
         DEBUG_FORMAT = "field[{}]"
     }
 }
 
 impl<'tcx> Place<'tcx> {
+    pub const RETURN_PLACE: Place<'tcx> = Place::Base(PlaceBase::Local(RETURN_PLACE));
+
     pub fn field(self, f: Field, ty: Ty<'tcx>) -> Place<'tcx> {
         self.elem(ProjectionElem::Field(f, ty))
     }
@@ -2009,27 +2028,27 @@ impl<'tcx> Place<'tcx> {
         Place::Projection(Box::new(PlaceProjection { base: self, elem }))
     }
 
-    /// Find the innermost `Local` from this `Place`, *if* it is either a local itself or
+    /// Finds the innermost `Local` from this `Place`, *if* it is either a local itself or
     /// a single deref of a local.
-    ///
-    /// FIXME: can we safely swap the semantics of `fn base_local` below in here instead?
+    //
+    // FIXME: can we safely swap the semantics of `fn base_local` below in here instead?
     pub fn local(&self) -> Option<Local> {
         match self {
-            Place::Local(local) |
+            Place::Base(PlaceBase::Local(local)) |
             Place::Projection(box Projection {
-                base: Place::Local(local),
+                base: Place::Base(PlaceBase::Local(local)),
                 elem: ProjectionElem::Deref,
             }) => Some(*local),
             _ => None,
         }
     }
 
-    /// Find the innermost `Local` from this `Place`.
+    /// Finds the innermost `Local` from this `Place`.
     pub fn base_local(&self) -> Option<Local> {
         match self {
-            Place::Local(local) => Some(*local),
+            Place::Base(PlaceBase::Local(local)) => Some(*local),
             Place::Projection(box Projection { base, elem: _ }) => base.base_local(),
-            Place::Promoted(..) | Place::Static(..) => None,
+            Place::Base(PlaceBase::Promoted(..)) | Place::Base(PlaceBase::Static(..)) => None,
         }
     }
 }
@@ -2039,14 +2058,19 @@ impl<'tcx> Debug for Place<'tcx> {
         use self::Place::*;
 
         match *self {
-            Local(id) => write!(fmt, "{:?}", id),
-            Static(box self::Static { def_id, ty }) => write!(
+            Base(PlaceBase::Local(id)) => write!(fmt, "{:?}", id),
+            Base(PlaceBase::Static(box self::Static { def_id, ty })) => write!(
                 fmt,
                 "({}: {:?})",
-                ty::tls::with(|tcx| tcx.item_path_str(def_id)),
+                ty::tls::with(|tcx| tcx.def_path_str(def_id)),
                 ty
             ),
-            Promoted(ref promoted) => write!(fmt, "({:?}: {:?})", promoted.0, promoted.1),
+            Base(PlaceBase::Promoted(ref promoted)) => write!(
+                fmt,
+                "({:?}: {:?})",
+                promoted.0,
+                promoted.1
+            ),
             Projection(ref data) => match data.elem {
                 ProjectionElem::Downcast(ref adt_def, index) => {
                     write!(fmt, "({:?} as {})", data.base, adt_def.variants[index].ident)
@@ -2085,21 +2109,22 @@ impl<'tcx> Debug for Place<'tcx> {
 
 newtype_index! {
     pub struct SourceScope {
+        derive [HashStable]
         DEBUG_FORMAT = "scope[{}]",
         const OUTERMOST_SOURCE_SCOPE = 0,
     }
 }
 
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct SourceScopeData {
     pub span: Span,
     pub parent_scope: Option<SourceScope>,
 }
 
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct SourceScopeLocalData {
-    /// A NodeId with lint levels equivalent to this scope's lint levels.
-    pub lint_root: ast::NodeId,
+    /// A HirId with lint levels equivalent to this scope's lint levels.
+    pub lint_root: hir::HirId,
     /// The unsafe block that contains this node.
     pub safety: Safety,
 }
@@ -2109,7 +2134,7 @@ pub struct SourceScopeLocalData {
 
 /// These are values that can appear inside an rvalue. They are intentionally
 /// limited to prevent rvalues from being nested in one another.
-#[derive(Clone, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Clone, PartialEq, RustcEncodable, RustcDecodable, HashStable)]
 pub enum Operand<'tcx> {
     /// Copy: The value must be available for use afterwards.
     ///
@@ -2141,12 +2166,12 @@ impl<'tcx> Debug for Operand<'tcx> {
 
 impl<'tcx> Operand<'tcx> {
     /// Convenience helper to make a constant that refers to the fn
-    /// with given def-id and substs. Since this is used to synthesize
+    /// with given `DefId` and substs. Since this is used to synthesize
     /// MIR, assumes `user_ty` is None.
     pub fn function_handle<'a>(
         tcx: TyCtxt<'a, 'tcx, 'tcx>,
         def_id: DefId,
-        substs: &'tcx Substs<'tcx>,
+        substs: SubstsRef<'tcx>,
         span: Span,
     ) -> Self {
         let ty = tcx.type_of(def_id).subst(tcx, substs);
@@ -2154,8 +2179,8 @@ impl<'tcx> Operand<'tcx> {
             span,
             ty,
             user_ty: None,
-            literal: tcx.intern_lazy_const(
-                ty::LazyConst::Evaluated(ty::Const::zero_sized(ty)),
+            literal: tcx.mk_const(
+                ty::Const::zero_sized(ty),
             ),
         })
     }
@@ -2171,7 +2196,7 @@ impl<'tcx> Operand<'tcx> {
 ///////////////////////////////////////////////////////////////////////////
 /// Rvalues
 
-#[derive(Clone, RustcEncodable, RustcDecodable)]
+#[derive(Clone, RustcEncodable, RustcDecodable, HashStable)]
 pub enum Rvalue<'tcx> {
     /// x (either a move or copy, depending on type of x)
     Use(Operand<'tcx>),
@@ -2199,7 +2224,7 @@ pub enum Rvalue<'tcx> {
     /// be defined to return, say, a 0) if ADT is not an enum.
     Discriminant(Place<'tcx>),
 
-    /// Create an aggregate value, like a tuple or struct.  This is
+    /// Creates an aggregate value, like a tuple or struct. This is
     /// only needed because we want to distinguish `dest = Foo { x:
     /// ..., y: ... }` from `dest.x = ...; dest.y = ...;` in the case
     /// that `Foo` has a destructor. These rvalues can be optimized
@@ -2207,18 +2232,21 @@ pub enum Rvalue<'tcx> {
     Aggregate(Box<AggregateKind<'tcx>>, Vec<Operand<'tcx>>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable, HashStable)]
 pub enum CastKind {
     Misc,
 
-    /// Convert unique, zero-sized type for a fn to fn()
+    /// Converts unique, zero-sized type for a fn to fn()
     ReifyFnPointer,
 
-    /// Convert non capturing closure to fn()
+    /// Converts non capturing closure to fn()
     ClosureFnPointer,
 
-    /// Convert safe fn() to unsafe fn()
+    /// Converts safe fn() to unsafe fn()
     UnsafeFnPointer,
+
+    /// Coerces *mut T to *const T, preserving T.
+    MutToConstPointer,
 
     /// "Unsize" -- convert a thin-or-fat pointer to a fat pointer.
     /// codegen must figure out the details once full monomorphization
@@ -2228,7 +2256,7 @@ pub enum CastKind {
     Unsize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable, HashStable)]
 pub enum AggregateKind<'tcx> {
     /// The type is of the element
     Array(Ty<'tcx>),
@@ -2242,7 +2270,7 @@ pub enum AggregateKind<'tcx> {
     Adt(
         &'tcx AdtDef,
         VariantIdx,
-        &'tcx Substs<'tcx>,
+        SubstsRef<'tcx>,
         Option<UserTypeAnnotationIndex>,
         Option<usize>,
     ),
@@ -2251,7 +2279,7 @@ pub enum AggregateKind<'tcx> {
     Generator(DefId, GeneratorSubsts<'tcx>, hir::GeneratorMovability),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable, HashStable)]
 pub enum BinOp {
     /// The `+` operator (addition)
     Add,
@@ -2299,15 +2327,15 @@ impl BinOp {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable, HashStable)]
 pub enum NullOp {
-    /// Return the size of a value of that type
+    /// Returns the size of a value of that type
     SizeOf,
-    /// Create a new uninitialized box for a value of that type
+    /// Creates a new uninitialized box for a value of that type
     Box,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, RustcEncodable, RustcDecodable, HashStable)]
 pub enum UnOp {
     /// The `!` operator for logical inversion
     Not,
@@ -2341,7 +2369,10 @@ impl<'tcx> Debug for Rvalue<'tcx> {
                 };
 
                 // When printing regions, add trailing space if necessary.
-                let region = if ppaux::verbose() || ppaux::identify_regions() {
+                let print_region = ty::tls::with(|tcx| {
+                    tcx.sess.verbose() || tcx.sess.opts.debugging_opts.identify_regions
+                });
+                let region = if print_region {
                     let mut region = region.to_string();
                     if region.len() > 0 {
                         region.push(' ');
@@ -2375,7 +2406,13 @@ impl<'tcx> Debug for Rvalue<'tcx> {
                     AggregateKind::Adt(adt_def, variant, substs, _user_ty, _) => {
                         let variant_def = &adt_def.variants[variant];
 
-                        ppaux::parameterized(fmt, substs, variant_def.did, &[])?;
+                        let f = &mut *fmt;
+                        ty::tls::with(|tcx| {
+                            let substs = tcx.lift(&substs).expect("could not lift for printing");
+                            FmtPrinter::new(tcx, f, Namespace::ValueNS)
+                                .print_def_path(variant_def.did, substs)?;
+                            Ok(())
+                        })?;
 
                         match variant_def.ctor_kind {
                             CtorKind::Const => Ok(()),
@@ -2391,15 +2428,15 @@ impl<'tcx> Debug for Rvalue<'tcx> {
                     }
 
                     AggregateKind::Closure(def_id, _) => ty::tls::with(|tcx| {
-                        if let Some(node_id) = tcx.hir().as_local_node_id(def_id) {
+                        if let Some(hir_id) = tcx.hir().as_local_hir_id(def_id) {
                             let name = if tcx.sess.opts.debugging_opts.span_free_formats {
-                                format!("[closure@{:?}]", node_id)
+                                format!("[closure@{:?}]", hir_id)
                             } else {
-                                format!("[closure@{:?}]", tcx.hir().span(node_id))
+                                format!("[closure@{:?}]", tcx.hir().span_by_hir_id(hir_id))
                             };
                             let mut struct_fmt = fmt.debug_struct(&name);
 
-                            tcx.with_freevars(node_id, |freevars| {
+                            tcx.with_freevars(hir_id, |freevars| {
                                 for (freevar, place) in freevars.iter().zip(places) {
                                     let var_name = tcx.hir().name(freevar.var_id());
                                     struct_fmt.field(&var_name.as_str(), place);
@@ -2413,11 +2450,12 @@ impl<'tcx> Debug for Rvalue<'tcx> {
                     }),
 
                     AggregateKind::Generator(def_id, _, _) => ty::tls::with(|tcx| {
-                        if let Some(node_id) = tcx.hir().as_local_node_id(def_id) {
-                            let name = format!("[generator@{:?}]", tcx.hir().span(node_id));
+                        if let Some(hir_id) = tcx.hir().as_local_hir_id(def_id) {
+                            let name = format!("[generator@{:?}]",
+                                               tcx.hir().span_by_hir_id(hir_id));
                             let mut struct_fmt = fmt.debug_struct(&name);
 
-                            tcx.with_freevars(node_id, |freevars| {
+                            tcx.with_freevars(hir_id, |freevars| {
                                 for (freevar, place) in freevars.iter().zip(places) {
                                     let var_name = tcx.hir().name(freevar.var_id());
                                     struct_fmt.field(&var_name.as_str(), place);
@@ -2447,7 +2485,7 @@ impl<'tcx> Debug for Rvalue<'tcx> {
 /// this does not necessarily mean that they are "==" in Rust -- in
 /// particular one must be wary of `NaN`!
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub struct Constant<'tcx> {
     pub span: Span,
     pub ty: Ty<'tcx>,
@@ -2459,7 +2497,7 @@ pub struct Constant<'tcx> {
     /// Needed for NLL to impose user-given type constraints.
     pub user_ty: Option<UserTypeAnnotationIndex>,
 
-    pub literal: &'tcx ty::LazyConst<'tcx>,
+    pub literal: &'tcx ty::Const<'tcx>,
 }
 
 /// A collection of projections into user types.
@@ -2494,7 +2532,7 @@ pub struct Constant<'tcx> {
 /// The first will lead to the constraint `w: &'1 str` (for some
 /// inferred region `'1`). The second will lead to the constraint `w:
 /// &'static str`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub struct UserTypeProjections<'tcx> {
     pub(crate) contents: Vec<(UserTypeProjection<'tcx>, Span)>,
 }
@@ -2580,7 +2618,7 @@ impl<'tcx> UserTypeProjections<'tcx> {
 /// * `let (x, _): T = ...` -- here, the `projs` vector would contain
 ///   `field[0]` (aka `.0`), indicating that the type of `s` is
 ///   determined by finding the type of the `.0` field from `T`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub struct UserTypeProjection<'tcx> {
     pub base: UserTypeAnnotationIndex,
     pub projs: Vec<ProjectionElem<'tcx, (), ()>>,
@@ -2625,7 +2663,7 @@ CloneTypeFoldableAndLiftImpls! { ProjectionKind<'tcx>, }
 
 impl<'tcx> TypeFoldable<'tcx> for UserTypeProjection<'tcx> {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
-        use mir::ProjectionElem::*;
+        use crate::mir::ProjectionElem::*;
 
         let base = self.base.fold_with(folder);
         let projs: Vec<_> = self.projs
@@ -2650,6 +2688,7 @@ impl<'tcx> TypeFoldable<'tcx> for UserTypeProjection<'tcx> {
 
 newtype_index! {
     pub struct Promoted {
+        derive [HashStable]
         DEBUG_FORMAT = "promoted[{}]"
     }
 }
@@ -2657,21 +2696,12 @@ newtype_index! {
 impl<'tcx> Debug for Constant<'tcx> {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
         write!(fmt, "const ")?;
-        fmt_lazy_const_val(fmt, self.literal)
+        fmt_const_val(fmt, *self.literal)
     }
 }
-
-/// Write a `ConstValue` in a way closer to the original source code than the `Debug` output.
-pub fn fmt_lazy_const_val(f: &mut impl Write, const_val: &ty::LazyConst<'_>) -> fmt::Result {
-    match *const_val {
-        ty::LazyConst::Unevaluated(..) => write!(f, "{:?}", const_val),
-        ty::LazyConst::Evaluated(c) => fmt_const_val(f, c),
-    }
-}
-
 /// Write a `ConstValue` in a way closer to the original source code than the `Debug` output.
 pub fn fmt_const_val(f: &mut impl Write, const_val: ty::Const<'_>) -> fmt::Result {
-    use ty::TyKind::*;
+    use crate::ty::TyKind::*;
     let value = const_val.val;
     let ty = const_val.ty;
     // print some primitives
@@ -2699,35 +2729,33 @@ pub fn fmt_const_val(f: &mut impl Write, const_val: ty::Const<'_>) -> fmt::Resul
     }
     // print function definitions
     if let FnDef(did, _) = ty.sty {
-        return write!(f, "{}", item_path_str(did));
+        return write!(f, "{}", def_path_str(did));
     }
     // print string literals
-    if let ConstValue::ScalarPair(ptr, len) = value {
+    if let ConstValue::Slice(ptr, len) = value {
         if let Scalar::Ptr(ptr) = ptr {
-            if let Scalar::Bits { bits: len, .. } = len {
-                if let Ref(_, &ty::TyS { sty: Str, .. }, _) = ty.sty {
-                    return ty::tls::with(|tcx| {
-                        let alloc = tcx.alloc_map.lock().get(ptr.alloc_id);
-                        if let Some(interpret::AllocKind::Memory(alloc)) = alloc {
-                            assert_eq!(len as usize as u128, len);
-                            let slice =
-                                &alloc.bytes[(ptr.offset.bytes() as usize)..][..(len as usize)];
-                            let s = ::std::str::from_utf8(slice).expect("non utf8 str from miri");
-                            write!(f, "{:?}", s)
-                        } else {
-                            write!(f, "pointer to erroneous constant {:?}, {:?}", ptr, len)
-                        }
-                    });
-                }
+            if let Ref(_, &ty::TyS { sty: Str, .. }, _) = ty.sty {
+                return ty::tls::with(|tcx| {
+                    let alloc = tcx.alloc_map.lock().get(ptr.alloc_id);
+                    if let Some(interpret::AllocKind::Memory(alloc)) = alloc {
+                        assert_eq!(len as usize as u64, len);
+                        let slice =
+                            &alloc.bytes[(ptr.offset.bytes() as usize)..][..(len as usize)];
+                        let s = ::std::str::from_utf8(slice).expect("non utf8 str from miri");
+                        write!(f, "{:?}", s)
+                    } else {
+                        write!(f, "pointer to erroneous constant {:?}, {:?}", ptr, len)
+                    }
+                });
             }
         }
     }
     // just raw dump everything else
-    write!(f, "{:?}:{}", value, ty)
+    write!(f, "{:?} : {}", value, ty)
 }
 
-fn item_path_str(def_id: DefId) -> String {
-    ty::tls::with(|tcx| tcx.item_path_str(def_id))
+fn def_path_str(def_id: DefId) -> String {
+    ty::tls::with(|tcx| tcx.def_path_str(def_id))
 }
 
 impl<'tcx> graph::DirectedGraph for Mir<'tcx> {
@@ -2774,7 +2802,7 @@ impl<'a, 'b> graph::GraphSuccessors<'b> for Mir<'a> {
     type Iter = iter::Cloned<Successors<'b>>;
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, HashStable)]
 pub struct Location {
     /// the location is within this block
     pub block: BasicBlock,
@@ -2846,16 +2874,16 @@ impl Location {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub enum UnsafetyViolationKind {
     General,
-    /// Permitted in const fn and regular fns
+    /// Permitted in const fn and regular fns.
     GeneralAndConstFn,
-    ExternStatic(ast::NodeId),
-    BorrowPacked(ast::NodeId),
+    ExternStatic(hir::HirId),
+    BorrowPacked(hir::HirId),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub struct UnsafetyViolation {
     pub source_info: SourceInfo,
     pub description: InternedString,
@@ -2863,22 +2891,22 @@ pub struct UnsafetyViolation {
     pub kind: UnsafetyViolationKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub struct UnsafetyCheckResult {
     /// Violations that are propagated *upwards* from this function
     pub violations: Lrc<[UnsafetyViolation]>,
     /// unsafe blocks in this function, along with whether they are used. This is
     /// used for the "unused_unsafe" lint.
-    pub unsafe_blocks: Lrc<[(ast::NodeId, bool)]>,
+    pub unsafe_blocks: Lrc<[(hir::HirId, bool)]>,
 }
 
 /// The layout of generator state
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct GeneratorLayout<'tcx> {
     pub fields: Vec<LocalDecl<'tcx>>,
 }
 
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct BorrowCheckResult<'gcx> {
     pub closure_requirements: Option<ClosureRegionRequirements<'gcx>>,
     pub used_mut_upvars: SmallVec<[Field; 8]>,
@@ -2886,7 +2914,7 @@ pub struct BorrowCheckResult<'gcx> {
 
 /// After we borrow check a closure, we are left with various
 /// requirements that we have inferred between the free regions that
-/// appear in the closure's signature or on its field types.  These
+/// appear in the closure's signature or on its field types. These
 /// requirements are then verified and proved by the closure's
 /// creating function. This struct encodes those requirements.
 ///
@@ -2934,9 +2962,9 @@ pub struct BorrowCheckResult<'gcx> {
 /// that case because the regions must be allocated in the global
 /// TyCtxt, and hence we cannot use `ReVar` (which is what we use
 /// internally within the rest of the NLL code).
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct ClosureRegionRequirements<'gcx> {
-    /// The number of external regions defined on the closure.  In our
+    /// The number of external regions defined on the closure. In our
     /// example above, it would be 3 -- one for `'static`, then `'1`
     /// and `'2`. This is just used for a sanity check later on, to
     /// make sure that the number of regions we see at the callsite
@@ -2950,7 +2978,7 @@ pub struct ClosureRegionRequirements<'gcx> {
 
 /// Indicates an outlives constraint between a type or between two
 /// free-regions declared on the closure.
-#[derive(Copy, Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct ClosureOutlivesRequirement<'tcx> {
     // This region or type ...
     pub subject: ClosureOutlivesSubject<'tcx>,
@@ -2970,7 +2998,8 @@ pub struct ClosureOutlivesRequirement<'tcx> {
 /// order of the category, thereby influencing diagnostic output.
 ///
 /// See also [rustc_mir::borrow_check::nll::constraints]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord,
+         Hash, RustcEncodable, RustcDecodable, HashStable)]
 pub enum ConstraintCategory {
     Return,
     Yield,
@@ -3007,7 +3036,7 @@ pub enum ConstraintCategory {
 
 /// The subject of a ClosureOutlivesRequirement -- that is, the thing
 /// that must outlive some region.
-#[derive(Copy, Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub enum ClosureOutlivesSubject<'tcx> {
     /// Subject is a type, typically a type parameter, but could also
     /// be a projection. Indicates a requirement like `T: 'a` being
@@ -3118,7 +3147,7 @@ EnumTypeFoldableImpl! {
 
 impl<'tcx> TypeFoldable<'tcx> for Terminator<'tcx> {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
-        use mir::TerminatorKind::*;
+        use crate::mir::TerminatorKind::*;
 
         let kind = match self.kind {
             Goto { target } => Goto { target },
@@ -3231,7 +3260,7 @@ impl<'tcx> TypeFoldable<'tcx> for Terminator<'tcx> {
     }
 
     fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
-        use mir::TerminatorKind::*;
+        use crate::mir::TerminatorKind::*;
 
         match self.kind {
             SwitchInt {
@@ -3303,7 +3332,7 @@ impl<'tcx> TypeFoldable<'tcx> for Place<'tcx> {
 
 impl<'tcx> TypeFoldable<'tcx> for Rvalue<'tcx> {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
-        use mir::Rvalue::*;
+        use crate::mir::Rvalue::*;
         match *self {
             Use(ref op) => Use(op.fold_with(folder)),
             Repeat(ref op, len) => Repeat(op.fold_with(folder), len),
@@ -3345,7 +3374,7 @@ impl<'tcx> TypeFoldable<'tcx> for Rvalue<'tcx> {
     }
 
     fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
-        use mir::Rvalue::*;
+        use crate::mir::Rvalue::*;
         match *self {
             Use(ref op) => op.visit_with(visitor),
             Repeat(ref op, _) => op.visit_with(visitor),
@@ -3397,7 +3426,7 @@ where
     T: TypeFoldable<'tcx>,
 {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
-        use mir::ProjectionElem::*;
+        use crate::mir::ProjectionElem::*;
 
         let base = self.base.fold_with(folder);
         let elem = match self.elem {
@@ -3411,7 +3440,7 @@ where
     }
 
     fn super_visit_with<Vs: TypeVisitor<'tcx>>(&self, visitor: &mut Vs) -> bool {
-        use mir::ProjectionElem::*;
+        use crate::mir::ProjectionElem::*;
 
         self.base.visit_with(visitor) || match self.elem {
             Field(_, ref ty) => ty.visit_with(visitor),

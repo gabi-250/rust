@@ -1,14 +1,13 @@
 use std::cell::Cell;
-use std::cmp::Ordering::{Equal, Greater, Less};
-use std::cmp::Ordering;
+use std::cmp::Ordering::{self, Equal, Greater, Less};
 use std::mem;
 use std::panic;
 use std::rc::Rc;
-use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{ATOMIC_USIZE_INIT, AtomicUsize};
+use std::sync::atomic::{Ordering::Relaxed, AtomicUsize};
 use std::thread;
 
-use rand::{Rng, RngCore, thread_rng, seq::SliceRandom};
+use rand::{Rng, RngCore, thread_rng};
+use rand::seq::SliceRandom;
 use rand::distributions::Standard;
 
 fn square(n: usize) -> usize {
@@ -390,6 +389,7 @@ fn test_reverse() {
 }
 
 #[test]
+#[cfg(not(miri))] // Miri does not support entropy
 fn test_sort() {
     let mut rng = thread_rng();
 
@@ -466,6 +466,7 @@ fn test_sort() {
 }
 
 #[test]
+#[cfg(not(miri))] // Miri does not support entropy
 fn test_sort_stability() {
     for len in (2..25).chain(500..510) {
         for _ in 0..10 {
@@ -476,7 +477,7 @@ fn test_sort_stability() {
             // the second item represents which occurrence of that
             // number this element is, i.e., the second elements
             // will occur in sorted order.
-            let mut orig: Vec<_> = (0..len)
+            let orig: Vec<_> = (0..len)
                 .map(|_| {
                     let n = thread_rng().gen::<usize>() % 10;
                     counts[n] += 1;
@@ -1396,6 +1397,7 @@ fn test_box_slice_clone() {
 #[test]
 #[allow(unused_must_use)] // here, we care about the side effects of `.clone()`
 #[cfg_attr(target_os = "emscripten", ignore)]
+#[cfg(not(miri))] // Miri does not support threads nor entropy
 fn test_box_slice_clone_panics() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1500,7 +1502,7 @@ static DROP_COUNTS: [AtomicUsize; MAX_LEN] = [
     AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
 ];
 
-static VERSIONS: AtomicUsize = ATOMIC_USIZE_INIT;
+static VERSIONS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Eq)]
 struct DropCounter {
@@ -1587,6 +1589,7 @@ thread_local!(static SILENCE_PANIC: Cell<bool> = Cell::new(false));
 
 #[test]
 #[cfg_attr(target_os = "emscripten", ignore)] // no threads
+#[cfg(not(miri))] // Miri does not support threads nor entropy
 fn panic_safe() {
     let prev = panic::take_hook();
     panic::set_hook(Box::new(move |info| {

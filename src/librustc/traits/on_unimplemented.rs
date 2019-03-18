@@ -1,9 +1,9 @@
 use fmt_macros::{Parser, Piece, Position};
 
-use hir::def_id::DefId;
-use ty::{self, TyCtxt, GenericParamDefKind};
-use util::common::ErrorReported;
-use util::nodemap::FxHashMap;
+use crate::hir::def_id::DefId;
+use crate::ty::{self, TyCtxt, GenericParamDefKind};
+use crate::util::common::ErrorReported;
+use crate::util::nodemap::FxHashMap;
 
 use syntax::ast::{MetaItem, NestedMetaItem};
 use syntax::attr;
@@ -107,7 +107,7 @@ impl<'a, 'gcx, 'tcx> OnUnimplementedDirective {
             {
                 if let Some(items) = item.meta_item_list() {
                     if let Ok(subcommand) =
-                        Self::parse(tcx, trait_def_id, &items, item.span, false)
+                        Self::parse(tcx, trait_def_id, &items, item.span(), false)
                     {
                         subcommands.push(subcommand);
                     } else {
@@ -118,7 +118,7 @@ impl<'a, 'gcx, 'tcx> OnUnimplementedDirective {
             }
 
             // nothing found
-            parse_error(tcx, item.span,
+            parse_error(tcx, item.span(),
                         "this attribute must have a valid value",
                         "expected value here",
                         Some(r#"eg `#[rustc_on_unimplemented(message="foo")]`"#));
@@ -157,10 +157,7 @@ impl<'a, 'gcx, 'tcx> OnUnimplementedDirective {
                 note: None,
             }))
         } else {
-            return Err(parse_error(tcx, attr.span,
-                                   "`#[rustc_on_unimplemented]` requires a value",
-                                   "value required here",
-                                   Some(r#"eg `#[rustc_on_unimplemented(message="foo")]`"#)));
+            return Err(ErrorReported);
         };
         debug!("of_item({:?}/{:?}) = {:?}", trait_def_id, impl_def_id, result);
         result
@@ -180,10 +177,12 @@ impl<'a, 'gcx, 'tcx> OnUnimplementedDirective {
         for command in self.subcommands.iter().chain(Some(self)).rev() {
             if let Some(ref condition) = command.condition {
                 if !attr::eval_condition(condition, &tcx.sess.parse_sess, &mut |c| {
-                    options.contains(&(
-                        c.name().as_str().to_string(),
-                        c.value_str().map(|s| s.as_str().to_string())
-                    ))
+                    c.ident_str().map_or(false, |name| {
+                        options.contains(&(
+                            name.to_string(),
+                            c.value_str().map(|s| s.as_str().to_string())
+                        ))
+                    })
                 }) {
                     debug!("evaluate: skipping {:?} due to condition", command);
                     continue
@@ -279,11 +278,12 @@ impl<'a, 'gcx, 'tcx> OnUnimplementedFormatString {
                   -> String
     {
         let name = tcx.item_name(trait_ref.def_id);
-        let trait_str = tcx.item_path_str(trait_ref.def_id);
+        let trait_str = tcx.def_path_str(trait_ref.def_id);
         let generics = tcx.generics_of(trait_ref.def_id);
         let generic_map = generics.params.iter().filter_map(|param| {
             let value = match param.kind {
-                GenericParamDefKind::Type {..} => {
+                GenericParamDefKind::Type { .. } |
+                GenericParamDefKind::Const => {
                     trait_ref.substs[param.index as usize].to_string()
                 },
                 GenericParamDefKind::Lifetime => return None

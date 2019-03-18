@@ -1,13 +1,14 @@
 error[E0382]: use of moved value: `x`
   --> $DIR/borrowck-asm.rs:27:17
    |
+LL |         let x = &mut 0isize;
+   |             - move occurs because `x` has type `&mut isize`, which does not implement the `Copy` trait
+LL |         unsafe {
 LL |             asm!("nop" : : "r"(x));
    |                                - value moved here
 LL |         }
-LL |         let z = x;  //[ast]~ ERROR use of moved value: `x`
+LL |         let z = x;
    |                 ^ value used here after move
-   |
-   = note: move occurs because `x` has type `&mut isize`, which does not implement the `Copy` trait
 
 error[E0503]: cannot use `x` because it was mutably borrowed
   --> $DIR/borrowck-asm.rs:35:32
@@ -15,7 +16,7 @@ error[E0503]: cannot use `x` because it was mutably borrowed
 LL |         let y = &mut x;
    |                 ------ borrow of `x` occurs here
 LL |         unsafe {
-LL |             asm!("nop" : : "r"(x)); //[ast]~ ERROR cannot use
+LL |             asm!("nop" : : "r"(x));
    |                                ^ use of borrowed `x`
 ...
 LL |         let z = y;
@@ -30,7 +31,7 @@ LL |         let x = 3;
    |             first assignment to `x`
    |             help: make this binding mutable: `mut x`
 LL |         unsafe {
-LL |             asm!("nop" : "=r"(x));  //[ast]~ ERROR cannot assign twice
+LL |             asm!("nop" : "=r"(x));
    |                               ^ cannot assign twice to immutable variable
 
 error[E0384]: cannot assign twice to immutable variable `x`
@@ -42,13 +43,13 @@ LL |         let x = 3;
    |             first assignment to `x`
    |             help: make this binding mutable: `mut x`
 LL |         unsafe {
-LL |             asm!("nop" : "+r"(x));  //[ast]~ ERROR cannot assign twice
+LL |             asm!("nop" : "+r"(x));
    |                               ^ cannot assign twice to immutable variable
 
 error[E0381]: use of possibly uninitialized variable: `x`
   --> $DIR/borrowck-asm.rs:68:32
    |
-LL |             asm!("nop" : "=*r"(x)); //[ast]~ ERROR use of possibly uninitialized variable
+LL |             asm!("nop" : "=*r"(x));
    |                                ^ use of possibly uninitialized `x`
 
 error[E0506]: cannot assign to `x` because it is borrowed
@@ -57,7 +58,7 @@ error[E0506]: cannot assign to `x` because it is borrowed
 LL |         let y = &*x;
    |                 --- borrow of `x` occurs here
 LL |         unsafe {
-LL |             asm!("nop" : "+r"(x));  //[ast]~ ERROR cannot assign to `x` because it is borrowed
+LL |             asm!("nop" : "+r"(x));
    |                               ^ assignment to borrowed `x` occurs here
 ...
 LL |         let z = y;
@@ -66,12 +67,13 @@ LL |         let z = y;
 error[E0382]: use of moved value: `x`
   --> $DIR/borrowck-asm.rs:86:40
    |
-LL |             asm!("nop" : : "r"(x), "r"(x) );    //[ast]~ ERROR use of moved value
+LL |         let x = &mut 2;
+   |             - move occurs because `x` has type `&mut i32`, which does not implement the `Copy` trait
+LL |         unsafe {
+LL |             asm!("nop" : : "r"(x), "r"(x) );
    |                                -       ^ value used here after move
    |                                |
    |                                value moved here
-   |
-   = note: move occurs because `x` has type `&mut i32`, which does not implement the `Copy` trait
 
 error: aborting due to 7 previous errors
 

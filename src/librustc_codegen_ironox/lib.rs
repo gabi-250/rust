@@ -107,7 +107,7 @@ impl Clone for TargetMachineIronOx {
 }
 
 impl ExtraBackendMethods for IronOxCodegenBackend {
-    fn new_metadata(&self, _sess: &Session, _mod_name: &str) -> ModuleIronOx {
+    fn new_metadata(&self, tcx: TyCtxt<'_, '_, '_>, mod_name: &str) -> ModuleIronOx {
         ModuleIronOx::new()
     }
 

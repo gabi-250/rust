@@ -1,11 +1,11 @@
-use cfg::*;
-use middle::region;
+use crate::cfg::*;
+use crate::middle::region;
 use rustc_data_structures::graph::implementation as graph;
 use syntax::ptr::P;
-use ty::{self, TyCtxt};
+use crate::ty::{self, TyCtxt};
 
-use hir::{self, PatKind};
-use hir::def_id::DefId;
+use crate::hir::{self, PatKind};
+use crate::hir::def_id::DefId;
 
 struct CFGBuilder<'a, 'tcx: 'a> {
     tcx: TyCtxt<'a, 'tcx, 'tcx>,
@@ -99,30 +99,20 @@ impl<'a, 'tcx> CFGBuilder<'a, 'tcx> {
     }
 
     fn stmt(&mut self, stmt: &hir::Stmt, pred: CFGIndex) -> CFGIndex {
-        let hir_id = self.tcx.hir().node_to_hir_id(stmt.node.id());
-        match stmt.node {
-            hir::StmtKind::Decl(ref decl, _) => {
-                let exit = self.decl(&decl, pred);
-                self.add_ast_node(hir_id.local_id, &[exit])
-            }
-
-            hir::StmtKind::Expr(ref expr, _) |
-            hir::StmtKind::Semi(ref expr, _) => {
-                let exit = self.expr(&expr, pred);
-                self.add_ast_node(hir_id.local_id, &[exit])
-            }
-        }
-    }
-
-    fn decl(&mut self, decl: &hir::Decl, pred: CFGIndex) -> CFGIndex {
-        match decl.node {
-            hir::DeclKind::Local(ref local) => {
+        let exit = match stmt.node {
+            hir::StmtKind::Local(ref local) => {
                 let init_exit = self.opt_expr(&local.init, pred);
                 self.pat(&local.pat, init_exit)
             }
-
-            hir::DeclKind::Item(_) => pred,
-        }
+            hir::StmtKind::Item(_) => {
+                pred
+            }
+            hir::StmtKind::Expr(ref expr) |
+            hir::StmtKind::Semi(ref expr) => {
+                self.expr(&expr, pred)
+            }
+        };
+        self.add_ast_node(stmt.hir_id.local_id, &[exit])
     }
 
     fn pat(&mut self, pat: &hir::Pat, pred: CFGIndex) -> CFGIndex {
@@ -160,9 +150,11 @@ impl<'a, 'tcx> CFGBuilder<'a, 'tcx> {
         }
     }
 
-    fn pats_all<'b, I: Iterator<Item=&'b P<hir::Pat>>>(&mut self,
-                                          pats: I,
-                                          pred: CFGIndex) -> CFGIndex {
+    fn pats_all<'b, I: Iterator<Item=&'b P<hir::Pat>>>(
+        &mut self,
+        pats: I,
+        pred: CFGIndex
+    ) -> CFGIndex {
         //! Handles case where all of the patterns must match.
         pats.fold(pred, |pred, pat| self.pat(&pat, pred))
     }
@@ -406,7 +398,7 @@ impl<'a, 'tcx> CFGBuilder<'a, 'tcx> {
             args: I) -> CFGIndex {
         let func_or_rcvr_exit = self.expr(func_or_rcvr, pred);
         let ret = self.straightline(call_expr, func_or_rcvr_exit, args);
-        let m = self.tcx.hir().get_module_parent(call_expr.id);
+        let m = self.tcx.hir().get_module_parent_by_hir_id(call_expr.hir_id);
         if self.tcx.is_ty_uninhabited_from(m, self.tables.expr_ty(call_expr)) {
             self.add_unreachable_node()
         } else {
@@ -579,9 +571,9 @@ impl<'a, 'tcx> CFGBuilder<'a, 'tcx> {
         match destination.target_id {
             Ok(loop_id) => {
                 for b in &self.breakable_block_scopes {
-                    if b.block_expr_id == self.tcx.hir().node_to_hir_id(loop_id).local_id {
+                    if b.block_expr_id == loop_id.local_id {
                         let scope = region::Scope {
-                            id: self.tcx.hir().node_to_hir_id(loop_id).local_id,
+                            id: loop_id.local_id,
                             data: region::ScopeData::Node
                         };
                         return (scope, match scope_cf_kind {
@@ -591,9 +583,9 @@ impl<'a, 'tcx> CFGBuilder<'a, 'tcx> {
                     }
                 }
                 for l in &self.loop_scopes {
-                    if l.loop_id == self.tcx.hir().node_to_hir_id(loop_id).local_id {
+                    if l.loop_id == loop_id.local_id {
                         let scope = region::Scope {
-                            id: self.tcx.hir().node_to_hir_id(loop_id).local_id,
+                            id: loop_id.local_id,
                             data: region::ScopeData::Node
                         };
                         return (scope, match scope_cf_kind {

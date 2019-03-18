@@ -1,9 +1,10 @@
-use io;
-use libc::{self, c_int};
-use mem;
-use sync::atomic::{AtomicBool, ATOMIC_BOOL_INIT, Ordering};
-use sys::fd::FileDesc;
-use sys::{cvt, cvt_r};
+use crate::io;
+use crate::mem;
+use crate::sync::atomic::{AtomicBool, Ordering};
+use crate::sys::fd::FileDesc;
+use crate::sys::{cvt, cvt_r};
+
+use libc::c_int;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Anonymous pipes
@@ -13,7 +14,7 @@ pub struct AnonPipe(FileDesc);
 
 pub fn anon_pipe() -> io::Result<(AnonPipe, AnonPipe)> {
     syscall! { fn pipe2(fds: *mut c_int, flags: c_int) -> c_int }
-    static INVALID: AtomicBool = ATOMIC_BOOL_INIT;
+    static INVALID: AtomicBool = AtomicBool::new(false);
 
     let mut fds = [0; 2];
 

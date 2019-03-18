@@ -68,7 +68,8 @@ if (!DOMTokenList.prototype.remove) {
                      "keyword",
                      "existential",
                      "attr",
-                     "derive"];
+                     "derive",
+                     "traitalias"];
 
     var search_input = document.getElementsByClassName("search-input")[0];
 
@@ -78,8 +79,6 @@ if (!DOMTokenList.prototype.remove) {
     // 1 for "In Parameters"
     // 2 for "In Return Types"
     var currentTab = 0;
-
-    var themesWidth = null;
 
     var titleBeforeSearch = document.title;
 
@@ -150,8 +149,7 @@ if (!DOMTokenList.prototype.remove) {
     }
 
     function browserSupportsHistoryApi() {
-        return document.location.protocol != "file:" &&
-          window.history && typeof window.history.pushState === "function";
+        return window.history && typeof window.history.pushState === "function";
     }
 
     var main = document.getElementById("main");
@@ -241,7 +239,7 @@ if (!DOMTokenList.prototype.remove) {
         return String.fromCharCode(c);
     }
 
-    function displayHelp(display, ev) {
+    function displayHelp(display, ev, help) {
         if (display === true) {
             if (hasClass(help, "hidden")) {
                 ev.preventDefault();
@@ -259,7 +257,7 @@ if (!DOMTokenList.prototype.remove) {
         hideModal();
         var search = document.getElementById("search");
         if (hasClass(help, "hidden") === false) {
-            displayHelp(false, ev);
+            displayHelp(false, ev, help);
         } else if (hasClass(search, "hidden") === false) {
             ev.preventDefault();
             addClass(search, "hidden");
@@ -290,7 +288,7 @@ if (!DOMTokenList.prototype.remove) {
 
             case "s":
             case "S":
-                displayHelp(false, ev);
+                displayHelp(false, ev, help);
                 hideModal();
                 ev.preventDefault();
                 focusSearchBar();
@@ -305,7 +303,7 @@ if (!DOMTokenList.prototype.remove) {
             case "?":
                 if (ev.shiftKey) {
                     hideModal();
-                    displayHelp(true, ev);
+                    displayHelp(true, ev, help);
                 }
                 break;
             }
@@ -655,7 +653,7 @@ if (!DOMTokenList.prototype.remove) {
                                 return MAX_LEV_DISTANCE + 1;
                             }
                         }
-                        return lev_distance;//Math.ceil(total / done);
+                        return Math.ceil(total / done);
                     }
                 }
                 return MAX_LEV_DISTANCE + 1;
@@ -1198,7 +1196,7 @@ if (!DOMTokenList.prototype.remove) {
                 var actives = [[], [], []];
                 // "current" is used to know which tab we're looking into.
                 var current = 0;
-                onEachLazy(document.getElementsByClassName("search-results"), function(e) {
+                onEachLazy(document.getElementById("results").childNodes, function(e) {
                     onEachLazy(e.getElementsByClassName("highlighted"), function(e) {
                         actives[current].push(e);
                     });
@@ -1215,7 +1213,7 @@ if (!DOMTokenList.prototype.remove) {
                     removeClass(actives[currentTab][0], "highlighted");
                 } else if (e.which === 40) { // down
                     if (!actives[currentTab].length) {
-                        var results = document.getElementsByClassName("search-results");
+                        var results = document.getElementById("results").childNodes;
                         if (results.length > 0) {
                             var res = results[currentTab].getElementsByClassName("result");
                             if (res.length > 0) {
@@ -1555,10 +1553,10 @@ if (!DOMTokenList.prototype.remove) {
                 //              (String) description,
                 //              (Number | null) the parent path index to `paths`]
                 //              (Object | null) the type of the function (if any)
-                var items = rawSearchIndex[crate].items;
+                var items = rawSearchIndex[crate].i;
                 // an array of [(Number) item type,
                 //              (String) name]
-                var paths = rawSearchIndex[crate].paths;
+                var paths = rawSearchIndex[crate].p;
 
                 // convert `paths` into an object form
                 var len = paths.length;
@@ -1599,7 +1597,7 @@ if (!DOMTokenList.prototype.remove) {
                 clearTimeout(searchTimeout);
                 if (search_input.value.length === 0) {
                     if (browserSupportsHistoryApi()) {
-                        history.replaceState("", "std - Rust", "?search=");
+                        history.replaceState("", window.currentCrate + " - Rust", "?search=");
                     }
                     if (hasClass(main, "content")) {
                         removeClass(main, "hidden");
@@ -1787,6 +1785,7 @@ if (!DOMTokenList.prototype.remove) {
         block("type", "Type Definitions");
         block("foreigntype", "Foreign Types");
         block("keyword", "Keywords");
+        block("traitalias", "Trait Aliases");
     }
 
     window.initSidebarItems = initSidebarItems;
@@ -1887,12 +1886,30 @@ if (!DOMTokenList.prototype.remove) {
             updateLocalStorage("rustdoc-collapse", "true");
             addClass(innerToggle, "will-expand");
             onEveryMatchingChild(innerToggle, "inner", function(e) {
-                e.innerHTML = labelForToggleButton(true);
+                var parent = e.parentNode;
+                var superParent = null;
+
+                if (parent) {
+                    superParent = parent.parentNode;
+                }
+                if (!parent || !superParent || superParent.id !== "main" ||
+                    hasClass(parent, "impl") === false) {
+                    e.innerHTML = labelForToggleButton(true);
+                }
             });
             innerToggle.title = "expand all docs";
             if (fromAutoCollapse !== true) {
                 onEachLazy(document.getElementsByClassName("collapse-toggle"), function(e) {
-                    collapseDocs(e, "hide", pageId);
+                    var parent = e.parentNode;
+                    var superParent = null;
+
+                    if (parent) {
+                        superParent = parent.parentNode;
+                    }
+                    if (!parent || !superParent || superParent.id !== "main" ||
+                        hasClass(parent, "impl") === false) {
+                        collapseDocs(e, "hide", pageId);
+                    }
                 });
             }
         }
@@ -1918,9 +1935,9 @@ if (!DOMTokenList.prototype.remove) {
             };
         }
 
-        function implHider(addOrRemove) {
+        function implHider(addOrRemove, fullHide) {
             return function(n) {
-                var is_method = hasClass(n, "method");
+                var is_method = hasClass(n, "method") || fullHide;
                 if (is_method || hasClass(n, "type")) {
                     if (is_method === true) {
                         if (addOrRemove) {
@@ -1974,7 +1991,7 @@ if (!DOMTokenList.prototype.remove) {
                 }
             }
         } else {
-            // we are collapsing the impl block
+            // we are collapsing the impl block(s).
 
             var parentElem = toggle.parentNode;
             relatedDoc = parentElem;
@@ -1989,7 +2006,7 @@ if (!DOMTokenList.prototype.remove) {
                 return;
             }
 
-            // Hide all functions, but not associated types/consts
+            // Hide all functions, but not associated types/consts.
 
             if (mode === "toggle") {
                 if (hasClass(relatedDoc, "fns-now-collapsed") ||
@@ -2000,16 +2017,17 @@ if (!DOMTokenList.prototype.remove) {
                 }
             }
 
+            var dontApplyBlockRule = toggle.parentNode.parentNode.id !== "main";
             if (action === "show") {
                 removeClass(relatedDoc, "fns-now-collapsed");
                 removeClass(docblock, "hidden-by-usual-hider");
-                onEachLazy(toggle.childNodes, adjustToggle(false));
-                onEachLazy(relatedDoc.childNodes, implHider(false));
+                onEachLazy(toggle.childNodes, adjustToggle(false, dontApplyBlockRule));
+                onEachLazy(relatedDoc.childNodes, implHider(false, dontApplyBlockRule));
             } else if (action === "hide") {
                 addClass(relatedDoc, "fns-now-collapsed");
                 addClass(docblock, "hidden-by-usual-hider");
-                onEachLazy(toggle.childNodes, adjustToggle(true));
-                onEachLazy(relatedDoc.childNodes, implHider(true));
+                onEachLazy(toggle.childNodes, adjustToggle(true, dontApplyBlockRule));
+                onEachLazy(relatedDoc.childNodes, implHider(true, dontApplyBlockRule));
             }
         }
     }
@@ -2059,16 +2077,22 @@ if (!DOMTokenList.prototype.remove) {
     }
 
     var toggle = createSimpleToggle(false);
+    var hideMethodDocs = getCurrentValue("rustdoc-method-docs") !== "false";
+    var pageId = getPageId();
 
     var func = function(e) {
         var next = e.nextElementSibling;
         if (!next) {
             return;
         }
-        if (hasClass(next, "docblock") ||
-            (hasClass(next, "stability") &&
-             hasClass(next.nextElementSibling, "docblock"))) {
-            insertAfter(toggle.cloneNode(true), e.childNodes[e.childNodes.length - 1]);
+        if (hasClass(next, "docblock") === true ||
+            (hasClass(next, "stability") === true &&
+             hasClass(next.nextElementSibling, "docblock") === true)) {
+            var newToggle = toggle.cloneNode(true);
+            insertAfter(newToggle, e.childNodes[e.childNodes.length - 1]);
+            if (hideMethodDocs === true && hasClass(e, "method") === true) {
+                collapseDocs(newToggle, "hide", pageId);
+            }
         }
     };
 
@@ -2089,17 +2113,16 @@ if (!DOMTokenList.prototype.remove) {
     onEachLazy(document.getElementsByClassName("associatedconstant"), func);
     onEachLazy(document.getElementsByClassName("impl"), funcImpl);
     var impl_call = function() {};
-    if (getCurrentValue("rustdoc-method-docs") !== "false") {
+    if (hideMethodDocs === true) {
         impl_call = function(e, newToggle, pageId) {
             if (e.id.match(/^impl(?:-\d+)?$/) === null) {
                 // Automatically minimize all non-inherent impls
-                if (hasClass(e, "impl")) {
+                if (hasClass(e, "impl") === true) {
                     collapseDocs(newToggle, "hide", pageId);
                 }
             }
         };
     }
-    var pageId = getPageId();
     var newToggle = document.createElement("a");
     newToggle.href = "javascript:void(0)";
     newToggle.className = "collapse-toggle hidden-default collapsed";
@@ -2145,7 +2168,7 @@ if (!DOMTokenList.prototype.remove) {
             var inner_toggle = newToggle.cloneNode(true);
             inner_toggle.onclick = toggleClicked;
             e.insertBefore(inner_toggle, e.firstChild);
-            impl_call(e, inner_toggle, pageId);
+            impl_call(e.previousSibling, inner_toggle, pageId);
         }
     });
 
@@ -2247,30 +2270,6 @@ if (!DOMTokenList.prototype.remove) {
     onEachLazy(document.getElementsByClassName("docblock"), buildToggleWrapper);
     onEachLazy(document.getElementsByClassName("sub-variant"), buildToggleWrapper);
 
-    // In the search display, allows to switch between tabs.
-    function printTab(nb) {
-        if (nb === 0 || nb === 1 || nb === 2) {
-            currentTab = nb;
-        }
-        var nb_copy = nb;
-        onEachLazy(document.getElementById("titles").childNodes, function(elem) {
-            if (nb_copy === 0) {
-                addClass(elem, "selected");
-            } else {
-                removeClass(elem, "selected");
-            }
-            nb_copy -= 1;
-        });
-        onEachLazy(document.getElementById("results").childNodes, function(elem) {
-            if (nb === 0) {
-                elem.style.display = "";
-            } else {
-                elem.style.display = "none";
-            }
-            nb -= 1;
-        });
-    }
-
     function createToggleWrapper(tog) {
         var span = document.createElement("span");
         span.className = "toggle-label";
@@ -2356,6 +2355,30 @@ if (!DOMTokenList.prototype.remove) {
         };
     });
 
+    // In the search display, allows to switch between tabs.
+    function printTab(nb) {
+        if (nb === 0 || nb === 1 || nb === 2) {
+            currentTab = nb;
+        }
+        var nb_copy = nb;
+        onEachLazy(document.getElementById("titles").childNodes, function(elem) {
+            if (nb_copy === 0) {
+                addClass(elem, "selected");
+            } else {
+                removeClass(elem, "selected");
+            }
+            nb_copy -= 1;
+        });
+        onEachLazy(document.getElementById("results").childNodes, function(elem) {
+            if (nb === 0) {
+                elem.style.display = "";
+            } else {
+                elem.style.display = "none";
+            }
+            nb -= 1;
+        });
+    }
+
     function putBackSearch(search_input) {
         if (search_input.value !== "") {
             addClass(main, "hidden");
@@ -2414,7 +2437,7 @@ if (!DOMTokenList.prototype.remove) {
             // for vertical layout (column-oriented flex layout for divs caused
             // errors in mobile browsers).
             if (e.tagName === "H2" || e.tagName === "H3") {
-                let nextTagName = e.nextElementSibling.tagName;
+                var nextTagName = e.nextElementSibling.tagName;
                 if (nextTagName == "H2" || nextTagName == "H3") {
                     e.nextElementSibling.style.display = "flex";
                 } else {

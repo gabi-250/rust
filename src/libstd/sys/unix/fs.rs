@@ -1,17 +1,18 @@
-use os::unix::prelude::*;
+use crate::os::unix::prelude::*;
 
-use ffi::{CString, CStr, OsString, OsStr};
-use fmt;
-use io::{self, Error, ErrorKind, SeekFrom};
-use libc::{self, c_int, mode_t};
-use mem;
-use path::{Path, PathBuf};
-use ptr;
-use sync::Arc;
-use sys::fd::FileDesc;
-use sys::time::SystemTime;
-use sys::{cvt, cvt_r};
-use sys_common::{AsInner, FromInner};
+use crate::ffi::{CString, CStr, OsString, OsStr};
+use crate::fmt;
+use crate::io::{self, Error, ErrorKind, SeekFrom};
+use crate::mem;
+use crate::path::{Path, PathBuf};
+use crate::ptr;
+use crate::sync::Arc;
+use crate::sys::fd::FileDesc;
+use crate::sys::time::SystemTime;
+use crate::sys::{cvt, cvt_r};
+use crate::sys_common::{AsInner, FromInner};
+
+use libc::{c_int, mode_t};
 
 #[cfg(any(target_os = "linux", target_os = "emscripten", target_os = "l4re"))]
 use libc::{stat64, fstat64, lstat64, off64_t, ftruncate64, lseek64, dirent64, readdir64_r, open64};
@@ -217,6 +218,8 @@ impl Iterator for ReadDir {
 
     #[cfg(any(target_os = "solaris", target_os = "fuchsia"))]
     fn next(&mut self) -> Option<io::Result<DirEntry>> {
+        use crate::slice;
+
         unsafe {
             loop {
                 // Although readdir_r(3) would be a correct function to use here because
@@ -239,8 +242,8 @@ impl Iterator for ReadDir {
 
                 let ret = DirEntry {
                     entry: *entry_ptr,
-                    name: ::slice::from_raw_parts(name as *const u8,
-                                                  namelen as usize).to_owned().into_boxed_slice(),
+                    name: slice::from_raw_parts(name as *const u8,
+                                                namelen as usize).to_owned().into_boxed_slice(),
                     dir: self.clone()
                 };
                 if ret.name_bytes() != b"." && ret.name_bytes() != b".." {
@@ -365,9 +368,10 @@ impl DirEntry {
               target_os = "dragonfly",
               target_os = "bitrig"))]
     fn name_bytes(&self) -> &[u8] {
+        use crate::slice;
         unsafe {
-            ::slice::from_raw_parts(self.entry.d_name.as_ptr() as *const u8,
-                                    self.entry.d_namlen as usize)
+            slice::from_raw_parts(self.entry.d_name.as_ptr() as *const u8,
+                                  self.entry.d_namlen as usize)
         }
     }
     #[cfg(any(target_os = "android",
@@ -475,7 +479,7 @@ impl File {
         // that we support, so we only do this on Linux currently.
         #[cfg(target_os = "linux")]
         fn ensure_cloexec(fd: &FileDesc) -> io::Result<()> {
-            use sync::atomic::{AtomicUsize, Ordering};
+            use crate::sync::atomic::{AtomicUsize, Ordering};
 
             const OPEN_CLOEXEC_UNKNOWN: usize = 0;
             const OPEN_CLOEXEC_SUPPORTED: usize = 1;
@@ -542,7 +546,7 @@ impl File {
 
     pub fn truncate(&self, size: u64) -> io::Result<()> {
         #[cfg(target_os = "android")]
-        return ::sys::android::ftruncate64(self.0.raw(), size);
+        return crate::sys::android::ftruncate64(self.0.raw(), size);
 
         #[cfg(not(target_os = "android"))]
         return cvt_r(|| unsafe {
@@ -823,9 +827,12 @@ pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
     Ok(PathBuf::from(OsString::from_vec(buf)))
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(not(any(target_os = "linux",
+              target_os = "android",
+              target_os = "macos",
+              target_os = "ios")))]
 pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
-    use fs::File;
+    use crate::fs::File;
     if !from.is_file() {
         return Err(Error::new(ErrorKind::InvalidInput,
                               "the source path is not an existing regular file"))
@@ -842,9 +849,9 @@ pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
-    use cmp;
-    use fs::File;
-    use sync::atomic::{AtomicBool, Ordering};
+    use crate::cmp;
+    use crate::fs::File;
+    use crate::sync::atomic::{AtomicBool, Ordering};
 
     // Kernel prior to 4.5 don't have copy_file_range
     // We store the availability in a global to avoid unnecessary syscalls
@@ -932,4 +939,86 @@ pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
     }
     writer.set_permissions(perm)?;
     Ok(written)
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
+    const COPYFILE_ACL: u32 = 1 << 0;
+    const COPYFILE_STAT: u32 = 1 << 1;
+    const COPYFILE_XATTR: u32 = 1 << 2;
+    const COPYFILE_DATA: u32 = 1 << 3;
+
+    const COPYFILE_SECURITY: u32 = COPYFILE_STAT | COPYFILE_ACL;
+    const COPYFILE_METADATA: u32 = COPYFILE_SECURITY | COPYFILE_XATTR;
+    const COPYFILE_ALL: u32 = COPYFILE_METADATA | COPYFILE_DATA;
+
+    const COPYFILE_STATE_COPIED: u32 = 8;
+
+    #[allow(non_camel_case_types)]
+    type copyfile_state_t = *mut libc::c_void;
+    #[allow(non_camel_case_types)]
+    type copyfile_flags_t = u32;
+
+    extern "C" {
+        fn copyfile(
+            from: *const libc::c_char,
+            to: *const libc::c_char,
+            state: copyfile_state_t,
+            flags: copyfile_flags_t,
+        ) -> libc::c_int;
+        fn copyfile_state_alloc() -> copyfile_state_t;
+        fn copyfile_state_free(state: copyfile_state_t) -> libc::c_int;
+        fn copyfile_state_get(
+            state: copyfile_state_t,
+            flag: u32,
+            dst: *mut libc::c_void,
+        ) -> libc::c_int;
+    }
+
+    struct FreeOnDrop(copyfile_state_t);
+    impl Drop for FreeOnDrop {
+        fn drop(&mut self) {
+            // The code below ensures that `FreeOnDrop` is never a null pointer
+            unsafe {
+                // `copyfile_state_free` returns -1 if the `to` or `from` files
+                // cannot be closed. However, this is not considerd this an
+                // error.
+                copyfile_state_free(self.0);
+            }
+        }
+    }
+
+    if !from.is_file() {
+        return Err(Error::new(ErrorKind::InvalidInput,
+                              "the source path is not an existing regular file"))
+    }
+
+    // We ensure that `FreeOnDrop` never contains a null pointer so it is
+    // always safe to call `copyfile_state_free`
+    let state = unsafe {
+        let state = copyfile_state_alloc();
+        if state.is_null() {
+            return Err(crate::io::Error::last_os_error());
+        }
+        FreeOnDrop(state)
+    };
+
+    cvt(unsafe {
+        copyfile(
+            cstr(from)?.as_ptr(),
+            cstr(to)?.as_ptr(),
+            state.0,
+            COPYFILE_ALL,
+        )
+    })?;
+
+    let mut bytes_copied: libc::off_t = 0;
+    cvt(unsafe {
+        copyfile_state_get(
+            state.0,
+            COPYFILE_STATE_COPIED,
+            &mut bytes_copied as *mut libc::off_t as *mut libc::c_void,
+        )
+    })?;
+    Ok(bytes_copied as u64)
 }

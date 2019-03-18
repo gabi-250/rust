@@ -1,15 +1,12 @@
 environment:
+  # This is required for at least an AArch64 compiler in one image, and is also
+  # going to soon be required for compiling LLVM.
+  APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017 Preview
 
   # By default schannel checks revocation of certificates unlike some other SSL
   # backends, but we've historically had problems on CI where a revocation
   # server goes down presumably. See #43333 for more info
   CARGO_HTTP_CHECK_REVOKE: false
-
-  # Recommended by AppVeyor this moves our builds to GCE which incurs a 3-4
-  # minute startup overhead, but that's paltry compared to our overall build
-  # times so we're will to eat the cost. This is intended to give us better
-  # performance I believe!
-  appveyor_build_worker_cloud: gce
 
   matrix:
   # 32/64 bit MSVC tests
@@ -87,7 +84,6 @@ environment:
     DIST_REQUIRE_ALL_TOOLS: 1
     DEPLOY: 1
     CI_JOB_NAME: dist-x86_64-msvc
-    APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017 Preview
   - RUST_CONFIGURE_ARGS: >
       --build=i686-pc-windows-msvc
       --target=i586-pc-windows-msvc

@@ -12,24 +12,27 @@ use ::fmt;
 /// and `*mut c_void` is equivalent to C's `void*`. That said, this is
 /// *not* the same as C's `void` return type, which is Rust's `()` type.
 ///
-/// Ideally, this type would be equivalent to [`!`], but currently it may
-/// be more ideal to use `c_void` for FFI purposes.
+/// To model pointers to opaque types in FFI, until `extern type` is
+/// stabilized, it is recommended to use a newtype wrapper around an empty
+/// byte array. See the [Nomicon] for details.
 ///
-/// [`!`]: ../../std/primitive.never.html
 /// [pointer]: ../../std/primitive.pointer.html
+/// [Nomicon]: https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 // N.B., for LLVM to recognize the void pointer type and by extension
 //     functions like malloc(), we need to have it represented as i8* in
 //     LLVM bitcode. The enum used here ensures this and prevents misuse
-//     of the "raw" type by only having private variants.. We need two
+//     of the "raw" type by only having private variants. We need two
 //     variants, because the compiler complains about the repr attribute
-//     otherwise.
+//     otherwise and we need at least one variant as otherwise the enum
+//     would be uninhabited and at least dereferencing such pointers would
+//     be UB.
 #[repr(u8)]
 #[stable(feature = "raw_os", since = "1.1.0")]
 pub enum c_void {
-    #[unstable(feature = "c_void_variant", reason = "should not have to exist",
+    #[unstable(feature = "c_void_variant", reason = "temporary implementation detail",
                issue = "0")]
     #[doc(hidden)] __variant1,
-    #[unstable(feature = "c_void_variant", reason = "should not have to exist",
+    #[unstable(feature = "c_void_variant", reason = "temporary implementation detail",
                issue = "0")]
     #[doc(hidden)] __variant2,
 }
@@ -49,7 +52,7 @@ impl fmt::Debug for c_void {
 #[unstable(feature = "c_variadic",
            reason = "the `c_variadic` feature has not been properly tested on \
                      all supported platforms",
-           issue = "27745")]
+           issue = "44930")]
 extern {
     type VaListImpl;
 }
@@ -74,11 +77,11 @@ impl fmt::Debug for VaListImpl {
 #[unstable(feature = "c_variadic",
            reason = "the `c_variadic` feature has not been properly tested on \
                      all supported platforms",
-           issue = "27745")]
+           issue = "44930")]
 struct VaListImpl {
-    stack: *mut (),
-    gr_top: *mut (),
-    vr_top: *mut (),
+    stack: *mut c_void,
+    gr_top: *mut c_void,
+    vr_top: *mut c_void,
     gr_offs: i32,
     vr_offs: i32,
 }
@@ -90,13 +93,13 @@ struct VaListImpl {
 #[unstable(feature = "c_variadic",
            reason = "the `c_variadic` feature has not been properly tested on \
                      all supported platforms",
-           issue = "27745")]
+           issue = "44930")]
 struct VaListImpl {
     gpr: u8,
     fpr: u8,
     reserved: u16,
-    overflow_arg_area: *mut (),
-    reg_save_area: *mut (),
+    overflow_arg_area: *mut c_void,
+    reg_save_area: *mut c_void,
 }
 
 /// x86_64 ABI implementation of a `va_list`.
@@ -106,12 +109,12 @@ struct VaListImpl {
 #[unstable(feature = "c_variadic",
            reason = "the `c_variadic` feature has not been properly tested on \
                      all supported platforms",
-           issue = "27745")]
+           issue = "44930")]
 struct VaListImpl {
     gp_offset: i32,
     fp_offset: i32,
-    overflow_arg_area: *mut (),
-    reg_save_area: *mut (),
+    overflow_arg_area: *mut c_void,
+    reg_save_area: *mut c_void,
 }
 
 /// A wrapper for a `va_list`
@@ -120,7 +123,7 @@ struct VaListImpl {
 #[unstable(feature = "c_variadic",
            reason = "the `c_variadic` feature has not been properly tested on \
                      all supported platforms",
-           issue = "27745")]
+           issue = "44930")]
 #[repr(transparent)]
 pub struct VaList<'a>(&'a mut VaListImpl);
 
@@ -140,7 +143,7 @@ mod sealed_trait {
     #[unstable(feature = "c_variadic",
                reason = "the `c_variadic` feature has not been properly tested on \
                          all supported platforms",
-               issue = "27745")]
+               issue = "44930")]
     pub trait VaArgSafe {}
 }
 
@@ -150,7 +153,7 @@ macro_rules! impl_va_arg_safe {
             #[unstable(feature = "c_variadic",
                        reason = "the `c_variadic` feature has not been properly tested on \
                                  all supported platforms",
-                       issue = "27745")]
+                       issue = "44930")]
             impl sealed_trait::VaArgSafe for $t {}
         )+
     }
@@ -163,12 +166,12 @@ impl_va_arg_safe!{f64}
 #[unstable(feature = "c_variadic",
            reason = "the `c_variadic` feature has not been properly tested on \
                      all supported platforms",
-           issue = "27745")]
+           issue = "44930")]
 impl<T> sealed_trait::VaArgSafe for *mut T {}
 #[unstable(feature = "c_variadic",
            reason = "the `c_variadic` feature has not been properly tested on \
                      all supported platforms",
-           issue = "27745")]
+           issue = "44930")]
 impl<T> sealed_trait::VaArgSafe for *const T {}
 
 impl<'a> VaList<'a> {
@@ -176,16 +179,16 @@ impl<'a> VaList<'a> {
     #[unstable(feature = "c_variadic",
                reason = "the `c_variadic` feature has not been properly tested on \
                          all supported platforms",
-               issue = "27745")]
+               issue = "44930")]
     pub unsafe fn arg<T: sealed_trait::VaArgSafe>(&mut self) -> T {
         va_arg(self)
     }
 
-    /// Copy the `va_list` at the current location.
+    /// Copies the `va_list` at the current location.
     #[unstable(feature = "c_variadic",
                reason = "the `c_variadic` feature has not been properly tested on \
                          all supported platforms",
-               issue = "27745")]
+               issue = "44930")]
     pub unsafe fn copy<F, R>(&self, f: F) -> R
             where F: for<'copy> FnOnce(VaList<'copy>) -> R {
         #[cfg(any(all(not(target_arch = "aarch64"), not(target_arch = "powerpc"),
@@ -210,7 +213,7 @@ extern "rust-intrinsic" {
     /// `va_copy`.
     fn va_end(ap: &mut VaList);
 
-    /// Copy the current location of arglist `src` to the arglist `dst`.
+    /// Copies the current location of arglist `src` to the arglist `dst`.
     #[cfg(any(all(not(target_arch = "aarch64"), not(target_arch = "powerpc"),
                   not(target_arch = "x86_64")),
               windows))]

@@ -1,4 +1,5 @@
-use errors::{self, Diagnostic, DiagnosticBuilder};
+use errors::{Diagnostic, DiagnosticBuilder};
+
 use std::panic;
 
 use proc_macro::bridge::{server, TokenTree};
@@ -67,7 +68,7 @@ impl FromInternal<(TreeAndJoint, &'_ ParseSess, &'_ mut Vec<Self>)>
         };
 
         macro_rules! tt {
-            ($ty:ident { $($field:ident $(: $value:expr)*),+ $(,)* }) => (
+            ($ty:ident { $($field:ident $(: $value:expr)*),+ $(,)? }) => (
                 TokenTree::$ty(self::$ty {
                     $($field $(: $value)*,)*
                     span,
@@ -176,8 +177,8 @@ impl FromInternal<(TreeAndJoint, &'_ ParseSess, &'_ mut Vec<Self>)>
                 tt!(Punct::new('#', false))
             }
 
-            Interpolated(_) => {
-                let stream = token.interpolated_to_tokenstream(sess, span);
+            Interpolated(nt) => {
+                let stream = nt.to_tokenstream(sess, span);
                 TokenTree::Group(Group {
                     delimiter: Delimiter::None,
                     stream,
@@ -269,7 +270,7 @@ impl ToInternal<TokenStream> for TokenTree<Group, Punct, Ident, Literal> {
         };
 
         let tree = tokenstream::TokenTree::Token(span, token);
-        TokenStream::Tree(tree, if joint { Joint } else { NonJoint })
+        TokenStream::new(vec![(tree, if joint { Joint } else { NonJoint })])
     }
 }
 
@@ -339,12 +340,8 @@ impl Ident {
         if !Self::is_valid(string) {
             panic!("`{:?}` is not a valid identifier", string)
         }
-        if is_raw {
-            let normalized_sym = Symbol::intern(string);
-            if normalized_sym == keywords::Underscore.name() ||
-               ast::Ident::with_empty_ctxt(normalized_sym).is_path_segment_keyword() {
-                panic!("`{:?}` is not a valid raw identifier", string)
-            }
+        if is_raw && !ast::Ident::from_str(string).can_be_raw() {
+            panic!("`{}` cannot be a raw identifier", string);
         }
         Ident { sym, is_raw, span }
     }
@@ -369,7 +366,7 @@ pub(crate) struct Rustc<'a> {
 }
 
 impl<'a> Rustc<'a> {
-    pub fn new(cx: &'a ExtCtxt) -> Self {
+    pub fn new(cx: &'a ExtCtxt<'_>) -> Self {
         // No way to determine def location for a proc macro right now, so use call location.
         let location = cx.current_expansion.mark.expn_info().unwrap().call_site;
         let to_span = |transparency| {
@@ -650,7 +647,7 @@ impl server::Literal for Rustc<'_> {
     }
 }
 
-impl<'a> server::SourceFile for Rustc<'a> {
+impl server::SourceFile for Rustc<'_> {
     fn eq(&mut self, file1: &Self::SourceFile, file2: &Self::SourceFile) -> bool {
         Lrc::ptr_eq(file1, file2)
     }

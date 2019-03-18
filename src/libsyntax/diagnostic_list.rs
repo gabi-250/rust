@@ -378,6 +378,21 @@ Erroneous code example:
 
 "##,
 
+E0725: r##"
+A feature attribute named a feature that was disallowed in the compiler
+command line flags.
+
+Erroneous code example:
+
+```ignore (can't specify compiler flags from doctests)
+#![feature(never_type)] // error: the feature `never_type` is not in
+                        // the list of allowed features
+```
+
+Delete the offending feature attribute, or add it to the list of allowed
+features in the `-Z allow_features` flag.
+"##,
+
 }
 
 register_diagnostics! {
@@ -389,12 +404,12 @@ register_diagnostics! {
     E0545, // incorrect 'issue'
     E0546, // missing 'feature'
     E0547, // missing 'issue'
-    E0548, // incorrect stability attribute type
+//  E0548, // replaced with a generic attribute input check
     E0549, // rustc_deprecated attribute must be paired with either stable or unstable attribute
     E0550, // multiple deprecated attributes
     E0551, // incorrect meta item
     E0553, // multiple rustc_const_unstable attributes
-    E0555, // malformed feature attribute, expected #![feature(...)]
+//  E0555, // replaced with a generic attribute input check
     E0556, // malformed feature, expected just one word
     E0584, // file for module `..` found at both .. and ..
     E0629, // missing 'feature' (rustc_const_unstable)

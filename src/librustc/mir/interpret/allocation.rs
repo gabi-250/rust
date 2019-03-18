@@ -1,21 +1,22 @@
-//! The virtual memory representation of the MIR interpreter
+//! The virtual memory representation of the MIR interpreter.
 
 use super::{
     Pointer, EvalResult, AllocId, ScalarMaybeUndef, write_target_uint, read_target_uint, Scalar,
     truncate,
 };
 
-use ty::layout::{Size, Align};
+use crate::ty::layout::{Size, Align};
 use syntax::ast::Mutability;
 use std::iter;
-use mir;
+use crate::mir;
 use std::ops::{Deref, DerefMut};
 use rustc_data_structures::sorted_map::SortedMap;
+use rustc_macros::HashStable;
 use rustc_target::abi::HasDataLayout;
 
 /// Used by `check_bounds` to indicate whether the pointer needs to be just inbounds
 /// or also inbounds of a *live* allocation.
-#[derive(Debug, Copy, Clone, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Copy, Clone, RustcEncodable, RustcDecodable, HashStable)]
 pub enum InboundsCheck {
     Live,
     MaybeDead,
@@ -54,7 +55,7 @@ pub trait AllocationExtra<Tag, MemoryExtra>: ::std::fmt::Debug + Clone {
     /// Hook for performing extra checks on a memory read access.
     ///
     /// Takes read-only access to the allocation so we can keep all the memory read
-    /// operations take `&self`.  Use a `RefCell` in `AllocExtra` if you
+    /// operations take `&self`. Use a `RefCell` in `AllocExtra` if you
     /// need to mutate.
     #[inline(always)]
     fn memory_read(
@@ -100,8 +101,7 @@ impl AllocationExtra<(), ()> for () {
 impl<Tag, Extra> Allocation<Tag, Extra> {
     /// Creates a read-only allocation initialized by the given bytes
     pub fn from_bytes(slice: &[u8], align: Align, extra: Extra) -> Self {
-        let mut undef_mask = UndefMask::new(Size::ZERO);
-        undef_mask.grow(Size::from_bytes(slice.len() as u64), true);
+        let undef_mask = UndefMask::new(Size::from_bytes(slice.len() as u64), true);
         Self {
             bytes: slice.to_owned(),
             relocations: Relocations::new(),
@@ -121,7 +121,7 @@ impl<Tag, Extra> Allocation<Tag, Extra> {
         Allocation {
             bytes: vec![0; size.bytes() as usize],
             relocations: Relocations::new(),
-            undef_mask: UndefMask::new(size),
+            undef_mask: UndefMask::new(size, false),
             align,
             mutability: Mutability::Mutable,
             extra,
@@ -133,7 +133,7 @@ impl<'tcx> ::serialize::UseSpecializedDecodable for &'tcx Allocation {}
 
 /// Alignment and bounds checks
 impl<'tcx, Tag, Extra> Allocation<Tag, Extra> {
-    /// Check if the pointer is "in-bounds". Notice that a pointer pointing at the end
+    /// Checks if the pointer is "in-bounds". Notice that a pointer pointing at the end
     /// of an allocation (i.e., at the first *inaccessible* location) *is* considered
     /// in-bounds!  This follows C's/LLVM's rules.
     /// If you want to check bounds before doing a memory access, better use `check_bounds`.
@@ -145,7 +145,7 @@ impl<'tcx, Tag, Extra> Allocation<Tag, Extra> {
         ptr.check_in_alloc(Size::from_bytes(allocation_size), InboundsCheck::Live)
     }
 
-    /// Check if the memory range beginning at `ptr` and of size `Size` is "in-bounds".
+    /// Checks if the memory range beginning at `ptr` and of size `Size` is "in-bounds".
     #[inline(always)]
     pub fn check_bounds(
         &self,
@@ -161,7 +161,7 @@ impl<'tcx, Tag, Extra> Allocation<Tag, Extra> {
 /// Byte accessors
 impl<'tcx, Tag: Copy, Extra> Allocation<Tag, Extra> {
     /// The last argument controls whether we error out when there are undefined
-    /// or pointer bytes.  You should never call this, call `get_bytes` or
+    /// or pointer bytes. You should never call this, call `get_bytes` or
     /// `get_bytes_with_undef_and_ptr` instead,
     ///
     /// This function also guarantees that the resulting pointer will remain stable
@@ -462,7 +462,7 @@ impl<'tcx, Tag: Copy, Extra> Allocation<Tag, Extra> {
 
 /// Relocations
 impl<'tcx, Tag: Copy, Extra> Allocation<Tag, Extra> {
-    /// Return all relocations overlapping with the given ptr-offset pair.
+    /// Returns all relocations overlapping with the given ptr-offset pair.
     pub fn relocations(
         &self,
         cx: &impl HasDataLayout,
@@ -476,7 +476,7 @@ impl<'tcx, Tag: Copy, Extra> Allocation<Tag, Extra> {
         self.relocations.range(Size::from_bytes(start)..end)
     }
 
-    /// Check that there are no relocations overlapping with the given range.
+    /// Checks that there are no relocations overlapping with the given range.
     #[inline(always)]
     fn check_relocations(
         &self,
@@ -491,10 +491,10 @@ impl<'tcx, Tag: Copy, Extra> Allocation<Tag, Extra> {
         }
     }
 
-    /// Remove all relocations inside the given range.
+    /// Removes all relocations inside the given range.
     /// If there are relocations overlapping with the edges, they
     /// are removed as well *and* the bytes they cover are marked as
-    /// uninitialized.  This is a somewhat odd "spooky action at a distance",
+    /// uninitialized. This is a somewhat odd "spooky action at a distance",
     /// but it allows strictly more code to run than if we would just error
     /// immediately in that case.
     fn clear_relocations(
@@ -613,8 +613,9 @@ impl<Tag> DerefMut for Relocations<Tag> {
 ////////////////////////////////////////////////////////////////////////////////
 
 type Block = u64;
-const BLOCK_SIZE: u64 = 64;
 
+/// A bitmask where each bit refers to the byte with the same index. If the bit is `true`, the byte
+/// is defined. If it is `false` the byte is undefined.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
 pub struct UndefMask {
     blocks: Vec<Block>,
@@ -624,16 +625,18 @@ pub struct UndefMask {
 impl_stable_hash_for!(struct mir::interpret::UndefMask{blocks, len});
 
 impl UndefMask {
-    pub fn new(size: Size) -> Self {
+    pub const BLOCK_SIZE: u64 = 64;
+
+    pub fn new(size: Size, state: bool) -> Self {
         let mut m = UndefMask {
             blocks: vec![],
             len: Size::ZERO,
         };
-        m.grow(size, false);
+        m.grow(size, state);
         m
     }
 
-    /// Check whether the range `start..end` (end-exclusive) is entirely defined.
+    /// Checks whether the range `start..end` (end-exclusive) is entirely defined.
     ///
     /// Returns `Ok(())` if it's defined. Otherwise returns the index of the byte
     /// at which the first undefined access begins.
@@ -643,6 +646,7 @@ impl UndefMask {
             return Err(self.len);
         }
 
+        // FIXME(oli-obk): optimize this for allocations larger than a block.
         let idx = (start.bytes()..end.bytes())
             .map(|i| Size::from_bytes(i))
             .find(|&i| !self.get(i));
@@ -662,20 +666,63 @@ impl UndefMask {
     }
 
     pub fn set_range_inbounds(&mut self, start: Size, end: Size, new_state: bool) {
-        for i in start.bytes()..end.bytes() {
-            self.set(Size::from_bytes(i), new_state);
+        let (blocka, bita) = bit_index(start);
+        let (blockb, bitb) = bit_index(end);
+        if blocka == blockb {
+            // first set all bits but the first `bita`
+            // then unset the last `64 - bitb` bits
+            let range = if bitb == 0 {
+                u64::max_value() << bita
+            } else {
+                (u64::max_value() << bita) & (u64::max_value() >> (64 - bitb))
+            };
+            if new_state {
+                self.blocks[blocka] |= range;
+            } else {
+                self.blocks[blocka] &= !range;
+            }
+            return;
+        }
+        // across block boundaries
+        if new_state {
+            // set bita..64 to 1
+            self.blocks[blocka] |= u64::max_value() << bita;
+            // set 0..bitb to 1
+            if bitb != 0 {
+                self.blocks[blockb] |= u64::max_value() >> (64 - bitb);
+            }
+            // fill in all the other blocks (much faster than one bit at a time)
+            for block in (blocka + 1) .. blockb {
+                self.blocks[block] = u64::max_value();
+            }
+        } else {
+            // set bita..64 to 0
+            self.blocks[blocka] &= !(u64::max_value() << bita);
+            // set 0..bitb to 0
+            if bitb != 0 {
+                self.blocks[blockb] &= !(u64::max_value() >> (64 - bitb));
+            }
+            // fill in all the other blocks (much faster than one bit at a time)
+            for block in (blocka + 1) .. blockb {
+                self.blocks[block] = 0;
+            }
         }
     }
 
     #[inline]
     pub fn get(&self, i: Size) -> bool {
         let (block, bit) = bit_index(i);
-        (self.blocks[block] & 1 << bit) != 0
+        (self.blocks[block] & (1 << bit)) != 0
     }
 
     #[inline]
     pub fn set(&mut self, i: Size, new_state: bool) {
         let (block, bit) = bit_index(i);
+        self.set_bit(block, bit, new_state);
+    }
+
+    #[inline]
+    fn set_bit(&mut self, block: usize, bit: usize, new_state: bool) {
         if new_state {
             self.blocks[block] |= 1 << bit;
         } else {
@@ -684,11 +731,15 @@ impl UndefMask {
     }
 
     pub fn grow(&mut self, amount: Size, new_state: bool) {
-        let unused_trailing_bits = self.blocks.len() as u64 * BLOCK_SIZE - self.len.bytes();
+        if amount.bytes() == 0 {
+            return;
+        }
+        let unused_trailing_bits = self.blocks.len() as u64 * Self::BLOCK_SIZE - self.len.bytes();
         if amount.bytes() > unused_trailing_bits {
-            let additional_blocks = amount.bytes() / BLOCK_SIZE + 1;
+            let additional_blocks = amount.bytes() / Self::BLOCK_SIZE + 1;
             assert_eq!(additional_blocks as usize as u64, additional_blocks);
             self.blocks.extend(
+                // FIXME(oli-obk): optimize this by repeating `new_state as Block`
                 iter::repeat(0).take(additional_blocks as usize),
             );
         }
@@ -701,8 +752,8 @@ impl UndefMask {
 #[inline]
 fn bit_index(bits: Size) -> (usize, usize) {
     let bits = bits.bytes();
-    let a = bits / BLOCK_SIZE;
-    let b = bits % BLOCK_SIZE;
+    let a = bits / UndefMask::BLOCK_SIZE;
+    let b = bits % UndefMask::BLOCK_SIZE;
     assert_eq!(a as usize as u64, a);
     assert_eq!(b as usize as u64, b);
     (a as usize, b as usize)

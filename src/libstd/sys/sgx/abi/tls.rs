@@ -1,8 +1,8 @@
-use sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
-use ptr;
-use mem;
-use cell::Cell;
-use num::NonZeroUsize;
+use crate::sync::atomic::{AtomicUsize, Ordering};
+use crate::ptr;
+use crate::mem;
+use crate::cell::Cell;
+use crate::num::NonZeroUsize;
 use self::sync_bitset::*;
 
 #[cfg(target_pointer_width="64")]
@@ -15,7 +15,40 @@ macro_rules! dup {
     ((* $($exp:tt)*) $($val:tt)*) => (dup!( ($($exp)*) $($val)* $($val)* ));
     (() $($val:tt)*) => ([$($val),*])
 }
-static TLS_DESTRUCTOR: [AtomicUsize; TLS_KEYS] = dup!((* * * * * * *) ATOMIC_USIZE_INIT);
+static TLS_DESTRUCTOR: [AtomicUsize; TLS_KEYS] = [
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+    AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0),
+];
 
 extern "C" {
     fn get_tls_ptr() -> *const u8;
@@ -119,16 +152,16 @@ impl Tls {
 }
 
 mod sync_bitset {
-    use sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
-    use iter::{Enumerate, Peekable};
-    use slice::Iter;
+    use crate::sync::atomic::{AtomicUsize, Ordering};
+    use crate::iter::{Enumerate, Peekable};
+    use crate::slice::Iter;
     use super::{TLS_KEYS_BITSET_SIZE, USIZE_BITS};
 
     /// A bitset that can be used synchronously.
     pub(super) struct SyncBitset([AtomicUsize; TLS_KEYS_BITSET_SIZE]);
 
     pub(super) const SYNC_BITSET_INIT: SyncBitset =
-        SyncBitset([ATOMIC_USIZE_INIT, ATOMIC_USIZE_INIT]);
+        SyncBitset([AtomicUsize::new(0), AtomicUsize::new(0)]);
 
     impl SyncBitset {
         pub fn get(&self, index: usize) -> bool {
@@ -149,7 +182,7 @@ mod sync_bitset {
             self.0[hi].fetch_and(!lo, Ordering::Relaxed);
         }
 
-        /// Set any unset bit. Not atomic. Returns `None` if all bits were
+        /// Sets any unset bit. Not atomic. Returns `None` if all bits were
         /// observed to be set.
         pub fn set(&self) -> Option<usize> {
             'elems: for (idx, elem) in self.0.iter().enumerate() {

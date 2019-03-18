@@ -1,9 +1,10 @@
-//! Library used by tidy and other tools
+//! Library used by tidy and other tools.
 //!
 //! This library contains the tidy lints and exposes it
 //! to be used by tools.
 
-extern crate serde;
+#![deny(rust_2018_idioms)]
+
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
@@ -47,6 +48,7 @@ pub mod libcoretest;
 fn filter_dirs(path: &Path) -> bool {
     let skip = [
         "src/llvm",
+        "src/llvm-project",
         "src/llvm-emscripten",
         "src/libbacktrace",
         "src/librustc_data_structures/owning_ref",

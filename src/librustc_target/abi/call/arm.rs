@@ -1,13 +1,13 @@
-use abi::call::{Conv, FnType, ArgType, Reg, RegKind, Uniform};
-use abi::{HasDataLayout, LayoutOf, TyLayout, TyLayoutMethods};
-use spec::HasTargetSpec;
+use crate::abi::call::{Conv, FnType, ArgType, Reg, RegKind, Uniform};
+use crate::abi::{HasDataLayout, LayoutOf, TyLayout, TyLayoutMethods};
+use crate::spec::HasTargetSpec;
 
 fn is_homogeneous_aggregate<'a, Ty, C>(cx: &C, arg: &mut ArgType<'a, Ty>)
                                      -> Option<Uniform>
     where Ty: TyLayoutMethods<'a, C> + Copy,
           C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout
 {
-    arg.layout.homogeneous_aggregate(cx).and_then(|unit| {
+    arg.layout.homogeneous_aggregate(cx).unit().and_then(|unit| {
         let size = arg.layout.size;
 
         // Ensure we have at most four uniquely addressable members.
@@ -99,7 +99,7 @@ pub fn compute_abi_info<'a, Ty, C>(cx: &C, fty: &mut FnType<'a, Ty>)
     // `extern "aapcs"`, then we must use the VFP registers for homogeneous aggregates.
     let vfp = cx.target_spec().llvm_target.ends_with("hf")
         && fty.conv != Conv::ArmAapcs
-        && !fty.variadic;
+        && !fty.c_variadic;
 
     if !fty.ret.is_ignore() {
         classify_ret_ty(cx, &mut fty.ret, vfp);

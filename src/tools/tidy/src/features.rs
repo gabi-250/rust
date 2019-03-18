@@ -1,12 +1,12 @@
-//! Tidy check to ensure that unstable features are all in order
+//! Tidy check to ensure that unstable features are all in order.
 //!
 //! This check will ensure properties like:
 //!
-//! * All stability attributes look reasonably well formed
-//! * The set of library features is disjoint from the set of language features
-//! * Library features have at most one stability level
-//! * Library features have at most one `since` value
-//! * All unstable lang features have tests to ensure they are actually unstable
+//! * All stability attributes look reasonably well formed.
+//! * The set of library features is disjoint from the set of language features.
+//! * Library features have at most one stability level.
+//! * Library features have at most one `since` value.
+//! * All unstable lang features have tests to ensure they are actually unstable.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -22,7 +22,7 @@ pub enum Status {
 }
 
 impl fmt::Display for Status {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_str = match *self {
             Status::Stable => "stable",
             Status::Unstable => "unstable",
@@ -172,8 +172,8 @@ fn test_filen_gate(filen_underscore: &str, features: &mut Features) -> bool {
 pub fn collect_lang_features(base_src_path: &Path, bad: &mut bool) -> Features {
     let contents = t!(fs::read_to_string(base_src_path.join("libsyntax/feature_gate.rs")));
 
-    // we allow rustc-internal features to omit a tracking issue.
-    // these features must be marked with `// rustc internal` in its own group.
+    // We allow rustc-internal features to omit a tracking issue.
+    // These features must be marked with a `// rustc internal` in its own group.
     let mut next_feature_is_rustc_internal = false;
 
     contents.lines().zip(1..)
@@ -188,7 +188,7 @@ pub fn collect_lang_features(base_src_path: &Path, bad: &mut bool) -> Features {
             }
 
             let mut parts = line.split(',');
-            let level = match parts.next().map(|l| l.trim().trim_left_matches('(')) {
+            let level = match parts.next().map(|l| l.trim().trim_start_matches('(')) {
                 Some("active") => Status::Unstable,
                 Some("removed") => Status::Removed,
                 Some("accepted") => Status::Stable,
@@ -327,7 +327,7 @@ fn map_lib_features(base_src_path: &Path,
             }
             becoming_feature = None;
             if line.contains("rustc_const_unstable(") {
-                // const fn features are handled specially
+                // `const fn` features are handled specially.
                 let feature_name = match find_attr_val(line, "feature") {
                     Some(name) => name,
                     None => err!("malformed stability attribute"),
@@ -337,9 +337,8 @@ fn map_lib_features(base_src_path: &Path,
                     since: "None".to_owned(),
                     has_gate_test: false,
                     // FIXME(#57563): #57563 is now used as a common tracking issue,
-                    // although we would like to have specific tracking
-                    // issues for each `rustc_const_unstable` in the
-                    // future.
+                    // although we would like to have specific tracking issues for each
+                    // `rustc_const_unstable` in the future.
                     tracking_issue: Some(57563),
                 };
                 mf(Ok((feature_name, feature)), file, i + 1);

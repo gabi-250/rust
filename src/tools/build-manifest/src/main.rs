@@ -1,6 +1,7 @@
-extern crate toml;
-#[macro_use]
-extern crate serde_derive;
+#![deny(rust_2018_idioms)]
+
+use toml;
+use serde::Serialize;
 
 use std::collections::BTreeMap;
 use std::env;
@@ -22,6 +23,10 @@ static HOSTS: &'static [&'static str] = &[
     "mips64-unknown-linux-gnuabi64",
     "mips64el-unknown-linux-gnuabi64",
     "mipsel-unknown-linux-gnu",
+    "mipsisa32r6-unknown-linux-gnu",
+    "mipsisa32r6el-unknown-linux-gnu",
+    "mipsisa64r6-unknown-linux-gnuabi64",
+    "mipsisa64r6el-unknown-linux-gnuabi64",
     "powerpc-unknown-linux-gnu",
     "powerpc64-unknown-linux-gnu",
     "powerpc64le-unknown-linux-gnu",
@@ -31,6 +36,7 @@ static HOSTS: &'static [&'static str] = &[
     "x86_64-pc-windows-msvc",
     "x86_64-unknown-freebsd",
     "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
     "x86_64-unknown-netbsd",
 ];
 
@@ -76,13 +82,20 @@ static TARGETS: &'static [&'static str] = &[
     "mips-unknown-linux-musl",
     "mips64-unknown-linux-gnuabi64",
     "mips64el-unknown-linux-gnuabi64",
+    "mipsisa32r6-unknown-linux-gnu",
+    "mipsisa32r6el-unknown-linux-gnu",
+    "mipsisa64r6-unknown-linux-gnuabi64",
+    "mipsisa64r6el-unknown-linux-gnuabi64",
     "mipsel-unknown-linux-gnu",
     "mipsel-unknown-linux-musl",
+    "nvptx64-nvidia-cuda",
     "powerpc-unknown-linux-gnu",
     "powerpc64-unknown-linux-gnu",
     "powerpc64le-unknown-linux-gnu",
     "riscv32imc-unknown-none-elf",
     "riscv32imac-unknown-none-elf",
+    "riscv64imac-unknown-none-elf",
+    "riscv64gc-unknown-none-elf",
     "s390x-unknown-linux-gnu",
     "sparc64-unknown-linux-gnu",
     "sparcv9-sun-solaris",
@@ -95,6 +108,7 @@ static TARGETS: &'static [&'static str] = &[
     "wasm32-unknown-unknown",
     "x86_64-apple-darwin",
     "x86_64-apple-ios",
+    "x86_64-fortanix-unknown-sgx",
     "x86_64-fuchsia",
     "x86_64-linux-android",
     "x86_64-pc-windows-gnu",
@@ -353,6 +367,7 @@ impl Builder {
         self.package("rust-src", &mut manifest.pkg, &["*"]);
         self.package("rls-preview", &mut manifest.pkg, HOSTS);
         self.package("clippy-preview", &mut manifest.pkg, HOSTS);
+        self.package("miri", &mut manifest.pkg, HOSTS);
         self.package("rustfmt-preview", &mut manifest.pkg, HOSTS);
         self.package("rust-analysis", &mut manifest.pkg, TARGETS);
         self.package("llvm-tools-preview", &mut manifest.pkg, TARGETS);
@@ -370,7 +385,7 @@ impl Builder {
                      &["rustc", "cargo", "rust-std", "rust-mingw",
                        "rust-docs", "rustfmt-preview", "clippy-preview",
                        "rls-preview", "rust-src", "llvm-tools-preview",
-                       "lldb-preview", "rust-analysis"]);
+                       "lldb-preview", "rust-analysis", "miri"]);
 
         manifest.renames.insert("rls".to_owned(), Rename { to: "rls-preview".to_owned() });
         manifest.renames.insert("rustfmt".to_owned(), Rename { to: "rustfmt-preview".to_owned() });
@@ -417,6 +432,7 @@ impl Builder {
             // weren't built
             extensions.extend(vec![
                 Component { pkg: "clippy-preview".to_string(), target: host.to_string() },
+                Component { pkg: "miri".to_string(), target: host.to_string() },
                 Component { pkg: "rls-preview".to_string(), target: host.to_string() },
                 Component { pkg: "rustfmt-preview".to_string(), target: host.to_string() },
                 Component { pkg: "llvm-tools-preview".to_string(), target: host.to_string() },
@@ -467,7 +483,7 @@ impl Builder {
         }
         manifest.pkg.insert("rust".to_string(), pkg);
 
-        return manifest;
+        manifest
     }
 
     fn profile(&mut self,

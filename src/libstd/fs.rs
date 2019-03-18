@@ -7,13 +7,13 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use fmt;
-use ffi::OsString;
-use io::{self, SeekFrom, Seek, Read, Initializer, Write};
-use path::{Path, PathBuf};
-use sys::fs as fs_imp;
-use sys_common::{AsInnerMut, FromInner, AsInner, IntoInner};
-use time::SystemTime;
+use crate::fmt;
+use crate::ffi::OsString;
+use crate::io::{self, SeekFrom, Seek, Read, Initializer, Write};
+use crate::path::{Path, PathBuf};
+use crate::sys::fs as fs_imp;
+use crate::sys_common::{AsInnerMut, FromInner, AsInner, IntoInner};
+use crate::time::SystemTime;
 
 /// A reference to an open file on the filesystem.
 ///
@@ -25,7 +25,7 @@ use time::SystemTime;
 ///
 /// # Examples
 ///
-/// Create a new file and write bytes to it:
+/// Creates a new file and write bytes to it:
 ///
 /// ```no_run
 /// use std::fs::File;
@@ -211,7 +211,7 @@ pub struct DirBuilder {
     recursive: bool,
 }
 
-/// How large a buffer to pre-allocate before reading the entire file.
+/// Indicates how large a buffer to pre-allocate before reading the entire file.
 fn initial_buffer_size(file: &File) -> usize {
     // Allocate one extra byte so the buffer doesn't need to grow before the
     // final `read` call at the end of the file.  Don't worry about `usize`
@@ -222,7 +222,7 @@ fn initial_buffer_size(file: &File) -> usize {
 /// Read the entire contents of a file into a bytes vector.
 ///
 /// This is a convenience function for using [`File::open`] and [`read_to_end`]
-/// with fewer imports and without an intermediate variable.  It pre-allocates a
+/// with fewer imports and without an intermediate variable. It pre-allocates a
 /// buffer based on the file size when available, so it is generally faster than
 /// reading into a vector created with `Vec::new()`.
 ///
@@ -254,16 +254,19 @@ fn initial_buffer_size(file: &File) -> usize {
 /// ```
 #[stable(feature = "fs_read_write_bytes", since = "1.26.0")]
 pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
-    let mut file = File::open(path)?;
-    let mut bytes = Vec::with_capacity(initial_buffer_size(&file));
-    file.read_to_end(&mut bytes)?;
-    Ok(bytes)
+    fn inner(path: &Path) -> io::Result<Vec<u8>> {
+        let mut file = File::open(path)?;
+        let mut bytes = Vec::with_capacity(initial_buffer_size(&file));
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+    inner(path.as_ref())
 }
 
 /// Read the entire contents of a file into a string.
 ///
 /// This is a convenience function for using [`File::open`] and [`read_to_string`]
-/// with fewer imports and without an intermediate variable.  It pre-allocates a
+/// with fewer imports and without an intermediate variable. It pre-allocates a
 /// buffer based on the file size when available, so it is generally faster than
 /// reading into a string created with `String::new()`.
 ///
@@ -296,10 +299,13 @@ pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
 /// ```
 #[stable(feature = "fs_read_write", since = "1.26.0")]
 pub fn read_to_string<P: AsRef<Path>>(path: P) -> io::Result<String> {
-    let mut file = File::open(path)?;
-    let mut string = String::with_capacity(initial_buffer_size(&file));
-    file.read_to_string(&mut string)?;
-    Ok(string)
+    fn inner(path: &Path) -> io::Result<String> {
+        let mut file = File::open(path)?;
+        let mut string = String::with_capacity(initial_buffer_size(&file));
+        file.read_to_string(&mut string)?;
+        Ok(string)
+    }
+    inner(path.as_ref())
 }
 
 /// Write a slice as the entire contents of a file.
@@ -326,7 +332,10 @@ pub fn read_to_string<P: AsRef<Path>>(path: P) -> io::Result<String> {
 /// ```
 #[stable(feature = "fs_read_write_bytes", since = "1.26.0")]
 pub fn write<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> io::Result<()> {
-    File::create(path)?.write_all(contents.as_ref())
+    fn inner(path: &Path, contents: &[u8]) -> io::Result<()> {
+        File::create(path)?.write_all(contents)
+    }
+    inner(path.as_ref(), contents.as_ref())
 }
 
 impl File {
@@ -488,13 +497,13 @@ impl File {
         self.inner.file_attr().map(Metadata)
     }
 
-    /// Create a new `File` instance that shares the same underlying file handle
+    /// Creates a new `File` instance that shares the same underlying file handle
     /// as the existing `File` instance. Reads, writes, and seeks will affect
     /// both `File` instances simultaneously.
     ///
     /// # Examples
     ///
-    /// Create two handles for a file named `foo.txt`:
+    /// Creates two handles for a file named `foo.txt`:
     ///
     /// ```no_run
     /// use std::fs::File;
@@ -618,7 +627,7 @@ impl Seek for File {
     }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a> Read for &'a File {
+impl Read for &File {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.inner.read(buf)
     }
@@ -629,14 +638,14 @@ impl<'a> Read for &'a File {
     }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a> Write for &'a File {
+impl Write for &File {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.inner.write(buf)
     }
     fn flush(&mut self) -> io::Result<()> { self.inner.flush() }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a> Seek for &'a File {
+impl Seek for &File {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.inner.seek(pos)
     }
@@ -896,7 +905,7 @@ impl Metadata {
         FileType(self.0.file_type())
     }
 
-    /// Returns whether this metadata is for a directory. The
+    /// Returns `true` if this metadata is for a directory. The
     /// result is mutually exclusive to the result of
     /// [`is_file`], and will be false for symlink metadata
     /// obtained from [`symlink_metadata`].
@@ -919,7 +928,7 @@ impl Metadata {
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn is_dir(&self) -> bool { self.file_type().is_dir() }
 
-    /// Returns whether this metadata is for a regular file. The
+    /// Returns `true` if this metadata is for a regular file. The
     /// result is mutually exclusive to the result of
     /// [`is_dir`], and will be false for symlink metadata
     /// obtained from [`symlink_metadata`].
@@ -1096,7 +1105,7 @@ impl AsInner<fs_imp::FileAttr> for Metadata {
 }
 
 impl Permissions {
-    /// Returns whether these permissions describe a readonly (unwritable) file.
+    /// Returns `true` if these permissions describe a readonly (unwritable) file.
     ///
     /// # Examples
     ///
@@ -1121,7 +1130,9 @@ impl Permissions {
     /// writing.
     ///
     /// This operation does **not** modify the filesystem. To modify the
-    /// filesystem use the `fs::set_permissions` function.
+    /// filesystem use the [`fs::set_permissions`] function.
+    ///
+    /// [`fs::set_permissions`]: fn.set_permissions.html
     ///
     /// # Examples
     ///
@@ -1150,7 +1161,7 @@ impl Permissions {
 }
 
 impl FileType {
-    /// Test whether this file type represents a directory. The
+    /// Tests whether this file type represents a directory. The
     /// result is mutually exclusive to the results of
     /// [`is_file`] and [`is_symlink`]; only zero or one of these
     /// tests may pass.
@@ -1174,7 +1185,7 @@ impl FileType {
     #[stable(feature = "file_type", since = "1.1.0")]
     pub fn is_dir(&self) -> bool { self.0.is_dir() }
 
-    /// Test whether this file type represents a regular file.
+    /// Tests whether this file type represents a regular file.
     /// The result is  mutually exclusive to the results of
     /// [`is_dir`] and [`is_symlink`]; only zero or one of these
     /// tests may pass.
@@ -1198,7 +1209,7 @@ impl FileType {
     #[stable(feature = "file_type", since = "1.1.0")]
     pub fn is_file(&self) -> bool { self.0.is_file() }
 
-    /// Test whether this file type represents a symbolic link.
+    /// Tests whether this file type represents a symbolic link.
     /// The result is mutually exclusive to the results of
     /// [`is_dir`] and [`is_file`]; only zero or one of these
     /// tests may pass.
@@ -1207,7 +1218,7 @@ impl FileType {
     /// with the [`fs::symlink_metadata`] function and not the
     /// [`fs::metadata`] function. The [`fs::metadata`] function
     /// follows symbolic links, so [`is_symlink`] would always
-    /// return false for the target file.
+    /// return `false` for the target file.
     ///
     /// [`Metadata`]: struct.Metadata.html
     /// [`fs::metadata`]: fn.metadata.html
@@ -1288,7 +1299,7 @@ impl DirEntry {
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn path(&self) -> PathBuf { self.0.path() }
 
-    /// Return the metadata for the file that this entry points at.
+    /// Returns the metadata for the file that this entry points at.
     ///
     /// This function will not traverse symlinks if this entry points at a
     /// symlink.
@@ -1323,7 +1334,7 @@ impl DirEntry {
         self.0.metadata().map(Metadata)
     }
 
-    /// Return the file type for the file that this entry points at.
+    /// Returns the file type for the file that this entry points at.
     ///
     /// This function will not traverse symlinks if this entry points at a
     /// symlink.
@@ -1570,7 +1581,8 @@ pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<()> 
 /// `O_CLOEXEC` is set for returned file descriptors.
 /// On Windows, this function currently corresponds to `CopyFileEx`. Alternate
 /// NTFS streams are copied but only the size of the main stream is returned by
-/// this function.
+/// this function. On MacOS, this function corresponds to `copyfile` with
+/// `COPYFILE_ALL`.
 /// Note that, this [may change in the future][changes].
 ///
 /// [changes]: ../io/index.html#platform-specific-behavior
@@ -1639,9 +1651,14 @@ pub fn hard_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dst: Q) -> io::Result<(
 ///
 /// The `dst` path will be a symbolic link pointing to the `src` path.
 /// On Windows, this will be a file symlink, not a directory symlink;
-/// for this reason, the platform-specific `std::os::unix::fs::symlink`
-/// and `std::os::windows::fs::{symlink_file, symlink_dir}` should be
+/// for this reason, the platform-specific [`std::os::unix::fs::symlink`]
+/// and [`std::os::windows::fs::symlink_file`] or [`symlink_dir`] should be
 /// used instead to make the intent explicit.
+///
+/// [`std::os::unix::fs::symlink`]: ../os/unix/fs/fn.symlink.html
+/// [`std::os::windows::fs::symlink_file`]: ../os/windows/fs/fn.symlink_file.html
+/// [`symlink_dir`]: ../os/windows/fs/fn.symlink_dir.html
+///
 ///
 /// # Examples
 ///
@@ -1795,13 +1812,15 @@ pub fn create_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
 /// * If any directory in the path specified by `path`
 /// does not already exist and it could not be created otherwise. The specific
 /// error conditions for when a directory is being created (after it is
-/// determined to not exist) are outlined by `fs::create_dir`.
+/// determined to not exist) are outlined by [`fs::create_dir`].
 ///
 /// Notable exception is made for situations where any of the directories
 /// specified in the `path` could not be created as it was being created concurrently.
 /// Such cases are considered to be successful. That is, calling `create_dir_all`
 /// concurrently from multiple threads or processes is guaranteed not to fail
 /// due to a race condition with itself.
+///
+/// [`fs::create_dir`]: fn.create_dir.html
 ///
 /// # Examples
 ///
@@ -1868,7 +1887,10 @@ pub fn remove_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
 ///
 /// # Errors
 ///
-/// See `file::remove_file` and `fs::remove_dir`.
+/// See [`fs::remove_file`] and [`fs::remove_dir`].
+///
+/// [`fs::remove_file`]:  fn.remove_file.html
+/// [`fs::remove_dir`]: fn.remove_dir.html
 ///
 /// # Examples
 ///
@@ -2013,7 +2035,7 @@ impl DirBuilder {
         self
     }
 
-    /// Create the specified directory with the options configured in this
+    /// Creates the specified directory with the options configured in this
     /// builder.
     ///
     /// It is considered an error if the directory already exists unless
@@ -2075,26 +2097,27 @@ impl AsInnerMut<fs_imp::DirBuilder> for DirBuilder {
 
 #[cfg(all(test, not(any(target_os = "cloudabi", target_os = "emscripten"))))]
 mod tests {
-    use io::prelude::*;
+    use crate::io::prelude::*;
 
-    use fs::{self, File, OpenOptions};
-    use io::{ErrorKind, SeekFrom};
-    use path::Path;
+    use crate::fs::{self, File, OpenOptions};
+    use crate::io::{ErrorKind, SeekFrom};
+    use crate::path::Path;
+    use crate::str;
+    use crate::sys_common::io::test::{TempDir, tmpdir};
+    use crate::thread;
+
     use rand::{rngs::StdRng, FromEntropy, RngCore};
-    use str;
-    use sys_common::io::test::{TempDir, tmpdir};
-    use thread;
 
     #[cfg(windows)]
-    use os::windows::fs::{symlink_dir, symlink_file};
+    use crate::os::windows::fs::{symlink_dir, symlink_file};
     #[cfg(windows)]
-    use sys::fs::symlink_junction;
+    use crate::sys::fs::symlink_junction;
     #[cfg(unix)]
-    use os::unix::fs::symlink as symlink_dir;
+    use crate::os::unix::fs::symlink as symlink_dir;
     #[cfg(unix)]
-    use os::unix::fs::symlink as symlink_file;
+    use crate::os::unix::fs::symlink as symlink_file;
     #[cfg(unix)]
-    use os::unix::fs::symlink as symlink_junction;
+    use crate::os::unix::fs::symlink as symlink_junction;
 
     macro_rules! check { ($e:expr) => (
         match $e {
@@ -2313,7 +2336,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn file_test_io_read_write_at() {
-        use os::unix::fs::FileExt;
+        use crate::os::unix::fs::FileExt;
 
         let tmpdir = tmpdir();
         let filename = tmpdir.join("file_rt_io_file_test_read_write_at.txt");
@@ -2369,7 +2392,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn set_get_unix_permissions() {
-        use os::unix::fs::PermissionsExt;
+        use crate::os::unix::fs::PermissionsExt;
 
         let tmpdir = tmpdir();
         let filename = &tmpdir.join("set_get_unix_permissions");
@@ -2390,7 +2413,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn file_test_io_seek_read_write() {
-        use os::windows::fs::FileExt;
+        use crate::os::windows::fs::FileExt;
 
         let tmpdir = tmpdir();
         let filename = tmpdir.join("file_rt_io_file_test_seek_read_write.txt");
@@ -2815,6 +2838,26 @@ mod tests {
     }
 
     #[test]
+    fn copy_file_follows_dst_symlink() {
+        let tmp = tmpdir();
+        if !got_symlink_permission(&tmp) { return };
+
+        let in_path = tmp.join("in.txt");
+        let out_path = tmp.join("out.txt");
+        let out_path_symlink = tmp.join("out_symlink.txt");
+
+        check!(fs::write(&in_path, "foo"));
+        check!(fs::write(&out_path, "bar"));
+        check!(symlink_file(&out_path, &out_path_symlink));
+
+        check!(fs::copy(&in_path, &out_path_symlink));
+
+        assert!(check!(out_path_symlink.symlink_metadata()).file_type().is_symlink());
+        assert_eq!(check!(fs::read(&out_path_symlink)), b"foo".to_vec());
+        assert_eq!(check!(fs::read(&out_path)), b"foo".to_vec());
+    }
+
+    #[test]
     fn symlinks_work() {
         let tmpdir = tmpdir();
         if !got_symlink_permission(&tmpdir) { return };
@@ -2992,7 +3035,7 @@ mod tests {
 
     #[test]
     fn open_flavors() {
-        use fs::OpenOptions as OO;
+        use crate::fs::OpenOptions as OO;
         fn c<T: Clone>(t: &T) -> T { t.clone() }
 
         let tmpdir = tmpdir();

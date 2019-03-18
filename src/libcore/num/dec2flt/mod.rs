@@ -37,7 +37,7 @@
 //!
 //! In addition, there are numerous helper functions that are used in the paper but not available
 //! in Rust (or at least in core). Our version is additionally complicated by the need to handle
-//! overflow and underflow and the desire to handle subnormal numbers.  Bellerophon and
+//! overflow and underflow and the desire to handle subnormal numbers. Bellerophon and
 //! Algorithm R have trouble with overflow, subnormals, and underflow. We conservatively switch to
 //! Algorithm M (with the modifications described in section 8 of the paper) well before the
 //! inputs get into the critical region.
@@ -54,7 +54,7 @@
 //! operations as well, if you want 0.5 ULP accuracy you need to do *everything* in full precision
 //! and round *exactly once, at the end*, by considering all truncated bits at once.
 //!
-//! FIXME Although some code duplication is necessary, perhaps parts of the code could be shuffled
+//! FIXME: Although some code duplication is necessary, perhaps parts of the code could be shuffled
 //! around such that less code is duplicated. Large parts of the algorithms are independent of the
 //! float type to output, or only needs access to a few constants, which could be passed in as
 //! parameters.
@@ -112,10 +112,34 @@ macro_rules! from_str_float_impl {
             /// * '2.5E10', or equivalently, '2.5e10'
             /// * '2.5E-10'
             /// * '5.'
-            /// * '.5', or, equivalently,  '0.5'
+            /// * '.5', or, equivalently, '0.5'
             /// * 'inf', '-inf', 'NaN'
             ///
             /// Leading and trailing whitespace represent an error.
+            ///
+            /// # Grammar
+            ///
+            /// All strings that adhere to the following [EBNF] grammar
+            /// will result in an [`Ok`] being returned:
+            ///
+            /// ```txt
+            /// Float  ::= Sign? ( 'inf' | 'NaN' | Number )
+            /// Number ::= ( Digit+ |
+            ///              Digit+ '.' Digit* |
+            ///              Digit* '.' Digit+ ) Exp?
+            /// Exp    ::= [eE] Sign? Digit+
+            /// Sign   ::= [+-]
+            /// Digit  ::= [0-9]
+            /// ```
+            ///
+            /// [EBNF]: https://www.w3.org/TR/REC-xml/#sec-notation
+            ///
+            /// # Known bugs
+            ///
+            /// In some situations, some strings that should create a valid float
+            /// instead return an error. See [issue #31407] for details.
+            ///
+            /// [issue #31407]: https://github.com/rust-lang/rust/issues/31407
             ///
             /// # Arguments
             ///
@@ -124,7 +148,7 @@ macro_rules! from_str_float_impl {
             /// # Return value
             ///
             /// `Err(ParseFloatError)` if the string did not represent a valid
-            /// number.  Otherwise, `Ok(n)` where `n` is the floating-point
+            /// number. Otherwise, `Ok(n)` where `n` is the floating-point
             /// number represented by `src`.
             #[inline]
             fn from_str(src: &str) -> Result<Self, ParseFloatError> {
@@ -185,7 +209,7 @@ fn pfe_invalid() -> ParseFloatError {
     ParseFloatError { kind: FloatErrorKind::Invalid }
 }
 
-/// Split decimal string into sign and the rest, without inspecting or validating the rest.
+/// Splits a decimal string into sign and the rest, without inspecting or validating the rest.
 fn extract_sign(s: &str) -> (Sign, &str) {
     match s.as_bytes()[0] {
         b'+' => (Sign::Positive, &s[1..]),
@@ -195,7 +219,7 @@ fn extract_sign(s: &str) -> (Sign, &str) {
     }
 }
 
-/// Convert a decimal string into a floating point number.
+/// Converts a decimal string into a floating point number.
 fn dec2flt<T: RawFloat>(s: &str) -> Result<T, ParseFloatError> {
     if s.is_empty() {
         return Err(pfe_empty())
@@ -280,8 +304,8 @@ fn simplify(decimal: &mut Decimal) {
     }
 }
 
-/// Quick and dirty upper bound on the size (log10) of the largest value that Algorithm R and
-/// Algorithm M will compute while working on the given decimal.
+/// Returns a quick-an-dirty upper bound on the size (log10) of the largest value that Algorithm R
+/// and Algorithm M will compute while working on the given decimal.
 fn bound_intermediate_digits(decimal: &Decimal, e: i64) -> u64 {
     // We don't need to worry too much about overflow here thanks to trivial_cases() and the
     // parser, which filter out the most extreme inputs for us.
@@ -300,7 +324,7 @@ fn bound_intermediate_digits(decimal: &Decimal, e: i64) -> u64 {
     }
 }
 
-/// Detect obvious overflows and underflows without even looking at the decimal digits.
+/// Detects obvious overflows and underflows without even looking at the decimal digits.
 fn trivial_cases<T: RawFloat>(decimal: &Decimal) -> Option<T> {
     // There were zeros but they were stripped by simplify()
     if decimal.integral.is_empty() && decimal.fractional.is_empty() {

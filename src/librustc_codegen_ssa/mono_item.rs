@@ -1,10 +1,10 @@
-use base;
 use rustc::hir;
 use rustc::hir::def::Def;
 use rustc::mir::mono::{Linkage, Visibility};
 use rustc::ty::layout::HasTyCtxt;
 use std::fmt;
-use traits::*;
+use crate::base;
+use crate::traits::*;
 
 pub use rustc::mir::mono::MonoItem;
 
@@ -13,7 +13,7 @@ pub use rustc_mir::monomorphize::item::MonoItemExt as BaseMonoItemExt;
 pub trait MonoItemExt<'a, 'tcx: 'a>: fmt::Debug + BaseMonoItemExt<'a, 'tcx> {
     fn define<Bx: BuilderMethods<'a, 'tcx>>(&self, cx: &'a Bx::CodegenCx) {
         debug!("BEGIN IMPLEMENTING '{} ({})' in cgu {}",
-               self.to_string(cx.tcx()),
+               self.to_string(cx.tcx(), true),
                self.to_raw_string(),
                cx.codegen_unit().name());
 
@@ -31,8 +31,8 @@ pub trait MonoItemExt<'a, 'tcx: 'a>: fmt::Debug + BaseMonoItemExt<'a, 'tcx> {
                 };
                 cx.codegen_static(def_id, is_mutable);
             }
-            MonoItem::GlobalAsm(node_id) => {
-                let item = cx.tcx().hir().expect_item(node_id);
+            MonoItem::GlobalAsm(hir_id) => {
+                let item = cx.tcx().hir().expect_item_by_hir_id(hir_id);
                 if let hir::ItemKind::GlobalAsm(ref ga) = item.node {
                     cx.codegen_global_asm(ga);
                 } else {
@@ -45,7 +45,7 @@ pub trait MonoItemExt<'a, 'tcx: 'a>: fmt::Debug + BaseMonoItemExt<'a, 'tcx> {
         }
 
         debug!("END IMPLEMENTING '{} ({})' in cgu {}",
-               self.to_string(cx.tcx()),
+               self.to_string(cx.tcx(), true),
                self.to_raw_string(),
                cx.codegen_unit().name());
     }
@@ -57,7 +57,7 @@ pub trait MonoItemExt<'a, 'tcx: 'a>: fmt::Debug + BaseMonoItemExt<'a, 'tcx> {
         visibility: Visibility
     ) {
         debug!("BEGIN PREDEFINING '{} ({})' in cgu {}",
-               self.to_string(cx.tcx()),
+               self.to_string(cx.tcx(), true),
                self.to_raw_string(),
                cx.codegen_unit().name());
 
@@ -76,7 +76,7 @@ pub trait MonoItemExt<'a, 'tcx: 'a>: fmt::Debug + BaseMonoItemExt<'a, 'tcx> {
         }
 
         debug!("END PREDEFINING '{} ({})' in cgu {}",
-               self.to_string(cx.tcx()),
+               self.to_string(cx.tcx(), true),
                self.to_raw_string(),
                cx.codegen_unit().name());
     }

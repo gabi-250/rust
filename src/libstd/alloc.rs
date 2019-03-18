@@ -64,7 +64,8 @@
 use core::sync::atomic::{AtomicPtr, Ordering};
 use core::{mem, ptr};
 use core::ptr::NonNull;
-use sys_common::util::dumb_print;
+
+use crate::sys_common::util::dumb_print;
 
 #[stable(feature = "alloc_module", since = "1.28.0")]
 #[doc(inline)]
@@ -95,11 +96,11 @@ pub use alloc_crate::alloc::*;
 ///
 /// ```rust
 /// use std::alloc::{System, GlobalAlloc, Layout};
-/// use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering::SeqCst};
+/// use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 ///
 /// struct Counter;
 ///
-/// static ALLOCATED: AtomicUsize = ATOMIC_USIZE_INIT;
+/// static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 ///
 /// unsafe impl GlobalAlloc for Counter {
 ///     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -208,7 +209,7 @@ pub fn rust_oom(layout: Layout) -> ! {
         unsafe { mem::transmute(hook) }
     };
     hook(layout);
-    unsafe { ::sys::abort_internal(); }
+    unsafe { crate::sys::abort_internal(); }
 }
 
 #[cfg(not(test))]

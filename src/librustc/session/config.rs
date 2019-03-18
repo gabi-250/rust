@@ -3,14 +3,15 @@
 
 use std::str::FromStr;
 
-use session::{early_error, early_warn, Session};
-use session::search_paths::SearchPath;
+use crate::session::{early_error, early_warn, Session};
+use crate::session::search_paths::SearchPath;
 
-use rustc_target::spec::{LinkerFlavor, PanicStrategy, RelroLevel};
+use rustc_target::spec::{LinkerFlavor, MergeFunctions, PanicStrategy, RelroLevel};
 use rustc_target::spec::{Target, TargetTriple};
-use lint;
-use middle::cstore;
+use crate::lint;
+use crate::middle::cstore;
 
+use syntax;
 use syntax::ast::{self, IntTy, UintTy, MetaItemKind};
 use syntax::source_map::{FileName, FilePathMapping};
 use syntax::edition::{Edition, EDITION_NAME_LIST, DEFAULT_EDITION};
@@ -58,6 +59,8 @@ pub enum OptLevel {
     SizeMin,    // -Oz
 }
 
+impl_stable_hash_via_hash!(OptLevel);
+
 /// This is what the `LtoCli` values get mapped to after resolving defaults and
 /// and taking other command line options into account.
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
@@ -94,18 +97,18 @@ pub enum LtoCli {
 }
 
 #[derive(Clone, PartialEq, Hash)]
-pub enum CrossLangLto {
+pub enum LinkerPluginLto {
     LinkerPlugin(PathBuf),
     LinkerPluginAuto,
     Disabled
 }
 
-impl CrossLangLto {
+impl LinkerPluginLto {
     pub fn enabled(&self) -> bool {
         match *self {
-            CrossLangLto::LinkerPlugin(_) |
-            CrossLangLto::LinkerPluginAuto => true,
-            CrossLangLto::Disabled => false,
+            LinkerPluginLto::LinkerPlugin(_) |
+            LinkerPluginLto::LinkerPluginAuto => true,
+            LinkerPluginLto::Disabled => false,
         }
     }
 }
@@ -409,6 +412,10 @@ top_level_options!(
         remap_path_prefix: Vec<(PathBuf, PathBuf)> [UNTRACKED],
 
         edition: Edition [TRACKED],
+
+        // The list of crates to consider private when
+        // checking leaked private dependency types in public interfaces
+        extern_private: Vec<String> [TRACKED],
     }
 );
 
@@ -469,7 +476,7 @@ impl BorrowckMode {
 }
 
 pub enum Input {
-    /// Load source from file
+    /// Loads source from file
     File(PathBuf),
     Str {
         /// String that is shown in place of a filename
@@ -491,6 +498,13 @@ impl Input {
         match *self {
             Input::File(_) => None,
             Input::Str { ref mut input, .. } => Some(input),
+        }
+    }
+
+    pub fn source_name(&self) -> FileName {
+        match *self {
+            Input::File(ref ifile) => ifile.clone().into(),
+            Input::Str { ref name, .. } => name.clone(),
         }
     }
 }
@@ -517,7 +531,7 @@ impl OutputFilenames {
             .unwrap_or_else(|| self.temp_path(flavor, None))
     }
 
-    /// Get the path where a compilation artifact of the given type for the
+    /// Gets the path where a compilation artifact of the given type for the
     /// given codegen unit should be placed on disk. If codegen_unit_name is
     /// None, a path distinct from those of any codegen unit will be generated.
     pub fn temp_path(&self, flavor: OutputType, codegen_unit_name: Option<&str>) -> PathBuf {
@@ -526,7 +540,7 @@ impl OutputFilenames {
     }
 
     /// Like temp_path, but also supports things where there is no corresponding
-    /// OutputType, like no-opt-bitcode or lto-bitcode.
+    /// OutputType, like noopt-bitcode or lto-bitcode.
     pub fn temp_path_ext(&self, ext: &str, codegen_unit_name: Option<&str>) -> PathBuf {
         let base = self.out_directory.join(&self.filestem());
 
@@ -604,12 +618,13 @@ impl Default for Options {
             cli_forced_thinlto_off: false,
             remap_path_prefix: Vec::new(),
             edition: DEFAULT_EDITION,
+            extern_private: Vec::new()
         }
     }
 }
 
 impl Options {
-    /// True if there is a reason to build the dep graph.
+    /// Returns `true` if there is a reason to build the dep graph.
     pub fn build_dep_graph(&self) -> bool {
         self.incremental.is_some() || self.debugging_opts.dump_dep_graph
             || self.debugging_opts.query_dep_graph
@@ -625,7 +640,7 @@ impl Options {
         FilePathMapping::new(self.remap_path_prefix.clone())
     }
 
-    /// True if there will be an output file generated
+    /// Returns `true` if there will be an output file generated
     pub fn will_create_output_file(&self) -> bool {
         !self.debugging_opts.parse_only && // The file is just being parsed
             !self.debugging_opts.ls // The file is just being queried
@@ -649,14 +664,14 @@ impl Options {
     }
 }
 
-// The type of entry function, so
-// users can have their own entry
-// functions
-#[derive(Copy, Clone, PartialEq)]
+// The type of entry function, so users can have their own entry functions
+#[derive(Copy, Clone, PartialEq, Hash, Debug)]
 pub enum EntryFnType {
     Main,
     Start,
 }
+
+impl_stable_hash_via_hash!(EntryFnType);
 
 #[derive(Copy, PartialEq, PartialOrd, Clone, Ord, Eq, Hash, Debug)]
 pub enum CrateType {
@@ -785,6 +800,7 @@ macro_rules! options {
         pub const parse_opt_pathbuf: Option<&str> = Some("a path");
         pub const parse_list: Option<&str> = Some("a space-separated list of strings");
         pub const parse_opt_list: Option<&str> = Some("a space-separated list of strings");
+        pub const parse_opt_comma_list: Option<&str> = Some("a comma-separated list of strings");
         pub const parse_uint: Option<&str> = Some("a number");
         pub const parse_passes: Option<&str> =
             Some("a space-separated list of passes, or `all`");
@@ -802,19 +818,24 @@ macro_rules! options {
             Some("crate=integer");
         pub const parse_unpretty: Option<&str> =
             Some("`string` or `string=string`");
+        pub const parse_treat_err_as_bug: Option<&str> =
+            Some("either no value or a number bigger than 0");
         pub const parse_lto: Option<&str> =
             Some("either a boolean (`yes`, `no`, `on`, `off`, etc), `thin`, \
                   `fat`, or omitted");
-        pub const parse_cross_lang_lto: Option<&str> =
+        pub const parse_linker_plugin_lto: Option<&str> =
             Some("either a boolean (`yes`, `no`, `on`, `off`, etc), \
                   or the path to the linker plugin");
+        pub const parse_merge_functions: Option<&str> =
+            Some("one of: `disabled`, `trampolines`, or `aliases`");
     }
 
     #[allow(dead_code)]
     mod $mod_set {
-        use super::{$struct_name, Passes, Sanitizer, LtoCli, CrossLangLto};
-        use rustc_target::spec::{LinkerFlavor, PanicStrategy, RelroLevel};
+        use super::{$struct_name, Passes, Sanitizer, LtoCli, LinkerPluginLto};
+        use rustc_target::spec::{LinkerFlavor, MergeFunctions, PanicStrategy, RelroLevel};
         use std::path::PathBuf;
+        use std::str::FromStr;
 
         $(
             pub fn $opt(cg: &mut $struct_name, v: Option<&str>) -> bool {
@@ -899,6 +920,18 @@ macro_rules! options {
             match v {
                 Some(s) => {
                     let v = s.split_whitespace().map(|s| s.to_string()).collect();
+                    *slot = Some(v);
+                    true
+                },
+                None => false,
+            }
+        }
+
+        fn parse_opt_comma_list(slot: &mut Option<Vec<String>>, v: Option<&str>)
+                      -> bool {
+            match v {
+                Some(s) => {
+                    let v = s.split(',').map(|s| s.to_string()).collect();
                     *slot = Some(v);
                     true
                 },
@@ -1005,6 +1038,13 @@ macro_rules! options {
             }
         }
 
+        fn parse_treat_err_as_bug(slot: &mut Option<usize>, v: Option<&str>) -> bool {
+            match v {
+                Some(s) => { *slot = s.parse().ok().filter(|&x| x != 0); slot.unwrap_or(0) != 0 }
+                None => { *slot = Some(1); true }
+            }
+        }
+
         fn parse_lto(slot: &mut LtoCli, v: Option<&str>) -> bool {
             if v.is_some() {
                 let mut bool_arg = None;
@@ -1027,23 +1067,31 @@ macro_rules! options {
             true
         }
 
-        fn parse_cross_lang_lto(slot: &mut CrossLangLto, v: Option<&str>) -> bool {
+        fn parse_linker_plugin_lto(slot: &mut LinkerPluginLto, v: Option<&str>) -> bool {
             if v.is_some() {
                 let mut bool_arg = None;
                 if parse_opt_bool(&mut bool_arg, v) {
                     *slot = if bool_arg.unwrap() {
-                        CrossLangLto::LinkerPluginAuto
+                        LinkerPluginLto::LinkerPluginAuto
                     } else {
-                        CrossLangLto::Disabled
+                        LinkerPluginLto::Disabled
                     };
                     return true
                 }
             }
 
             *slot = match v {
-                None => CrossLangLto::LinkerPluginAuto,
-                Some(path) => CrossLangLto::LinkerPlugin(PathBuf::from(path)),
+                None => LinkerPluginLto::LinkerPluginAuto,
+                Some(path) => LinkerPluginLto::LinkerPlugin(PathBuf::from(path)),
             };
+            true
+        }
+
+        fn parse_merge_functions(slot: &mut Option<MergeFunctions>, v: Option<&str>) -> bool {
+            match v.and_then(|s| MergeFunctions::from_str(s).ok()) {
+                Some(mergefunc) => *slot = Some(mergefunc),
+                _ => return false,
+            }
             true
         }
     }
@@ -1127,6 +1175,10 @@ options! {CodegenOptions, CodegenSetter, basic_codegen_options,
         "allow the linker to link its default libraries"),
     linker_flavor: Option<LinkerFlavor> = (None, parse_linker_flavor, [UNTRACKED],
                                            "Linker flavor"),
+    linker_plugin_lto: LinkerPluginLto = (LinkerPluginLto::Disabled,
+        parse_linker_plugin_lto, [TRACKED],
+        "generate build artifacts that are compatible with linker-based LTO."),
+
 }
 
 options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
@@ -1181,8 +1233,8 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "prints the llvm optimization passes being run"),
     ast_json: bool = (false, parse_bool, [UNTRACKED],
         "print the AST as JSON and halt"),
-    query_threads: Option<usize> = (None, parse_opt_uint, [UNTRACKED],
-        "execute queries on a thread pool with N threads"),
+    threads: Option<usize> = (None, parse_opt_uint, [UNTRACKED],
+        "use a thread pool with N threads"),
     ast_json_noexpand: bool = (false, parse_bool, [UNTRACKED],
         "print the pre-expansion AST as JSON and halt"),
     ls: bool = (false, parse_bool, [UNTRACKED],
@@ -1203,10 +1255,12 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
          Use with RUST_REGION_GRAPH=help for more info"),
     parse_only: bool = (false, parse_bool, [UNTRACKED],
         "parse only; do not compile, assemble, or link"),
+    dual_proc_macros: bool = (false, parse_bool, [TRACKED],
+        "load proc macros for both target and host, but only link to the target"),
     no_codegen: bool = (false, parse_bool, [TRACKED],
         "run all passes except codegen; no output"),
-    treat_err_as_bug: bool = (false, parse_bool, [TRACKED],
-        "treat all errors that occur as bugs"),
+    treat_err_as_bug: Option<usize> = (None, parse_treat_err_as_bug, [TRACKED],
+        "treat error number `val` that occurs as bug"),
     report_delayed_bugs: bool = (false, parse_bool, [TRACKED],
         "immediately print bugs registered with `delay_span_bug`"),
     external_macro_backtrace: bool = (false, parse_bool, [UNTRACKED],
@@ -1215,6 +1269,8 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "show extended diagnostic help"),
     continue_parse_after_error: bool = (false, parse_bool, [TRACKED],
         "attempt to recover from parse errors (experimental)"),
+    dep_tasks: bool = (false, parse_bool, [UNTRACKED],
+        "print tasks that execute and the color their dep node gets (requires debug build)"),
     incremental: Option<String> = (None, parse_opt_string, [UNTRACKED],
         "enable incremental compilation (experimental)"),
     incremental_queries: bool = (true, parse_bool, [UNTRACKED],
@@ -1287,6 +1343,8 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "print some statistics about AST and HIR"),
     always_encode_mir: bool = (false, parse_bool, [TRACKED],
         "encode MIR of all functions into the crate metadata"),
+    unleash_the_miri_inside_of_you: bool = (false, parse_bool, [TRACKED],
+        "take the breaks off const evaluation. NOTE: this is unsound"),
     osx_rpath_install_name: bool = (false, parse_bool, [TRACKED],
         "pass `-install_name @rpath/...` to the macOS linker"),
     sanitizer: Option<Sanitizer> = (None, parse_sanitizer, [TRACKED],
@@ -1342,10 +1400,15 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
     unpretty: Option<String> = (None, parse_unpretty, [UNTRACKED],
         "Present the input source, unstable (and less-pretty) variants;
         valid types are any of the types for `--pretty`, as well as:
+        `expanded`, `expanded,identified`,
+        `expanded,hygiene` (with internal representations),
         `flowgraph=<nodeid>` (graphviz formatted flowgraph for node),
+        `flowgraph,unlabelled=<nodeid>` (unlabelled graphviz formatted flowgraph for node),
         `everybody_loops` (all function bodies replaced with `loop {}`),
-        `hir` (the HIR), `hir,identified`, or
-        `hir,typed` (HIR with types for each node)."),
+        `hir` (the HIR), `hir,identified`,
+        `hir,typed` (HIR with types for each node),
+        `hir-tree` (dump the raw HIR),
+        `mir` (the MIR), or `mir-cfg` (graphviz formatted MIR)"),
     run_dsymutil: Option<bool> = (None, parse_opt_bool, [TRACKED],
         "run `dsymutil` and delete intermediate object files"),
     ui_testing: bool = (false, parse_bool, [UNTRACKED],
@@ -1358,24 +1421,27 @@ options! {DebuggingOptions, DebuggingSetter, basic_debugging_options,
         "make the current crate share its generic instantiations"),
     chalk: bool = (false, parse_bool, [TRACKED],
         "enable the experimental Chalk-based trait solving engine"),
-    cross_lang_lto: CrossLangLto = (CrossLangLto::Disabled, parse_cross_lang_lto, [TRACKED],
-        "generate build artifacts that are compatible with linker-based LTO."),
     no_parallel_llvm: bool = (false, parse_bool, [UNTRACKED],
         "don't run LLVM in parallel (while keeping codegen-units and ThinLTO)"),
     no_leak_check: bool = (false, parse_bool, [UNTRACKED],
         "disables the 'leak check' for subtyping; unsound, but useful for tests"),
+    no_interleave_lints: bool = (false, parse_bool, [UNTRACKED],
+        "don't interleave execution of lints; allows benchmarking individual lints"),
     crate_attr: Vec<String> = (Vec::new(), parse_string_push, [TRACKED],
         "inject the given attribute in the crate"),
     self_profile: bool = (false, parse_bool, [UNTRACKED],
-        "run the self profiler"),
-    profile_json: bool = (false, parse_bool, [UNTRACKED],
-        "output a json file with profiler results"),
+        "run the self profiler and output the raw event data"),
     emit_stack_sizes: bool = (false, parse_bool, [UNTRACKED],
         "emits a section containing stack size metadata"),
     plt: Option<bool> = (None, parse_opt_bool, [TRACKED],
           "whether to use the PLT when calling into shared libraries;
           only has effect for PIC code on systems with ELF binaries
           (default: PLT is disabled if full relro is enabled)"),
+    merge_functions: Option<MergeFunctions> = (None, parse_merge_functions, [TRACKED],
+        "control the operation of the MergeFunctions LLVM pass, taking
+         the same values as the target option of the same name"),
+    allow_features: Option<Vec<String>> = (None, parse_opt_comma_list, [TRACKED],
+        "only allow the listed language features to be enabled in code (space separated)"),
 }
 
 pub fn default_lib_output() -> CrateType {
@@ -1442,6 +1508,15 @@ pub fn default_configuration(sess: &Session) -> ast::CrateConfig {
         ret.insert((Symbol::intern("proc_macro"), None));
     }
     ret
+}
+
+/// Converts the crate cfg! configuration from String to Symbol.
+/// `rustc_interface::interface::Config` accepts this in the compiler configuration,
+/// but the symbol interner is not yet set up then, so we must convert it later.
+pub fn to_crate_config(cfg: FxHashSet<(String, Option<String>)>) -> ast::CrateConfig {
+    cfg.into_iter()
+       .map(|(a, b)| (Symbol::intern(&a), b.map(|b| Symbol::intern(&b))))
+       .collect()
 }
 
 pub fn build_configuration(sess: &Session, mut user_cfg: ast::CrateConfig) -> ast::CrateConfig {
@@ -1701,6 +1776,12 @@ pub fn rustc_optgroups() -> Vec<RustcOptGroup> {
             "Specify where an external rust library is located",
             "NAME=PATH",
         ),
+        opt::multi_s(
+            "",
+            "extern-private",
+            "Specify where an extern rust library is located, marking it as a private dependency",
+            "NAME=PATH",
+        ),
         opt::opt_s("", "sysroot", "Override the system root", "PATH"),
         opt::multi("Z", "", "Set internal debugging options", "FLAG"),
         opt::opt_s(
@@ -1744,10 +1825,9 @@ pub fn rustc_optgroups() -> Vec<RustcOptGroup> {
 }
 
 // Convert strings provided as --cfg [cfgspec] into a crate_cfg
-pub fn parse_cfgspecs(cfgspecs: Vec<String>) -> ast::CrateConfig {
-    cfgspecs
-        .into_iter()
-        .map(|s| {
+pub fn parse_cfgspecs(cfgspecs: Vec<String>) -> FxHashSet<(String, Option<String>)> {
+    syntax::with_globals(move || {
+        let cfg = cfgspecs.into_iter().map(|s| {
             let sess = parse::ParseSess::new(FilePathMapping::empty());
             let filename = FileName::cfg_spec_source_code(&s);
             let mut parser = parse::new_parser_from_source_str(&sess, filename, s.to_string());
@@ -1759,7 +1839,7 @@ pub fn parse_cfgspecs(cfgspecs: Vec<String>) -> ast::CrateConfig {
 
             match &mut parser.parse_meta_item() {
                 Ok(meta_item) if parser.token == token::Eof => {
-                    if meta_item.ident.segments.len() != 1 {
+                    if meta_item.path.segments.len() != 1 {
                         error!("argument key must be an identifier");
                     }
                     match &meta_item.node {
@@ -1770,7 +1850,8 @@ pub fn parse_cfgspecs(cfgspecs: Vec<String>) -> ast::CrateConfig {
                             error!("argument value must be a string");
                         }
                         MetaItemKind::NameValue(..) | MetaItemKind::Word => {
-                            return (meta_item.name(), meta_item.value_str());
+                            let ident = meta_item.ident().expect("multi-segment cfg key");
+                            return (ident.name, meta_item.value_str());
                         }
                     }
                 }
@@ -1779,8 +1860,11 @@ pub fn parse_cfgspecs(cfgspecs: Vec<String>) -> ast::CrateConfig {
             }
 
             error!(r#"expected `key` or `key="value"`"#);
-        })
-        .collect::<ast::CrateConfig>()
+        }).collect::<ast::CrateConfig>();
+        cfg.into_iter().map(|(a, b)| {
+            (a.to_string(), b.map(|b| b.to_string()))
+        }).collect()
+    })
 }
 
 pub fn get_cmd_lint_options(matches: &getopts::Matches,
@@ -1808,7 +1892,7 @@ pub fn get_cmd_lint_options(matches: &getopts::Matches,
 
 pub fn build_session_options_and_crate_config(
     matches: &getopts::Matches,
-) -> (Options, ast::CrateConfig) {
+) -> (Options, FxHashSet<(String, Option<String>)>) {
     let color = match matches.opt_str("color").as_ref().map(|s| &s[..]) {
         Some("auto") => ColorConfig::Auto,
         Some("always") => ColorConfig::Always,
@@ -1881,6 +1965,7 @@ pub fn build_session_options_and_crate_config(
     let unparsed_crate_types = matches.opt_strs("crate-type");
     let crate_types = parse_crate_types_from_list(unparsed_crate_types)
         .unwrap_or_else(|e| early_error(error_format, &e[..]));
+
 
     let (lint_opts, describe_lints, lint_cap) = get_cmd_lint_options(matches, error_format);
 
@@ -1963,17 +2048,17 @@ pub fn build_session_options_and_crate_config(
         }
     }
 
-    if debugging_opts.query_threads == Some(0) {
+    if debugging_opts.threads == Some(0) {
         early_error(
             error_format,
-            "Value for query threads must be a positive nonzero integer",
+            "Value for threads must be a positive nonzero integer",
         );
     }
 
-    if debugging_opts.query_threads.unwrap_or(1) > 1 && debugging_opts.fuel.is_some() {
+    if debugging_opts.threads.unwrap_or(1) > 1 && debugging_opts.fuel.is_some() {
         early_error(
             error_format,
-            "Optimization fuel is incompatible with multiple query threads",
+            "Optimization fuel is incompatible with multiple threads",
         );
     }
 
@@ -2195,8 +2280,18 @@ pub fn build_session_options_and_crate_config(
         );
     }
 
+    if matches.opt_present("extern-private") && !debugging_opts.unstable_options {
+        early_error(
+            ErrorOutputType::default(),
+            "'--extern-private' is unstable and only \
+            available for nightly builds of rustc."
+        )
+    }
+
+    let extern_private = matches.opt_strs("extern-private");
+
     let mut externs: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
-    for arg in &matches.opt_strs("extern") {
+    for arg in matches.opt_strs("extern").into_iter().chain(matches.opt_strs("extern-private")) {
         let mut parts = arg.splitn(2, '=');
         let name = parts.next().unwrap_or_else(||
             early_error(error_format, "--extern value must not be empty"));
@@ -2264,6 +2359,7 @@ pub fn build_session_options_and_crate_config(
             cli_forced_thinlto_off: disable_thinlto,
             remap_path_prefix,
             edition,
+            extern_private
         },
         cfg,
     )
@@ -2296,7 +2392,7 @@ pub mod nightly_options {
     use getopts;
     use syntax::feature_gate::UnstableFeatures;
     use super::{ErrorOutputType, OptionStability, RustcOptGroup};
-    use session::early_error;
+    use crate::session::early_error;
 
     pub fn is_unstable_enabled(matches: &getopts::Matches) -> bool {
         is_nightly_build()
@@ -2385,16 +2481,16 @@ impl fmt::Display for CrateType {
 /// we have an opt-in scheme here, so one is hopefully forced to think about
 /// how the hash should be calculated when adding a new command-line argument.
 mod dep_tracking {
-    use lint;
-    use middle::cstore;
+    use crate::lint;
+    use crate::middle::cstore;
     use std::collections::BTreeMap;
     use std::hash::Hash;
     use std::path::PathBuf;
     use std::collections::hash_map::DefaultHasher;
     use super::{CrateType, DebugInfo, ErrorOutputType, OptLevel, OutputTypes,
-                Passes, Sanitizer, LtoCli, CrossLangLto};
+                Passes, Sanitizer, LtoCli, LinkerPluginLto};
     use syntax::feature_gate::UnstableFeatures;
-    use rustc_target::spec::{PanicStrategy, RelroLevel, TargetTriple};
+    use rustc_target::spec::{MergeFunctions, PanicStrategy, RelroLevel, TargetTriple};
     use syntax::edition::Edition;
 
     pub trait DepTrackingHash {
@@ -2437,12 +2533,15 @@ mod dep_tracking {
     impl_dep_tracking_hash_via_hash!(Option<usize>);
     impl_dep_tracking_hash_via_hash!(Option<String>);
     impl_dep_tracking_hash_via_hash!(Option<(String, u64)>);
+    impl_dep_tracking_hash_via_hash!(Option<Vec<String>>);
+    impl_dep_tracking_hash_via_hash!(Option<MergeFunctions>);
     impl_dep_tracking_hash_via_hash!(Option<PanicStrategy>);
     impl_dep_tracking_hash_via_hash!(Option<RelroLevel>);
     impl_dep_tracking_hash_via_hash!(Option<lint::Level>);
     impl_dep_tracking_hash_via_hash!(Option<PathBuf>);
     impl_dep_tracking_hash_via_hash!(Option<cstore::NativeLibraryKind>);
     impl_dep_tracking_hash_via_hash!(CrateType);
+    impl_dep_tracking_hash_via_hash!(MergeFunctions);
     impl_dep_tracking_hash_via_hash!(PanicStrategy);
     impl_dep_tracking_hash_via_hash!(RelroLevel);
     impl_dep_tracking_hash_via_hash!(Passes);
@@ -2456,7 +2555,7 @@ mod dep_tracking {
     impl_dep_tracking_hash_via_hash!(Option<Sanitizer>);
     impl_dep_tracking_hash_via_hash!(TargetTriple);
     impl_dep_tracking_hash_via_hash!(Edition);
-    impl_dep_tracking_hash_via_hash!(CrossLangLto);
+    impl_dep_tracking_hash_via_hash!(LinkerPluginLto);
 
     impl_dep_tracking_hash_for_sortable_vec_of!(String);
     impl_dep_tracking_hash_for_sortable_vec_of!(PathBuf);
@@ -2516,19 +2615,22 @@ mod dep_tracking {
 
 #[cfg(test)]
 mod tests {
-    use errors;
     use getopts;
-    use lint;
-    use middle::cstore;
-    use session::config::{build_configuration, build_session_options_and_crate_config};
-    use session::config::{LtoCli, CrossLangLto};
-    use session::build_session;
-    use session::search_paths::SearchPath;
+    use crate::lint;
+    use crate::middle::cstore;
+    use crate::session::config::{
+        build_configuration,
+        build_session_options_and_crate_config,
+        to_crate_config
+    };
+    use crate::session::config::{LtoCli, LinkerPluginLto};
+    use crate::session::build_session;
+    use crate::session::search_paths::SearchPath;
     use std::collections::{BTreeMap, BTreeSet};
     use std::iter::FromIterator;
     use std::path::PathBuf;
     use super::{Externs, OutputType, OutputTypes};
-    use rustc_target::spec::{PanicStrategy, RelroLevel};
+    use rustc_target::spec::{MergeFunctions, PanicStrategy, RelroLevel};
     use syntax::symbol::Symbol;
     use syntax::edition::{Edition, DEFAULT_EDITION};
     use syntax;
@@ -2561,7 +2663,7 @@ mod tests {
             let registry = errors::registry::Registry::new(&[]);
             let (sessopts, cfg) = build_session_options_and_crate_config(matches);
             let sess = build_session(sessopts, None, registry);
-            let cfg = build_configuration(&sess, cfg);
+            let cfg = build_configuration(&sess, to_crate_config(cfg));
             assert!(cfg.contains(&(Symbol::intern("test"), None)));
         });
     }
@@ -2579,7 +2681,7 @@ mod tests {
             let registry = errors::registry::Registry::new(&[]);
             let (sessopts, cfg) = build_session_options_and_crate_config(matches);
             let sess = build_session(sessopts, None, registry);
-            let cfg = build_configuration(&sess, cfg);
+            let cfg = build_configuration(&sess, to_crate_config(cfg));
             let mut test_items = cfg.iter().filter(|&&(name, _)| name == "test");
             assert!(test_items.next().is_some());
             assert!(test_items.next().is_none());
@@ -3054,6 +3156,10 @@ mod tests {
         opts = reference.clone();
         opts.cg.panic = Some(PanicStrategy::Abort);
         assert!(reference.dep_tracking_hash() != opts.dep_tracking_hash());
+
+        opts = reference.clone();
+        opts.cg.linker_plugin_lto = LinkerPluginLto::LinkerPluginAuto;
+        assert!(reference.dep_tracking_hash() != opts.dep_tracking_hash());
     }
 
     #[test]
@@ -3149,7 +3255,7 @@ mod tests {
         assert!(reference.dep_tracking_hash() != opts.dep_tracking_hash());
 
         opts = reference.clone();
-        opts.debugging_opts.treat_err_as_bug = true;
+        opts.debugging_opts.treat_err_as_bug = Some(1);
         assert!(reference.dep_tracking_hash() != opts.dep_tracking_hash());
 
         opts = reference.clone();
@@ -3181,7 +3287,11 @@ mod tests {
         assert!(reference.dep_tracking_hash() != opts.dep_tracking_hash());
 
         opts = reference.clone();
-        opts.debugging_opts.cross_lang_lto = CrossLangLto::LinkerPluginAuto;
+        opts.debugging_opts.merge_functions = Some(MergeFunctions::Disabled);
+        assert!(reference.dep_tracking_hash() != opts.dep_tracking_hash());
+
+        opts = reference.clone();
+        opts.debugging_opts.allow_features = Some(vec![String::from("lang_items")]);
         assert!(reference.dep_tracking_hash() != opts.dep_tracking_hash());
     }
 

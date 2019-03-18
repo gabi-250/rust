@@ -3,15 +3,287 @@
 //! hand, though we've recently added some macros (e.g.,
 //! `BraceStructLiftImpl!`) to help with the tedium.
 
-use mir::ProjectionKind;
-use mir::interpret::ConstValue;
-use ty::{self, Lift, Ty, TyCtxt};
-use ty::fold::{TypeFoldable, TypeFolder, TypeVisitor};
+use crate::hir::def::Namespace;
+use crate::mir::ProjectionKind;
+use crate::mir::interpret::ConstValue;
+use crate::ty::{self, Lift, Ty, TyCtxt, ConstVid};
+use crate::ty::fold::{TypeFoldable, TypeFolder, TypeVisitor};
+use crate::ty::print::{FmtPrinter, Printer};
 use rustc_data_structures::indexed_vec::{IndexVec, Idx};
 use smallvec::SmallVec;
-use mir::interpret;
+use crate::mir::interpret;
 
+use std::fmt;
+use std::marker::PhantomData;
 use std::rc::Rc;
+
+impl fmt::Debug for ty::GenericParamDef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let type_name = match self.kind {
+            ty::GenericParamDefKind::Lifetime => "Lifetime",
+            ty::GenericParamDefKind::Type {..} => "Type",
+            ty::GenericParamDefKind::Const => "Const",
+        };
+        write!(f, "{}({}, {:?}, {})",
+               type_name,
+               self.name,
+               self.def_id,
+               self.index)
+    }
+}
+
+impl fmt::Debug for ty::TraitDef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        ty::tls::with(|tcx| {
+            FmtPrinter::new(tcx, f, Namespace::TypeNS)
+                .print_def_path(self.def_id, &[])?;
+            Ok(())
+        })
+    }
+}
+
+impl fmt::Debug for ty::AdtDef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        ty::tls::with(|tcx| {
+            FmtPrinter::new(tcx, f, Namespace::TypeNS)
+                .print_def_path(self.did, &[])?;
+            Ok(())
+        })
+    }
+}
+
+impl fmt::Debug for ty::ClosureUpvar<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ClosureUpvar({:?},{:?})",
+               self.def,
+               self.ty)
+    }
+}
+
+impl fmt::Debug for ty::UpvarId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = ty::tls::with(|tcx| {
+            tcx.hir().name_by_hir_id(self.var_path.hir_id)
+        });
+        write!(f, "UpvarId({:?};`{}`;{:?})",
+            self.var_path.hir_id,
+            name,
+            self.closure_expr_id)
+    }
+}
+
+impl fmt::Debug for ty::UpvarBorrow<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "UpvarBorrow({:?}, {:?})",
+               self.kind, self.region)
+    }
+}
+
+impl fmt::Debug for ty::ExistentialTraitRef<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl fmt::Debug for ty::adjustment::Adjustment<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?} -> {}", self.kind, self.target)
+    }
+}
+
+impl fmt::Debug for ty::BoundRegion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ty::BrAnon(n) => write!(f, "BrAnon({:?})", n),
+            ty::BrFresh(n) => write!(f, "BrFresh({:?})", n),
+            ty::BrNamed(did, name) => {
+                write!(f, "BrNamed({:?}:{:?}, {})",
+                        did.krate, did.index, name)
+            }
+            ty::BrEnv => write!(f, "BrEnv"),
+        }
+    }
+}
+
+impl fmt::Debug for ty::RegionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ty::ReEarlyBound(ref data) => {
+                write!(f, "ReEarlyBound({}, {})",
+                        data.index,
+                        data.name)
+            }
+
+            ty::ReClosureBound(ref vid) => {
+                write!(f, "ReClosureBound({:?})", vid)
+            }
+
+            ty::ReLateBound(binder_id, ref bound_region) => {
+                write!(f, "ReLateBound({:?}, {:?})", binder_id, bound_region)
+            }
+
+            ty::ReFree(ref fr) => fr.fmt(f),
+
+            ty::ReScope(id) => write!(f, "ReScope({:?})", id),
+
+            ty::ReStatic => write!(f, "ReStatic"),
+
+            ty::ReVar(ref vid) => vid.fmt(f),
+
+            ty::RePlaceholder(placeholder) => {
+                write!(f, "RePlaceholder({:?})", placeholder)
+            }
+
+            ty::ReEmpty => write!(f, "ReEmpty"),
+
+            ty::ReErased => write!(f, "ReErased"),
+        }
+    }
+}
+
+impl fmt::Debug for ty::FreeRegion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ReFree({:?}, {:?})", self.scope, self.bound_region)
+    }
+}
+
+impl fmt::Debug for ty::Variance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match *self {
+            ty::Covariant => "+",
+            ty::Contravariant => "-",
+            ty::Invariant => "o",
+            ty::Bivariant => "*",
+        })
+    }
+}
+
+impl fmt::Debug for ty::FnSig<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({:?}; c_variadic: {})->{:?}",
+                self.inputs(), self.c_variadic, self.output())
+    }
+}
+
+impl fmt::Debug for ty::TyVid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_#{}t", self.index)
+    }
+}
+
+impl<'tcx> fmt::Debug for ty::ConstVid<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_#{}c", self.index)
+    }
+}
+
+impl fmt::Debug for ty::IntVid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_#{}i", self.index)
+    }
+}
+
+impl fmt::Debug for ty::FloatVid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_#{}f", self.index)
+    }
+}
+
+impl fmt::Debug for ty::RegionVid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "'_#{}r", self.index())
+    }
+}
+
+impl fmt::Debug for ty::InferTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ty::TyVar(ref v) => v.fmt(f),
+            ty::IntVar(ref v) => v.fmt(f),
+            ty::FloatVar(ref v) => v.fmt(f),
+            ty::FreshTy(v) => write!(f, "FreshTy({:?})", v),
+            ty::FreshIntTy(v) => write!(f, "FreshIntTy({:?})", v),
+            ty::FreshFloatTy(v) => write!(f, "FreshFloatTy({:?})", v),
+        }
+    }
+}
+
+impl fmt::Debug for ty::IntVarValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ty::IntType(ref v) => v.fmt(f),
+            ty::UintType(ref v) => v.fmt(f),
+        }
+    }
+}
+
+impl fmt::Debug for ty::FloatVarValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Debug for ty::TraitRef<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // FIXME(#59188) this is used across the compiler to print
+        // a `TraitRef` qualified (with the Self type explicit),
+        // instead of having a different way to make that choice.
+        write!(f, "<{} as {}>", self.self_ty(), self)
+    }
+}
+
+impl fmt::Debug for Ty<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl fmt::Debug for ty::ParamTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/#{}", self.name, self.idx)
+    }
+}
+
+impl fmt::Debug for ty::ParamConst {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/#{}", self.name, self.index)
+    }
+}
+
+impl fmt::Debug for ty::TraitPredicate<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "TraitPredicate({:?})", self.trait_ref)
+    }
+}
+
+impl fmt::Debug for ty::ProjectionPredicate<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ProjectionPredicate({:?}, {:?})", self.projection_ty, self.ty)
+    }
+}
+
+impl fmt::Debug for ty::Predicate<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ty::Predicate::Trait(ref a) => a.fmt(f),
+            ty::Predicate::Subtype(ref pair) => pair.fmt(f),
+            ty::Predicate::RegionOutlives(ref pair) => pair.fmt(f),
+            ty::Predicate::TypeOutlives(ref pair) => pair.fmt(f),
+            ty::Predicate::Projection(ref pair) => pair.fmt(f),
+            ty::Predicate::WellFormed(ty) => write!(f, "WellFormed({:?})", ty),
+            ty::Predicate::ObjectSafe(trait_def_id) => {
+                write!(f, "ObjectSafe({:?})", trait_def_id)
+            }
+            ty::Predicate::ClosureKind(closure_def_id, closure_substs, kind) => {
+                write!(f, "ClosureKind({:?}, {:?}, {:?})",
+                    closure_def_id, closure_substs, kind)
+            }
+            ty::Predicate::ConstEvaluatable(def_id, substs) => {
+                write!(f, "ConstEvaluatable({:?}, {:?})", def_id, substs)
+            }
+        }
+    }
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // Atomic structs
@@ -23,41 +295,47 @@ CloneTypeFoldableAndLiftImpls! {
     (),
     bool,
     usize,
-    ::ty::layout::VariantIdx,
+    crate::ty::layout::VariantIdx,
     u64,
     String,
-    ::middle::region::Scope,
+    crate::middle::region::Scope,
     ::syntax::ast::FloatTy,
     ::syntax::ast::NodeId,
     ::syntax_pos::symbol::Symbol,
-    ::hir::def::Def,
-    ::hir::def_id::DefId,
-    ::hir::InlineAsm,
-    ::hir::MatchSource,
-    ::hir::Mutability,
-    ::hir::Unsafety,
+    crate::hir::def::Def,
+    crate::hir::def_id::DefId,
+    crate::hir::InlineAsm,
+    crate::hir::MatchSource,
+    crate::hir::Mutability,
+    crate::hir::Unsafety,
     ::rustc_target::spec::abi::Abi,
-    ::mir::Local,
-    ::mir::Promoted,
-    ::traits::Reveal,
-    ::ty::adjustment::AutoBorrowMutability,
-    ::ty::AdtKind,
+    crate::mir::Local,
+    crate::mir::Promoted,
+    crate::traits::Reveal,
+    crate::ty::adjustment::AutoBorrowMutability,
+    crate::ty::AdtKind,
     // Including `BoundRegion` is a *bit* dubious, but direct
     // references to bound region appear in `ty::Error`, and aren't
     // really meant to be folded. In general, we can only fold a fully
     // general `Region`.
-    ::ty::BoundRegion,
-    ::ty::ClosureKind,
-    ::ty::IntVarValue,
-    ::ty::ParamTy,
-    ::ty::UniverseIndex,
-    ::ty::Variance,
+    crate::ty::BoundRegion,
+    crate::ty::Placeholder<crate::ty::BoundRegion>,
+    crate::ty::ClosureKind,
+    crate::ty::FreeRegion,
+    crate::ty::InferTy,
+    crate::ty::IntVarValue,
+    crate::ty::ParamConst,
+    crate::ty::ParamTy,
+    crate::ty::RegionVid,
+    crate::ty::UniverseIndex,
+    crate::ty::Variance,
     ::syntax_pos::Span,
 }
 
 ///////////////////////////////////////////////////////////////////////////
 // Lift implementations
 
+// FIXME(eddyb) replace all the uses of `Option::map` with `?`.
 impl<'tcx, A: Lift<'tcx>, B: Lift<'tcx>> Lift<'tcx> for (A, B) {
     type Lifted = (A::Lifted, B::Lifted);
     fn lift_to_tcx<'a, 'gcx>(&self, tcx: TyCtxt<'a, 'gcx, 'tcx>) -> Option<Self::Lifted> {
@@ -151,6 +429,23 @@ impl<'a, 'tcx> Lift<'tcx> for ty::ExistentialTraitRef<'a> {
             def_id: self.def_id,
             substs,
         })
+    }
+}
+
+impl<'a, 'tcx> Lift<'tcx> for ty::ExistentialPredicate<'a> {
+    type Lifted = ty::ExistentialPredicate<'tcx>;
+    fn lift_to_tcx<'b, 'gcx>(&self, tcx: TyCtxt<'b, 'gcx, 'tcx>) -> Option<Self::Lifted> {
+        match self {
+            ty::ExistentialPredicate::Trait(x) => {
+                tcx.lift(x).map(ty::ExistentialPredicate::Trait)
+            }
+            ty::ExistentialPredicate::Projection(x) => {
+                tcx.lift(x).map(ty::ExistentialPredicate::Projection)
+            }
+            ty::ExistentialPredicate::AutoTrait(def_id) => {
+                Some(ty::ExistentialPredicate::AutoTrait(*def_id))
+            }
+        }
     }
 }
 
@@ -396,7 +691,7 @@ impl<'a, 'tcx> Lift<'tcx> for ty::FnSig<'a> {
         tcx.lift(&self.inputs_and_output).map(|x| {
             ty::FnSig {
                 inputs_and_output: x,
-                variadic: self.variadic,
+                c_variadic: self.c_variadic,
                 unsafety: self.unsafety,
                 abi: self.abi,
             }
@@ -421,7 +716,7 @@ impl<'tcx, T: Lift<'tcx>> Lift<'tcx> for ty::error::ExpectedFound<T> {
 impl<'a, 'tcx> Lift<'tcx> for ty::error::TypeError<'a> {
     type Lifted = ty::error::TypeError<'tcx>;
     fn lift_to_tcx<'b, 'gcx>(&self, tcx: TyCtxt<'b, 'gcx, 'tcx>) -> Option<Self::Lifted> {
-        use ty::error::TypeError::*;
+        use crate::ty::error::TypeError::*;
 
         Some(match *self {
             Mismatch => Mismatch,
@@ -433,6 +728,12 @@ impl<'a, 'tcx> Lift<'tcx> for ty::error::TypeError<'a> {
             ArgCount => ArgCount,
             RegionsDoesNotOutlive(a, b) => {
                 return tcx.lift(&(a, b)).map(|(a, b)| RegionsDoesNotOutlive(a, b))
+            }
+            RegionsInsufficientlyPolymorphic(a, b) => {
+                return tcx.lift(&b).map(|b| RegionsInsufficientlyPolymorphic(a, b))
+            }
+            RegionsOverlyPolymorphic(a, b) => {
+                return tcx.lift(&b).map(|b| RegionsOverlyPolymorphic(a, b))
             }
             RegionsPlaceholderMismatch => RegionsPlaceholderMismatch,
             IntMismatch(x) => IntMismatch(x),
@@ -473,6 +774,13 @@ impl<'a, 'tcx> Lift<'tcx> for ty::InstanceDef<'a> {
 }
 
 BraceStructLiftImpl! {
+    impl<'a, 'tcx> Lift<'tcx> for ty::TypeAndMut<'a> {
+        type Lifted = ty::TypeAndMut<'tcx>;
+        ty, mutbl
+    }
+}
+
+BraceStructLiftImpl! {
     impl<'a, 'tcx> Lift<'tcx> for ty::Instance<'a> {
         type Lifted = ty::Instance<'tcx>;
         def, substs
@@ -486,23 +794,13 @@ BraceStructLiftImpl! {
     }
 }
 
-BraceStructLiftImpl! {
-    impl<'a, 'tcx> Lift<'tcx> for ty::Const<'a> {
-        type Lifted = ty::Const<'tcx>;
-        val, ty
-    }
-}
-
-impl<'a, 'tcx> Lift<'tcx> for ConstValue<'a> {
-    type Lifted = ConstValue<'tcx>;
-    fn lift_to_tcx<'b, 'gcx>(&self, tcx: TyCtxt<'b, 'gcx, 'tcx>) -> Option<Self::Lifted> {
-        match *self {
-            ConstValue::Scalar(x) => Some(ConstValue::Scalar(x)),
-            ConstValue::ScalarPair(x, y) => Some(ConstValue::ScalarPair(x, y)),
-            ConstValue::ByRef(x, alloc, z) => Some(ConstValue::ByRef(
-                x, alloc.lift_to_tcx(tcx)?, z,
-            )),
-        }
+impl<'a, 'tcx> Lift<'tcx> for ConstVid<'a> {
+    type Lifted = ConstVid<'tcx>;
+    fn lift_to_tcx<'b, 'gcx>(&self, _: TyCtxt<'b, 'gcx, 'tcx>) -> Option<Self::Lifted> {
+        Some(ConstVid {
+            index: self.index,
+            phantom: PhantomData,
+        })
     }
 }
 
@@ -651,7 +949,7 @@ impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::List<ProjectionKind<'tcx>> {
 
 impl<'tcx> TypeFoldable<'tcx> for ty::instance::Instance<'tcx> {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
-        use ty::InstanceDef::*;
+        use crate::ty::InstanceDef::*;
         Self {
             substs: self.substs.fold_with(folder),
             def: match self.def {
@@ -682,7 +980,7 @@ impl<'tcx> TypeFoldable<'tcx> for ty::instance::Instance<'tcx> {
     }
 
     fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
-        use ty::InstanceDef::*;
+        use crate::ty::InstanceDef::*;
         self.substs.visit_with(visitor) ||
         match self.def {
             Item(did) | VtableShim(did) | Intrinsic(did) | Virtual(did, _) => {
@@ -826,7 +1124,7 @@ BraceStructTypeFoldableImpl! {
 
 BraceStructTypeFoldableImpl! {
     impl<'tcx> TypeFoldable<'tcx> for ty::FnSig<'tcx> {
-        inputs_and_output, variadic, unsafety, abi
+        inputs_and_output, c_variadic, unsafety, abi
     }
 }
 
@@ -1021,6 +1319,8 @@ EnumTypeFoldableImpl! {
         (ty::error::TypeError::FixedArraySize)(x),
         (ty::error::TypeError::ArgCount),
         (ty::error::TypeError::RegionsDoesNotOutlive)(a, b),
+        (ty::error::TypeError::RegionsInsufficientlyPolymorphic)(a, b),
+        (ty::error::TypeError::RegionsOverlyPolymorphic)(a, b),
         (ty::error::TypeError::RegionsPlaceholderMismatch),
         (ty::error::TypeError::IntMismatch)(x),
         (ty::error::TypeError::FloatMismatch)(x),
@@ -1034,15 +1334,14 @@ EnumTypeFoldableImpl! {
     }
 }
 
-impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::LazyConst<'tcx> {
+impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::Const<'tcx> {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
-        let new = match self {
-            ty::LazyConst::Evaluated(v) => ty::LazyConst::Evaluated(v.fold_with(folder)),
-            ty::LazyConst::Unevaluated(def_id, substs) => {
-                ty::LazyConst::Unevaluated(*def_id, substs.fold_with(folder))
-            }
-        };
-        folder.tcx().intern_lazy_const(new)
+        let ty = self.ty.fold_with(folder);
+        let val = self.val.fold_with(folder);
+        folder.tcx().mk_const(ty::Const {
+            ty,
+            val
+        })
     }
 
     fn fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
@@ -1050,10 +1349,7 @@ impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::LazyConst<'tcx> {
     }
 
     fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
-        match *self {
-            ty::LazyConst::Evaluated(c) => c.visit_with(visitor),
-            ty::LazyConst::Unevaluated(_, substs) => substs.visit_with(visitor),
-        }
+        self.ty.visit_with(visitor) || self.val.visit_with(visitor)
     }
 
     fn visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
@@ -1061,27 +1357,29 @@ impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::LazyConst<'tcx> {
     }
 }
 
-impl<'tcx> TypeFoldable<'tcx> for ty::Const<'tcx> {
+impl<'tcx> TypeFoldable<'tcx> for ConstValue<'tcx> {
     fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, folder: &mut F) -> Self {
-        let ty = self.ty.fold_with(folder);
-        let val = self.val.fold_with(folder);
-        ty::Const {
-            ty,
-            val
+        match *self {
+            ConstValue::ByRef(ptr, alloc) => ConstValue::ByRef(ptr, alloc),
+            // FIXME(const_generics): implement TypeFoldable for InferConst
+            ConstValue::Infer(ic) => ConstValue::Infer(ic),
+            ConstValue::Param(p) => ConstValue::Param(p.fold_with(folder)),
+            ConstValue::Scalar(a) => ConstValue::Scalar(a),
+            ConstValue::Slice(a, b) => ConstValue::Slice(a, b),
+            ConstValue::Unevaluated(did, substs)
+                => ConstValue::Unevaluated(did, substs.fold_with(folder)),
         }
     }
 
     fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
-        self.ty.visit_with(visitor) || self.val.visit_with(visitor)
-    }
-}
-
-impl<'tcx> TypeFoldable<'tcx> for ConstValue<'tcx> {
-    fn super_fold_with<'gcx: 'tcx, F: TypeFolder<'gcx, 'tcx>>(&self, _folder: &mut F) -> Self {
-        *self
-    }
-
-    fn super_visit_with<V: TypeVisitor<'tcx>>(&self, _visitor: &mut V) -> bool {
-        false
+        match *self {
+            ConstValue::ByRef(..) => false,
+            // FIXME(const_generics): implement TypeFoldable for InferConst
+            ConstValue::Infer(_ic) => false,
+            ConstValue::Param(p) => p.visit_with(visitor),
+            ConstValue::Scalar(_) => false,
+            ConstValue::Slice(..) => false,
+            ConstValue::Unevaluated(_, substs) => substs.visit_with(visitor),
+        }
     }
 }

@@ -64,7 +64,6 @@ pub struct Config {
     pub backtrace_on_ice: bool,
 
     // llvm codegen options
-    pub llvm_enabled: bool,
     pub llvm_assertions: bool,
     pub llvm_optimize: bool,
     pub llvm_thin_lto: bool,
@@ -77,11 +76,16 @@ pub struct Config {
     pub llvm_experimental_targets: String,
     pub llvm_link_jobs: Option<u32>,
     pub llvm_version_suffix: Option<String>,
+    pub llvm_use_linker: Option<String>,
+    pub llvm_allow_old_toolchain: Option<bool>,
 
     pub lld_enabled: bool,
     pub lldb_enabled: bool,
     pub llvm_tools_enabled: bool,
 
+    pub llvm_cflags: Option<String>,
+    pub llvm_cxxflags: Option<String>,
+    pub llvm_ldflags: Option<String>,
     pub llvm_use_libcxx: bool,
 
     // rust codegen options
@@ -94,7 +98,7 @@ pub struct Config {
     pub rust_debuginfo_only_std: bool,
     pub rust_debuginfo_tools: bool,
     pub rust_rpath: bool,
-    pub rustc_parallel_queries: bool,
+    pub rustc_parallel: bool,
     pub rustc_default_linker: Option<String>,
     pub rust_optimize_tests: bool,
     pub rust_debuginfo_tests: bool,
@@ -239,7 +243,6 @@ struct Install {
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct Llvm {
-    enabled: Option<bool>,
     ccache: Option<StringOrBool>,
     ninja: Option<bool>,
     assertions: Option<bool>,
@@ -254,7 +257,12 @@ struct Llvm {
     link_shared: Option<bool>,
     version_suffix: Option<String>,
     clang_cl: Option<String>,
+    cflags: Option<String>,
+    cxxflags: Option<String>,
+    ldflags: Option<String>,
     use_libcxx: Option<bool>,
+    use_linker: Option<String>,
+    allow_old_toolchain: Option<bool>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -292,7 +300,7 @@ struct Rust {
     debuginfo_lines: Option<bool>,
     debuginfo_only_std: Option<bool>,
     debuginfo_tools: Option<bool>,
-    experimental_parallel_queries: Option<bool>,
+    parallel_compiler: Option<bool>,
     backtrace: Option<bool>,
     default_linker: Option<String>,
     channel: Option<String>,
@@ -350,7 +358,6 @@ impl Config {
 
     pub fn default_opts() -> Config {
         let mut config = Config::default();
-        config.llvm_enabled = true;
         config.llvm_optimize = true;
         config.llvm_version_check = true;
         config.backtrace = true;
@@ -502,7 +509,6 @@ impl Config {
                 Some(StringOrBool::Bool(false)) | None => {}
             }
             set(&mut config.ninja, llvm.ninja);
-            set(&mut config.llvm_enabled, llvm.enabled);
             llvm_assertions = llvm.assertions;
             set(&mut config.llvm_optimize, llvm.optimize);
             set(&mut config.llvm_thin_lto, llvm.thin_lto);
@@ -516,7 +522,13 @@ impl Config {
             config.llvm_link_jobs = llvm.link_jobs;
             config.llvm_version_suffix = llvm.version_suffix.clone();
             config.llvm_clang_cl = llvm.clang_cl.clone();
+
+            config.llvm_cflags = llvm.cflags.clone();
+            config.llvm_cxxflags = llvm.cxxflags.clone();
+            config.llvm_ldflags = llvm.ldflags.clone();
             set(&mut config.llvm_use_libcxx, llvm.use_libcxx);
+            config.llvm_use_linker = llvm.use_linker.clone();
+            config.llvm_allow_old_toolchain = llvm.allow_old_toolchain.clone();
         }
 
         if let Some(ref rust) = toml.rust {
@@ -547,7 +559,7 @@ impl Config {
             set(&mut config.lld_enabled, rust.lld);
             set(&mut config.lldb_enabled, rust.lldb);
             set(&mut config.llvm_tools_enabled, rust.llvm_tools);
-            config.rustc_parallel_queries = rust.experimental_parallel_queries.unwrap_or(false);
+            config.rustc_parallel = rust.parallel_compiler.unwrap_or(false);
             config.rustc_default_linker = rust.default_linker.clone();
             config.musl_root = rust.musl_root.clone().map(PathBuf::from);
             config.save_toolstates = rust.save_toolstates.clone().map(PathBuf::from);
@@ -654,6 +666,11 @@ impl Config {
 
     pub fn very_verbose(&self) -> bool {
         self.verbose > 1
+    }
+
+    pub fn llvm_enabled(&self) -> bool {
+        self.rust_codegen_backends.contains(&INTERNER.intern_str("llvm"))
+        || self.rust_codegen_backends.contains(&INTERNER.intern_str("emscripten"))
     }
 }
 

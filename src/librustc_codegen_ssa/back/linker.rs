@@ -13,7 +13,7 @@ use rustc::hir::def_id::{LOCAL_CRATE, CrateNum};
 use rustc::middle::dependency_format::Linkage;
 use rustc::session::Session;
 use rustc::session::config::{self, CrateType, OptLevel, DebugInfo,
-                             CrossLangLto};
+                             LinkerPluginLto, Lto};
 use rustc::ty::TyCtxt;
 use rustc_target::spec::{LinkerFlavor, LldFlavor};
 use serialize::{json, Encoder};
@@ -25,7 +25,7 @@ pub struct LinkerInfo {
 }
 
 impl LinkerInfo {
-    pub fn new(tcx: TyCtxt) -> LinkerInfo {
+    pub fn new(tcx: TyCtxt<'_, '_, '_>) -> LinkerInfo {
         LinkerInfo {
             exports: tcx.sess.crate_types.borrow().iter().map(|&c| {
                 (c, exported_symbols(tcx, c))
@@ -83,11 +83,15 @@ impl LinkerInfo {
             LinkerFlavor::Lld(LldFlavor::Wasm) => {
                 Box::new(WasmLd::new(cmd, sess, self)) as Box<dyn Linker>
             }
+
+            LinkerFlavor::PtxLinker => {
+                Box::new(PtxLinker { cmd, sess }) as Box<dyn Linker>
+            }
         }
     }
 }
 
-/// Linker abstraction used by back::link to build up the command to invoke a
+/// Linker abstraction used by `back::link` to build up the command to invoke a
 /// linker.
 ///
 /// This trait is the total list of requirements needed by `back::link` and
@@ -123,7 +127,7 @@ pub trait Linker {
     fn subsystem(&mut self, subsystem: &str);
     fn group_start(&mut self);
     fn group_end(&mut self);
-    fn cross_lang_lto(&mut self);
+    fn linker_plugin_lto(&mut self);
     // Should have been finalize(self), but we don't support self-by-value on trait objects (yet?).
     fn finalize(&mut self) -> Command;
 }
@@ -141,7 +145,7 @@ pub struct GccLinker<'a> {
 impl<'a> GccLinker<'a> {
     /// Argument that must be passed *directly* to the linker
     ///
-    /// These arguments need to be prepended with '-Wl,' when a gcc-style linker is used
+    /// These arguments need to be prepended with `-Wl`, when a GCC-style linker is used.
     fn linker_arg<S>(&mut self, arg: S) -> &mut Self
         where S: AsRef<OsStr>
     {
@@ -179,7 +183,7 @@ impl<'a> GccLinker<'a> {
         }
     }
 
-    fn push_cross_lang_lto_args(&mut self, plugin_path: Option<&OsStr>) {
+    fn push_linker_plugin_lto_args(&mut self, plugin_path: Option<&OsStr>) {
         if let Some(plugin_path) = plugin_path {
             let mut arg = OsString::from("-plugin=");
             arg.push(plugin_path);
@@ -378,20 +382,19 @@ impl<'a> Linker for GccLinker<'a> {
 
         if self.sess.target.target.options.is_like_osx {
             // Write a plain, newline-separated list of symbols
-            let res = (|| -> io::Result<()> {
+            let res: io::Result<()> = try {
                 let mut f = BufWriter::new(File::create(&path)?);
                 for sym in self.info.exports[&crate_type].iter() {
                     debug!("  _{}", sym);
                     writeln!(f, "_{}", sym)?;
                 }
-                Ok(())
-            })();
+            };
             if let Err(e) = res {
                 self.sess.fatal(&format!("failed to write lib.def file: {}", e));
             }
         } else {
             // Write an LD version script
-            let res = (|| -> io::Result<()> {
+            let res: io::Result<()> = try {
                 let mut f = BufWriter::new(File::create(&path)?);
                 writeln!(f, "{{\n  global:")?;
                 for sym in self.info.exports[&crate_type].iter() {
@@ -399,8 +402,7 @@ impl<'a> Linker for GccLinker<'a> {
                     writeln!(f, "    {};", sym)?;
                 }
                 writeln!(f, "\n  local:\n    *;\n}};")?;
-                Ok(())
-            })();
+            };
             if let Err(e) = res {
                 self.sess.fatal(&format!("failed to write version script: {}", e));
             }
@@ -450,16 +452,16 @@ impl<'a> Linker for GccLinker<'a> {
         }
     }
 
-    fn cross_lang_lto(&mut self) {
-        match self.sess.opts.debugging_opts.cross_lang_lto {
-            CrossLangLto::Disabled => {
+    fn linker_plugin_lto(&mut self) {
+        match self.sess.opts.cg.linker_plugin_lto {
+            LinkerPluginLto::Disabled => {
                 // Nothing to do
             }
-            CrossLangLto::LinkerPluginAuto => {
-                self.push_cross_lang_lto_args(None);
+            LinkerPluginLto::LinkerPluginAuto => {
+                self.push_linker_plugin_lto_args(None);
             }
-            CrossLangLto::LinkerPlugin(ref path) => {
-                self.push_cross_lang_lto_args(Some(path.as_os_str()));
+            LinkerPluginLto::LinkerPlugin(ref path) => {
+                self.push_linker_plugin_lto_args(Some(path.as_os_str()));
             }
         }
     }
@@ -640,7 +642,7 @@ impl<'a> Linker for MsvcLinker<'a> {
                       tmpdir: &Path,
                       crate_type: CrateType) {
         let path = tmpdir.join("lib.def");
-        let res = (|| -> io::Result<()> {
+        let res: io::Result<()> = try {
             let mut f = BufWriter::new(File::create(&path)?);
 
             // Start off with the standard module name header and then go
@@ -651,8 +653,7 @@ impl<'a> Linker for MsvcLinker<'a> {
                 debug!("  _{}", symbol);
                 writeln!(f, "  {}", symbol)?;
             }
-            Ok(())
-        })();
+        };
         if let Err(e) = res {
             self.sess.fatal(&format!("failed to write lib.def file: {}", e));
         }
@@ -693,7 +694,7 @@ impl<'a> Linker for MsvcLinker<'a> {
     fn group_start(&mut self) {}
     fn group_end(&mut self) {}
 
-    fn cross_lang_lto(&mut self) {
+    fn linker_plugin_lto(&mut self) {
         // Do nothing
     }
 }
@@ -861,7 +862,7 @@ impl<'a> Linker for EmLinker<'a> {
     fn group_start(&mut self) {}
     fn group_end(&mut self) {}
 
-    fn cross_lang_lto(&mut self) {
+    fn linker_plugin_lto(&mut self) {
         // Do nothing
     }
 }
@@ -910,9 +911,6 @@ impl<'a> WasmLd<'a> {
 
         // For now we just never have an entry symbol
         cmd.arg("--no-entry");
-
-        // Make the default table accessible
-        cmd.arg("--export-table");
 
         // Rust code should never have warnings, and warnings are often
         // indicative of bugs, let's prevent them.
@@ -1046,12 +1044,12 @@ impl<'a> Linker for WasmLd<'a> {
     fn group_start(&mut self) {}
     fn group_end(&mut self) {}
 
-    fn cross_lang_lto(&mut self) {
+    fn linker_plugin_lto(&mut self) {
         // Do nothing for now
     }
 }
 
-fn exported_symbols(tcx: TyCtxt, crate_type: CrateType) -> Vec<String> {
+fn exported_symbols(tcx: TyCtxt<'_, '_, '_>, crate_type: CrateType) -> Vec<String> {
     if let Some(ref exports) = tcx.sess.target.target.options.override_export_symbols {
         return exports.clone()
     }
@@ -1082,4 +1080,130 @@ fn exported_symbols(tcx: TyCtxt, crate_type: CrateType) -> Vec<String> {
     }
 
     symbols
+}
+
+/// Much simplified and explicit CLI for the NVPTX linker. The linker operates
+/// with bitcode and uses LLVM backend to generate a PTX assembly.
+pub struct PtxLinker<'a> {
+    cmd: Command,
+    sess: &'a Session,
+}
+
+impl<'a> Linker for PtxLinker<'a> {
+    fn link_rlib(&mut self, path: &Path) {
+        self.cmd.arg("--rlib").arg(path);
+    }
+
+    fn link_whole_rlib(&mut self, path: &Path) {
+        self.cmd.arg("--rlib").arg(path);
+    }
+
+    fn include_path(&mut self, path: &Path) {
+        self.cmd.arg("-L").arg(path);
+    }
+
+    fn debuginfo(&mut self) {
+        self.cmd.arg("--debug");
+    }
+
+    fn add_object(&mut self, path: &Path) {
+        self.cmd.arg("--bitcode").arg(path);
+    }
+
+    fn args(&mut self, args: &[String]) {
+        self.cmd.args(args);
+    }
+
+    fn optimize(&mut self) {
+        match self.sess.lto() {
+            Lto::Thin | Lto::Fat | Lto::ThinLocal => {
+                self.cmd.arg("-Olto");
+            },
+
+            Lto::No => { },
+        };
+    }
+
+    fn output_filename(&mut self, path: &Path) {
+        self.cmd.arg("-o").arg(path);
+    }
+
+    fn finalize(&mut self) -> Command {
+        // Provide the linker with fallback to internal `target-cpu`.
+        self.cmd.arg("--fallback-arch").arg(match self.sess.opts.cg.target_cpu {
+            Some(ref s) => s,
+            None => &self.sess.target.target.options.cpu
+        });
+
+        ::std::mem::replace(&mut self.cmd, Command::new(""))
+    }
+
+    fn link_dylib(&mut self, _lib: &str) {
+        panic!("external dylibs not supported")
+    }
+
+    fn link_rust_dylib(&mut self, _lib: &str, _path: &Path) {
+        panic!("external dylibs not supported")
+    }
+
+    fn link_staticlib(&mut self, _lib: &str) {
+        panic!("staticlibs not supported")
+    }
+
+    fn link_whole_staticlib(&mut self, _lib: &str, _search_path: &[PathBuf]) {
+        panic!("staticlibs not supported")
+    }
+
+    fn framework_path(&mut self, _path: &Path) {
+        panic!("frameworks not supported")
+    }
+
+    fn link_framework(&mut self, _framework: &str) {
+        panic!("frameworks not supported")
+    }
+
+    fn position_independent_executable(&mut self) {
+    }
+
+    fn full_relro(&mut self) {
+    }
+
+    fn partial_relro(&mut self) {
+    }
+
+    fn no_relro(&mut self) {
+    }
+
+    fn build_static_executable(&mut self) {
+    }
+
+    fn gc_sections(&mut self, _keep_metadata: bool) {
+    }
+
+    fn pgo_gen(&mut self) {
+    }
+
+    fn no_default_libraries(&mut self) {
+    }
+
+    fn build_dylib(&mut self, _out_filename: &Path) {
+    }
+
+    fn export_symbols(&mut self, _tmpdir: &Path, _crate_type: CrateType) {
+    }
+
+    fn subsystem(&mut self, _subsystem: &str) {
+    }
+
+    fn no_position_independent_executable(&mut self) {
+    }
+
+    fn group_start(&mut self) {
+    }
+
+    fn group_end(&mut self) {
+    }
+
+    fn linker_plugin_lto(&mut self) {
+    }
 }

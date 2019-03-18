@@ -1011,6 +1011,7 @@ fn test_rotate_right() {
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(miri))] // Miri does not support entropy
 fn sort_unstable() {
     use core::cmp::Ordering::{Equal, Greater, Less};
     use core::slice::heapsort;
@@ -1166,6 +1167,7 @@ pub mod memchr {
 }
 
 #[test]
+#[cfg(not(miri))] // Miri cannot compute actual alignment of an allocation
 fn test_align_to_simple() {
     let bytes = [1u8, 2, 3, 4, 5, 6, 7];
     let (prefix, aligned, suffix) = unsafe { bytes.align_to::<u16>() };
@@ -1189,6 +1191,7 @@ fn test_align_to_zst() {
 }
 
 #[test]
+#[cfg(not(miri))] // Miri cannot compute actual alignment of an allocation
 fn test_align_to_non_trivial() {
     #[repr(align(8))] struct U64(u64, u64);
     #[repr(align(8))] struct U64U64U32(u64, u64, u32);
@@ -1316,4 +1319,19 @@ fn test_copy_within_panics_src_inverted() {
     let mut bytes = *b"Hello, World!";
     // 2 is greater than 1, so this range is invalid.
     bytes.copy_within(2..1, 0);
+}
+
+#[test]
+fn test_is_sorted() {
+    let empty: [i32; 0] = [];
+
+    assert!([1, 2, 2, 9].is_sorted());
+    assert!(![1, 3, 2].is_sorted());
+    assert!([0].is_sorted());
+    assert!(empty.is_sorted());
+    assert!(![0.0, 1.0, std::f32::NAN].is_sorted());
+    assert!([-2, -1, 0, 3].is_sorted());
+    assert!(![-2i32, -1, 0, 3].is_sorted_by_key(|n| n.abs()));
+    assert!(!["c", "bb", "aaa"].is_sorted());
+    assert!(["c", "bb", "aaa"].is_sorted_by_key(|s| s.len()));
 }

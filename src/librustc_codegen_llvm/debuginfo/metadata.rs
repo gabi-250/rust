@@ -7,15 +7,16 @@ use super::utils::{debug_context, DIB, span_start,
 use super::namespace::mangled_name_of_instance;
 use super::type_names::compute_debuginfo_type_name;
 use super::{CrateDebugContext};
+use crate::abi;
+use crate::value::Value;
 use rustc_codegen_ssa::traits::*;
-use abi;
-use value::Value;
 
-use llvm;
-use llvm::debuginfo::{DIArray, DIType, DIFile, DIScope, DIDescriptor,
-                      DICompositeType, DILexicalBlock, DIFlags};
-use llvm_util;
+use crate::llvm;
+use crate::llvm::debuginfo::{DIArray, DIType, DIFile, DIScope, DIDescriptor,
+                      DICompositeType, DILexicalBlock, DIFlags, DebugEmissionKind};
+use crate::llvm_util;
 
+use crate::common::CodegenCx;
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc::hir::CodegenFnAttrFlags;
 use rustc::hir::def::CtorKind;
@@ -23,7 +24,6 @@ use rustc::hir::def_id::{DefId, CrateNum, LOCAL_CRATE};
 use rustc::ich::NodeIdHashingMode;
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc::ty::Instance;
-use common::CodegenCx;
 use rustc::ty::{self, AdtKind, ParamEnv, Ty, TyCtxt};
 use rustc::ty::layout::{self, Align, Integer, IntegerExt, LayoutOf,
                         PrimitiveExt, Size, TyLayout};
@@ -60,7 +60,7 @@ impl Hash for llvm::Metadata {
 }
 
 impl fmt::Debug for llvm::Metadata {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         (self as *const Self).fmt(f)
     }
 }
@@ -817,7 +817,7 @@ fn pointer_type_metadata(
     }
 }
 
-pub fn compile_unit_metadata(tcx: TyCtxt,
+pub fn compile_unit_metadata(tcx: TyCtxt<'_, '_, '_>,
                              codegen_unit_name: &str,
                              debug_context: &CrateDebugContext<'ll, '_>)
                              -> &'ll DIDescriptor {
@@ -846,6 +846,7 @@ pub fn compile_unit_metadata(tcx: TyCtxt,
     let producer = CString::new(producer).unwrap();
     let flags = "\0";
     let split_name = "\0";
+    let kind = DebugEmissionKind::from_generic(tcx.sess.opts.debuginfo);
 
     unsafe {
         let file_metadata = llvm::LLVMRustDIBuilderCreateFile(
@@ -859,7 +860,8 @@ pub fn compile_unit_metadata(tcx: TyCtxt,
             tcx.sess.opts.optimize != config::OptLevel::No,
             flags.as_ptr() as *const _,
             0,
-            split_name.as_ptr() as *const _);
+            split_name.as_ptr() as *const _,
+            kind);
 
         if tcx.sess.opts.debugging_opts.profile {
             let cu_desc_metadata = llvm::LLVMRustMetadataAsValue(debug_context.llcontext,
@@ -1160,11 +1162,14 @@ fn prepare_union_metadata(
 // sometimes emit the old style rather than emit something completely
 // useless when rust is compiled against LLVM 6 or older.  This
 // function decides which representation will be emitted.
-fn use_enum_fallback(cx: &CodegenCx) -> bool {
+fn use_enum_fallback(cx: &CodegenCx<'_, '_>) -> bool {
     // On MSVC we have to use the fallback mode, because LLVM doesn't
     // lower variant parts to PDB.
     return cx.sess().target.target.options.is_like_msvc
-        || llvm_util::get_major_version() < 7;
+        // LLVM version 7 did not release with an important bug fix;
+        // but the required patch is in the LLVM 8.  Rust LLVM reports
+        // 8 as well.
+        || llvm_util::get_major_version() < 8;
 }
 
 // Describes the members of an enum value: An enum is described as a union of
@@ -1731,7 +1736,7 @@ fn prepare_enum_metadata(
         }),
     );
 
-    fn get_enum_discriminant_name(cx: &CodegenCx,
+    fn get_enum_discriminant_name(cx: &CodegenCx<'_, '_>,
                                   def_id: DefId)
                                   -> InternedString {
         cx.tcx.item_name(def_id)
@@ -1858,7 +1863,7 @@ fn compute_type_parameters(cx: &CodegenCx<'ll, 'tcx>, ty: Ty<'tcx>) -> Option<&'
     }
     return Some(create_DIArray(DIB(cx), &[]));
 
-    fn get_parameter_names(cx: &CodegenCx,
+    fn get_parameter_names(cx: &CodegenCx<'_, '_>,
                            generics: &ty::Generics)
                            -> Vec<InternedString> {
         let mut names = generics.parent.map_or(vec![], |def_id| {

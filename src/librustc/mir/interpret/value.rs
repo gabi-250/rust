@@ -1,11 +1,13 @@
 use std::fmt;
+use rustc_macros::HashStable;
 
-use crate::ty::{Ty, layout::{HasDataLayout, Size}};
+use crate::ty::{Ty, InferConst, ParamConst, layout::{HasDataLayout, Size}, subst::SubstsRef};
+use crate::hir::def_id::DefId;
 
 use super::{EvalResult, Pointer, PointerArithmetic, Allocation, AllocId, sign_extend, truncate};
 
 /// Represents the result of a raw const operation, pre-validation.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, RustcEncodable, RustcDecodable, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, RustcEncodable, RustcDecodable, Hash, HashStable)]
 pub struct RawConst<'tcx> {
     // the value lives here, at offset 0, and that allocation definitely is a `AllocKind::Memory`
     // (so you can use `AllocMap::unwrap_memory`).
@@ -13,31 +15,52 @@ pub struct RawConst<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
-/// Represents a constant value in Rust. Scalar and ScalarPair are optimizations which
-/// matches the LocalValue optimizations for easy conversions between Value and ConstValue.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, RustcEncodable, RustcDecodable, Hash)]
+/// Represents a constant value in Rust. `Scalar` and `ScalarPair` are optimizations that
+/// match the `LocalState` optimizations for easy conversions between `Value` and `ConstValue`.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord,
+         RustcEncodable, RustcDecodable, Hash, HashStable)]
 pub enum ConstValue<'tcx> {
-    /// Used only for types with layout::abi::Scalar ABI and ZSTs
+    /// A const generic parameter.
+    Param(ParamConst),
+
+    /// Infer the value of the const.
+    Infer(InferConst<'tcx>),
+
+    /// Used only for types with `layout::abi::Scalar` ABI and ZSTs.
     ///
-    /// Not using the enum `Value` to encode that this must not be `Undef`
+    /// Not using the enum `Value` to encode that this must not be `Undef`.
     Scalar(Scalar),
 
-    /// Used only for *fat pointers* with layout::abi::ScalarPair
+    /// Used only for slices and strings (`&[T]`, `&str`, `*const [T]`, `*mut str`, `Box<str>`,
+    /// etc.).
     ///
-    /// Needed for pattern matching code related to slices and strings.
-    ScalarPair(Scalar, Scalar),
+    /// Empty slices don't necessarily have an address backed by an `AllocId`, thus we also need to
+    /// enable integer pointers. The `Scalar` type covers exactly those two cases. While we could
+    /// create dummy-`AllocId`s, the additional code effort for the conversions doesn't seem worth
+    /// it.
+    Slice(Scalar, u64),
 
-    /// An allocation + offset into the allocation.
-    /// Invariant: The AllocId matches the allocation.
-    ByRef(AllocId, &'tcx Allocation, Size),
+    /// An allocation together with a pointer into the allocation.
+    /// Invariant: the pointer's `AllocId` resolves to the allocation.
+    ByRef(Pointer, &'tcx Allocation),
+
+    /// Used in the HIR by using `Unevaluated` everywhere and later normalizing to one of the other
+    /// variants when the code is monomorphic enough for that.
+    Unevaluated(DefId, SubstsRef<'tcx>),
 }
+
+#[cfg(target_arch = "x86_64")]
+static_assert!(CONST_SIZE: ::std::mem::size_of::<ConstValue<'static>>() == 40);
 
 impl<'tcx> ConstValue<'tcx> {
     #[inline]
     pub fn try_to_scalar(&self) -> Option<Scalar> {
         match *self {
+            ConstValue::Param(_) |
+            ConstValue::Infer(_) |
             ConstValue::ByRef(..) |
-            ConstValue::ScalarPair(..) => None,
+            ConstValue::Unevaluated(..) |
+            ConstValue::Slice(..) => None,
             ConstValue::Scalar(val) => Some(val),
         }
     }
@@ -56,17 +79,8 @@ impl<'tcx> ConstValue<'tcx> {
     pub fn new_slice(
         val: Scalar,
         len: u64,
-        cx: &impl HasDataLayout
     ) -> Self {
-        ConstValue::ScalarPair(val, Scalar::Bits {
-            bits: len as u128,
-            size: cx.data_layout().pointer_size.bytes() as u8,
-        })
-    }
-
-    #[inline]
-    pub fn new_dyn_trait(val: Scalar, vtable: Pointer) -> Self {
-        ConstValue::ScalarPair(val, Scalar::Ptr(vtable))
+        ConstValue::Slice(val, len)
     }
 }
 
@@ -74,7 +88,8 @@ impl<'tcx> ConstValue<'tcx> {
 /// `memory::Allocation`. It is in many ways like a small chunk of a `Allocation`, up to 8 bytes in
 /// size. Like a range of bytes in an `Allocation`, a `Scalar` can either represent the raw bytes
 /// of a simple value or a pointer into another `Allocation`
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, RustcEncodable, RustcDecodable, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd,
+         RustcEncodable, RustcDecodable, Hash, HashStable)]
 pub enum Scalar<Tag=(), Id=AllocId> {
     /// The raw bytes of a simple value.
     Bits {
@@ -89,6 +104,9 @@ pub enum Scalar<Tag=(), Id=AllocId> {
     /// relocation and its associated offset together as a `Pointer` here.
     Ptr(Pointer<Tag, Id>),
 }
+
+#[cfg(target_arch = "x86_64")]
+static_assert!(SCALAR_SIZE: ::std::mem::size_of::<Scalar>() == 24);
 
 impl<Tag> fmt::Display for Scalar<Tag> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -515,7 +533,7 @@ impl<'tcx, Tag> ScalarMaybeUndef<Tag> {
     }
 }
 
-impl_stable_hash_for!(enum ::mir::interpret::ScalarMaybeUndef {
+impl_stable_hash_for!(enum crate::mir::interpret::ScalarMaybeUndef {
     Scalar(v),
     Undef
 });

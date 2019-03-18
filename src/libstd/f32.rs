@@ -9,9 +9,9 @@
 #![allow(missing_docs)]
 
 #[cfg(not(test))]
-use intrinsics;
+use crate::intrinsics;
 #[cfg(not(test))]
-use sys::cmath;
+use crate::sys::cmath;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::f32::{RADIX, MANTISSA_DIGITS, DIGITS, EPSILON};
@@ -488,7 +488,7 @@ impl f32 {
     #[inline]
     pub fn log2(self) -> f32 {
         #[cfg(target_os = "android")]
-        return ::sys::android::log2f32(self);
+        return crate::sys::android::log2f32(self);
         #[cfg(not(target_os = "android"))]
         return unsafe { intrinsics::log2f32(self) };
     }
@@ -932,7 +932,7 @@ impl f32 {
     #[inline]
     pub fn acosh(self) -> f32 {
         match self {
-            x if x < 1.0 => ::f32::NAN,
+            x if x < 1.0 => crate::f32::NAN,
             x => (x + ((x * x) - 1.0).sqrt()).ln(),
         }
     }
@@ -956,14 +956,35 @@ impl f32 {
     pub fn atanh(self) -> f32 {
         0.5 * ((2.0 * self) / (1.0 - self)).ln_1p()
     }
+    /// Returns max if self is greater than max, and min if self is less than min.
+    /// Otherwise this returns self.  Panics if min > max, min equals NaN, or max equals NaN.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(clamp)]
+    /// assert!((-3.0f32).clamp(-2.0f32, 1.0f32) == -2.0f32);
+    /// assert!((0.0f32).clamp(-2.0f32, 1.0f32) == 0.0f32);
+    /// assert!((2.0f32).clamp(-2.0f32, 1.0f32) == 1.0f32);
+    /// ```
+    #[unstable(feature = "clamp", issue = "44095")]
+    #[inline]
+    pub fn clamp(self, min: f32, max: f32) -> f32 {
+        assert!(min <= max);
+        let mut x = self;
+        if x < min { x = min; }
+        if x > max { x = max; }
+        x
+    }
+
 }
 
 #[cfg(test)]
 mod tests {
-    use f32;
-    use f32::*;
-    use num::*;
-    use num::FpCategory as Fp;
+    use crate::f32;
+    use crate::f32::*;
+    use crate::num::*;
+    use crate::num::FpCategory as Fp;
 
     #[test]
     fn test_num_f32() {

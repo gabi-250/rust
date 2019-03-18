@@ -1,19 +1,23 @@
-use hir;
-use hir::def_id::DefId;
-use hir::map::DefPathHash;
-use ich::{self, StableHashingContext};
-use traits::specialization_graph;
-use ty::fast_reject;
-use ty::fold::TypeFoldable;
-use ty::{Ty, TyCtxt};
+use crate::hir;
+use crate::hir::def_id::DefId;
+use crate::hir::map::DefPathHash;
+use crate::ich::{self, StableHashingContext};
+use crate::traits::specialization_graph;
+use crate::ty::fast_reject;
+use crate::ty::fold::TypeFoldable;
+use crate::ty::{Ty, TyCtxt};
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher,
                                            StableHasherResult};
 use rustc_data_structures::sync::Lrc;
+use rustc_macros::HashStable;
 
 /// A trait's definition with type information.
+#[derive(HashStable)]
 pub struct TraitDef {
+    // We already have the def_path_hash below, no need to hash it twice
+    #[stable_hasher(ignore)]
     pub def_id: DefId,
 
     pub unsafety: hir::Unsafety,
@@ -39,7 +43,7 @@ pub struct TraitDef {
 #[derive(Default)]
 pub struct TraitImpls {
     blanket_impls: Vec<DefId>,
-    /// Impls indexed by their simplified self-type, for fast lookup.
+    /// Impls indexed by their simplified self type, for fast lookup.
     non_blanket_impls: FxHashMap<fast_reject::SimplifiedType, Vec<DefId>>,
 }
 
@@ -84,7 +88,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
     }
 
     /// Iterate over every impl that could possibly match the
-    /// self-type `self_ty`.
+    /// self type `self_ty`.
     pub fn for_each_relevant_impl<F: FnMut(DefId)>(self,
                                                    def_id: DefId,
                                                    self_ty: Ty<'tcx>,
@@ -134,7 +138,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
         }
     }
 
-    /// Return a vector containing all impls
+    /// Returns a vector containing all impls
     pub fn all_impls(self, def_id: DefId) -> Vec<DefId> {
         let impls = self.trait_impls_of(def_id);
 

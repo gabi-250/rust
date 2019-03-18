@@ -1,12 +1,13 @@
-use hir::def_id::DefId;
-use infer::InferCtxt;
-use ty::subst::Substs;
-use traits;
-use ty::{self, ToPredicate, Ty, TyCtxt, TypeFoldable};
+use crate::hir;
+use crate::hir::def_id::DefId;
+use crate::infer::InferCtxt;
+use crate::ty::subst::SubstsRef;
+use crate::traits;
+use crate::ty::{self, ToPredicate, Ty, TyCtxt, TypeFoldable};
 use std::iter::once;
-use syntax::ast;
 use syntax_pos::Span;
-use middle::lang_items;
+use crate::middle::lang_items;
+use crate::mir::interpret::ConstValue;
 
 /// Returns the set of obligations needed to make `ty` well-formed.
 /// If `ty` contains unresolved inference variables, this may include
@@ -16,7 +17,7 @@ use middle::lang_items;
 /// say "$0 is WF if $0 is WF".
 pub fn obligations<'a, 'gcx, 'tcx>(infcx: &InferCtxt<'a, 'gcx, 'tcx>,
                                    param_env: ty::ParamEnv<'tcx>,
-                                   body_id: ast::NodeId,
+                                   body_id: hir::HirId,
                                    ty: Ty<'tcx>,
                                    span: Span)
                                    -> Option<Vec<traits::PredicateObligation<'tcx>>>
@@ -42,7 +43,7 @@ pub fn obligations<'a, 'gcx, 'tcx>(infcx: &InferCtxt<'a, 'gcx, 'tcx>,
 /// if `Bar: Eq`.
 pub fn trait_obligations<'a, 'gcx, 'tcx>(infcx: &InferCtxt<'a, 'gcx, 'tcx>,
                                          param_env: ty::ParamEnv<'tcx>,
-                                         body_id: ast::NodeId,
+                                         body_id: hir::HirId,
                                          trait_ref: &ty::TraitRef<'tcx>,
                                          span: Span)
                                          -> Vec<traits::PredicateObligation<'tcx>>
@@ -54,7 +55,7 @@ pub fn trait_obligations<'a, 'gcx, 'tcx>(infcx: &InferCtxt<'a, 'gcx, 'tcx>,
 
 pub fn predicate_obligations<'a, 'gcx, 'tcx>(infcx: &InferCtxt<'a, 'gcx, 'tcx>,
                                              param_env: ty::ParamEnv<'tcx>,
-                                             body_id: ast::NodeId,
+                                             body_id: hir::HirId,
                                              predicate: &ty::Predicate<'tcx>,
                                              span: Span)
                                              -> Vec<traits::PredicateObligation<'tcx>>
@@ -103,7 +104,7 @@ pub fn predicate_obligations<'a, 'gcx, 'tcx>(infcx: &InferCtxt<'a, 'gcx, 'tcx>,
 struct WfPredicates<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
     infcx: &'a InferCtxt<'a, 'gcx, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
-    body_id: ast::NodeId,
+    body_id: hir::HirId,
     span: Span,
     out: Vec<traits::PredicateObligation<'tcx>>,
 }
@@ -203,8 +204,8 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
 
     /// Pushes the obligations required for an array length to be WF
     /// into `self.out`.
-    fn compute_array_len(&mut self, constant: ty::LazyConst<'tcx>) {
-        if let ty::LazyConst::Unevaluated(def_id, substs) = constant {
+    fn compute_array_len(&mut self, constant: ty::Const<'tcx>) {
+        if let ConstValue::Unevaluated(def_id, substs) = constant.val {
             let obligations = self.nominal_obligations(def_id, substs);
             self.out.extend(obligations);
 
@@ -227,7 +228,7 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
         }
     }
 
-    /// Push new obligations into `out`. Returns true if it was able
+    /// Pushes new obligations into `out`. Returns `true` if it was able
     /// to generate all the predicates needed to validate that `ty0`
     /// is WF. Returns false if `ty0` is an unresolved type variable,
     /// in which case we are not able to simplify at all.
@@ -432,7 +433,7 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
 
     fn nominal_obligations(&mut self,
                            def_id: DefId,
-                           substs: &Substs<'tcx>)
+                           substs: SubstsRef<'tcx>)
                            -> Vec<traits::PredicateObligation<'tcx>>
     {
         let predicates =
@@ -482,8 +483,7 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
         //
         // Note: in fact we only permit builtin traits, not `Bar<'d>`, I
         // am looking forward to the future here.
-
-        if !data.has_escaping_bound_vars() {
+        if !data.has_escaping_bound_vars() && !region.has_escaping_bound_vars() {
             let implicit_bounds =
                 object_region_bounds(self.infcx.tcx, data);
 
@@ -502,7 +502,7 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
     }
 }
 
-/// Given an object type like `SomeTrait+Send`, computes the lifetime
+/// Given an object type like `SomeTrait + Send`, computes the lifetime
 /// bounds that must hold on the elided self type. These are derived
 /// from the declarations of `SomeTrait`, `Send`, and friends -- if
 /// they declare `trait SomeTrait : 'static`, for example, then

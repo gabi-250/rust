@@ -877,7 +877,7 @@ fn test_iterator_flat_map() {
     assert_eq!(i, ys.len());
 }
 
-/// Test `FlatMap::fold` with items already picked off the front and back,
+/// Tests `FlatMap::fold` with items already picked off the front and back,
 /// to make sure all parts of the `FlatMap` are folded correctly.
 #[test]
 fn test_iterator_flat_map_fold() {
@@ -915,7 +915,7 @@ fn test_iterator_flatten() {
     assert_eq!(i, ys.len());
 }
 
-/// Test `Flatten::fold` with items already picked off the front and back,
+/// Tests `Flatten::fold` with items already picked off the front and back,
 /// to make sure all parts of the `Flatten` are folded correctly.
 #[test]
 fn test_iterator_flatten_fold() {
@@ -1081,12 +1081,39 @@ fn test_iterator_product_result() {
     assert_eq!(v.iter().cloned().product::<Result<i32, _>>(), Err(()));
 }
 
+/// A wrapper struct that implements `Eq` and `Ord` based on the wrapped
+/// integer modulo 3. Used to test that `Iterator::max` and `Iterator::min`
+/// return the correct element if some of them are equal.
+#[derive(Debug)]
+struct Mod3(i32);
+
+impl PartialEq for Mod3 {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 % 3 == other.0 % 3
+    }
+}
+
+impl Eq for Mod3 {}
+
+impl PartialOrd for Mod3 {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Mod3 {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        (self.0 % 3).cmp(&(other.0 % 3))
+    }
+}
+
 #[test]
 fn test_iterator_max() {
     let v: &[_] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     assert_eq!(v[..4].iter().cloned().max(), Some(3));
     assert_eq!(v.iter().cloned().max(), Some(10));
     assert_eq!(v[..0].iter().cloned().max(), None);
+    assert_eq!(v.iter().cloned().map(Mod3).max().map(|x| x.0), Some(8));
 }
 
 #[test]
@@ -1095,6 +1122,7 @@ fn test_iterator_min() {
     assert_eq!(v[..4].iter().cloned().min(), Some(0));
     assert_eq!(v.iter().cloned().min(), Some(0));
     assert_eq!(v[..0].iter().cloned().min(), None);
+    assert_eq!(v.iter().cloned().map(Mod3).min().map(|x| x.0), Some(0));
 }
 
 #[test]
@@ -1739,18 +1767,36 @@ fn test_range_inclusive_folds() {
     assert_eq!((1..=10).sum::<i32>(), 55);
     assert_eq!((1..=10).rev().sum::<i32>(), 55);
 
-    let mut it = 40..=50;
+    let mut it = 44..=50;
     assert_eq!(it.try_fold(0, i8::checked_add), None);
-    assert_eq!(it, 44..=50);
+    assert_eq!(it, 47..=50);
+    assert_eq!(it.try_fold(0, i8::checked_add), None);
+    assert_eq!(it, 50..=50);
+    assert_eq!(it.try_fold(0, i8::checked_add), Some(50));
+    assert!(it.is_empty());
+    assert_eq!(it.try_fold(0, i8::checked_add), Some(0));
+    assert!(it.is_empty());
+
+    let mut it = 40..=47;
     assert_eq!(it.try_rfold(0, i8::checked_add), None);
-    assert_eq!(it, 44..=47);
+    assert_eq!(it, 40..=44);
+    assert_eq!(it.try_rfold(0, i8::checked_add), None);
+    assert_eq!(it, 40..=41);
+    assert_eq!(it.try_rfold(0, i8::checked_add), Some(81));
+    assert!(it.is_empty());
+    assert_eq!(it.try_rfold(0, i8::checked_add), Some(0));
+    assert!(it.is_empty());
 
     let mut it = 10..=20;
     assert_eq!(it.try_fold(0, |a,b| Some(a+b)), Some(165));
     assert!(it.is_empty());
+    assert_eq!(it.try_fold(0, |a,b| Some(a+b)), Some(0));
+    assert!(it.is_empty());
 
     let mut it = 10..=20;
     assert_eq!(it.try_rfold(0, |a,b| Some(a+b)), Some(165));
+    assert!(it.is_empty());
+    assert_eq!(it.try_rfold(0, |a,b| Some(a+b)), Some(0));
     assert!(it.is_empty());
 }
 
@@ -2234,4 +2280,17 @@ fn test_monad_laws_associativity() {
     fn g(x: usize) -> impl Iterator<Item = usize> { (0..x).rev() }
     assert_eq!((0..10).flat_map(f).flat_map(g).sum::<usize>(),
                 (0..10).flat_map(|x| f(x).flat_map(g)).sum::<usize>());
+}
+
+#[test]
+fn test_is_sorted() {
+    assert!([1, 2, 2, 9].iter().is_sorted());
+    assert!(![1, 3, 2].iter().is_sorted());
+    assert!([0].iter().is_sorted());
+    assert!(std::iter::empty::<i32>().is_sorted());
+    assert!(![0.0, 1.0, std::f32::NAN].iter().is_sorted());
+    assert!([-2, -1, 0, 3].iter().is_sorted());
+    assert!(![-2i32, -1, 0, 3].iter().is_sorted_by_key(|n| n.abs()));
+    assert!(!["c", "bb", "aaa"].iter().is_sorted());
+    assert!(["c", "bb", "aaa"].iter().is_sorted_by_key(|s| s.len()));
 }

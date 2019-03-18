@@ -33,7 +33,7 @@ fn codegen_ironox_module<'ll, 'tcx>(
 ) -> (Stats, ModuleCodegen<ModuleIronOx>) {
     let backend = IronOxCodegenBackend(());
     let cgu = tcx.codegen_unit(cgu_name);
-    let mut ironox_module = backend.new_metadata(tcx.sess, &cgu_name.as_str());
+    let mut ironox_module = backend.new_metadata(tcx, &cgu_name.as_str());
     let (stats, asm) = {
         let cx = CodegenCx::new(tcx, Some(cgu), &mut ironox_module);
         let mono_items = cx.codegen_unit()

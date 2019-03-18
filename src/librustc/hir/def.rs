@@ -1,14 +1,15 @@
-use hir::def_id::DefId;
-use util::nodemap::{NodeMap, DefIdMap};
+use crate::hir::def_id::DefId;
+use crate::util::nodemap::{NodeMap, DefIdMap};
 use syntax::ast;
 use syntax::ext::base::MacroKind;
 use syntax_pos::Span;
-use hir;
-use ty;
+use rustc_macros::HashStable;
+use crate::hir;
+use crate::ty;
 
 use self::Namespace::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug, HashStable)]
 pub enum CtorKind {
     /// Constructor function automatically created by a tuple struct/variant.
     Fn,
@@ -18,7 +19,7 @@ pub enum CtorKind {
     Fictive,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug, HashStable)]
 pub enum NonMacroAttrKind {
     /// Single-segment attribute defined by the language (`#[inline]`)
     Builtin,
@@ -32,7 +33,7 @@ pub enum NonMacroAttrKind {
     Custom,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug, HashStable)]
 pub enum Def {
     // Type namespace
     Mod(DefId),
@@ -58,6 +59,7 @@ pub enum Def {
     // Value namespace
     Fn(DefId),
     Const(DefId),
+    ConstParam(DefId),
     Static(DefId, bool /* is_mutbl */),
     StructCtor(DefId, CtorKind), // `DefId` refers to `NodeId` of the struct's constructor
     VariantCtor(DefId, CtorKind), // `DefId` refers to the enum variant
@@ -181,7 +183,7 @@ impl<T> ::std::ops::IndexMut<Namespace> for PerNS<T> {
 }
 
 impl<T> PerNS<Option<T>> {
-    /// Returns whether all the items in this collection are `None`.
+    /// Returns `true` if all the items in this collection are `None`.
     pub fn is_empty(&self) -> bool {
         self.type_ns.is_none() && self.value_ns.is_none() && self.macro_ns.is_none()
     }
@@ -208,7 +210,7 @@ pub type ExportMap = DefIdMap<Vec<Export>>;
 /// namespace.
 pub type ImportMap = NodeMap<PerNS<Option<PathResolution>>>;
 
-#[derive(Copy, Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct Export {
     /// The name of the target.
     pub ident: ast::Ident,
@@ -252,18 +254,21 @@ impl NonMacroAttrKind {
 }
 
 impl Def {
+    /// Return the `DefId` of this `Def` if it has an id, else panic.
     pub fn def_id(&self) -> DefId {
         self.opt_def_id().unwrap_or_else(|| {
             bug!("attempted .def_id() on invalid def: {:?}", self)
         })
     }
 
+    /// Return `Some(..)` with the `DefId` of this `Def` if it has a id, else `None`.
     pub fn opt_def_id(&self) -> Option<DefId> {
         match *self {
             Def::Fn(id) | Def::Mod(id) | Def::Static(id, _) |
             Def::Variant(id) | Def::VariantCtor(id, ..) | Def::Enum(id) |
             Def::TyAlias(id) | Def::TraitAlias(id) |
-            Def::AssociatedTy(id) | Def::TyParam(id) | Def::Struct(id) | Def::StructCtor(id, ..) |
+            Def::AssociatedTy(id) | Def::TyParam(id) | Def::ConstParam(id) | Def::Struct(id) |
+            Def::StructCtor(id, ..) |
             Def::Union(id) | Def::Trait(id) | Def::Method(id) | Def::Const(id) |
             Def::AssociatedConst(id) | Def::Macro(id, ..) |
             Def::Existential(id) | Def::AssociatedExistential(id) | Def::ForeignTy(id) => {
@@ -281,6 +286,14 @@ impl Def {
             Def::Err => {
                 None
             }
+        }
+    }
+
+    /// Return the `DefId` of this `Def` if it represents a module.
+    pub fn mod_def_id(&self) -> Option<DefId> {
+        match *self {
+            Def::Mod(id) => Some(id),
+            _ => None,
         }
     }
 
@@ -312,6 +325,7 @@ impl Def {
             Def::Const(..) => "constant",
             Def::AssociatedConst(..) => "associated constant",
             Def::TyParam(..) => "type parameter",
+            Def::ConstParam(..) => "const parameter",
             Def::PrimTy(..) => "builtin type",
             Def::Local(..) => "local variable",
             Def::Upvar(..) => "closure capture",

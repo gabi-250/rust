@@ -1,8 +1,9 @@
 //! An iterator over the type substructure.
 //! WARNING: this does not keep track of the region depth.
 
-use ty::{self, Ty};
+use crate::ty::{self, Ty};
 use smallvec::{self, SmallVec};
+use crate::mir::interpret::ConstValue;
 
 // The TypeWalker's stack is hot enough that it's worth going to some effort to
 // avoid heap allocations.
@@ -74,9 +75,10 @@ fn push_subtypes<'tcx>(stack: &mut TypeWalkerStack<'tcx>, parent_ty: Ty<'tcx>) {
         ty::Placeholder(..) | ty::Bound(..) | ty::Foreign(..) => {
         }
         ty::Array(ty, len) => {
-            if let ty::LazyConst::Unevaluated(_, substs) = len {
+            if let ConstValue::Unevaluated(_, substs) = len.val {
                 stack.extend(substs.types().rev());
             }
+            stack.push(len.ty);
             stack.push(ty);
         }
         ty::Slice(ty) => {
@@ -99,7 +101,7 @@ fn push_subtypes<'tcx>(stack: &mut TypeWalkerStack<'tcx>, parent_ty: Ty<'tcx>) {
                         (p.substs, Some(p.ty)),
                     ty::ExistentialPredicate::AutoTrait(_) =>
                         // Empty iterator
-                        (ty::Substs::empty(), None),
+                        (ty::InternalSubsts::empty(), None),
                 };
 
                 substs.types().rev().chain(opt_ty)
