@@ -121,8 +121,19 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_defined_value(&self, name: &str) -> Option<Value> {
-        // FIXME: check if the value is a declaration (defined outside
-        // of the current translation unit)
-        self.get_declared_value(name)
+        match self.get_declared_value(name) {
+            Some(Value::Global(idx)) => {
+                // If this is a declaration (if it is defined outside of the
+                // current translation unit), return None:
+                if self.globals.borrow()[idx].is_declaration() {
+                    None
+                } else {
+                    Some(Value::Global(idx))
+                }
+
+            },
+            Some(x) => bug!("Expected global, found {:?}", x),
+            None => None,
+        }
     }
 }

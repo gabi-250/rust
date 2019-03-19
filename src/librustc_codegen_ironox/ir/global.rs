@@ -15,6 +15,10 @@ impl OxGlobal {
         OxGlobal { ty, name, constant: false, initializer: None, private }
     }
 
+    pub fn is_declaration(&self) -> bool {
+        self.initializer.is_none()
+    }
+
     pub fn set_initializer(&mut self, value: Value) {
         self.initializer = Some(value)
     }
