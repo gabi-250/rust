@@ -144,7 +144,7 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
     pub fn get_sym_name(&self, prefix: &str) -> String {
         let count = self.sym_count.get();
         self.sym_count.set(count + 1);
-        format!("{}.{}", prefix, count)
+        format!(".L{}.{}", prefix, count)
     }
 }
 

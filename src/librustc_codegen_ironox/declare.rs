@@ -7,13 +7,14 @@ use ir::value::Value;
 use rustc::ty::{self, PolyFnSig};
 use rustc_codegen_ssa::traits::*;
 
-impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
-
-    fn declare_global(
+impl CodegenCx<'ll, 'tcx> {
+    /// Declare a global variable, which may have either private linkage, or default.
+    fn declare_global_with_linkage(
         &self,
-        name: &str, ty: Type
-    ) -> Value {
-        let gv = OxGlobal::new(ty, name.to_string());
+        name: &str,
+        ty: Type,
+        private: bool) -> Value {
+        let gv = OxGlobal::new(ty, name.to_string(), private);
         let mut globals = self.globals.borrow_mut();
         let mut globals_cache = self.globals_cache.borrow_mut();
 
@@ -27,15 +28,38 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         });
         Value::Global(gv_idx)
     }
+}
 
+impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
+
+    fn declare_global(
+        &self,
+        name: &str, ty: Type
+    ) -> Value {
+        self.declare_global_with_linkage(name, ty, false)
+    }
+
+    /// Declare a function of a particular `Type`.
+    ///
+    /// This does not check if a function with the specified named has already been
+    /// declared. As such, this will cause problems if it called with the same
+    /// function name twice.
+    ///
+    /// FIXME: This is supposed to follow the C calling convention. IronOx currently
+    /// only supports the Rust calling convention.
     fn declare_cfn(
         &self,
         name: &str,
         fn_type: Type
     ) -> Value {
+        // Make sure the function ends up in the global cache.
+        self.declare_global_with_linkage(name, fn_type, false);
         self.module.borrow_mut().add_function(self, name, fn_type)
     }
 
+    /// Declare a function of a particular `PolyFnSig`.
+    ///
+    /// This calls declare_cfn, so it has similar problems.
     fn declare_fn(
         &self,
         name: &str,
@@ -52,22 +76,28 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         fn_val
     }
 
+    /// Create a new global variable with the given name and type.
     fn define_global(
         &self,
         name: &str,
         ty: Type
     ) -> Option<Value> {
+        eprintln!("define global: {}", name);
         if self.get_defined_value(name).is_some() {
             None
         } else {
-            Some(self.declare_global(name, ty))
+            // `get_defined_value` returns None if this variable hasn't been declared
+            // yet, or if it's initialised outside of the current translation unit.
+            // As such, setting the linkage option private = false makes the symbol
+            // global (its definition can be accessed).
+            Some(self.declare_global_with_linkage(name, ty, false))
         }
     }
 
+    /// Create a new global variable with private linkage.
     fn define_private_global(&self, ty: Type) -> Value {
-        // FIXME: this global should have private linkage.
         let name = self.get_sym_name("priv_glbl");
-        self.declare_global(&name, ty)
+        self.declare_global_with_linkage(&name[..], ty, true)
     }
 
     fn define_fn(
@@ -86,6 +116,7 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         unimplemented!("define_internal_fn");
     }
 
+    /// Find the global variable with the given name.
     fn get_declared_value(&self, name: &str) -> Option<Value> {
         if let Some(idx) = self.globals_cache.borrow().get(name) {
             Some(Value::Global(*idx))
@@ -94,9 +125,22 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         }
     }
 
+    /// Find the value with the specified name, and return it if it's defined in
+    /// the current translation unit.
     fn get_defined_value(&self, name: &str) -> Option<Value> {
-        // FIXME: check if the value is a declaration (defined outside
-        // of the current translation unit)
-        self.get_declared_value(name)
+        match self.get_declared_value(name) {
+            Some(Value::Global(idx)) => {
+                // If this is a declaration (if it is defined outside of the
+                // current translation unit), return None:
+                if self.globals.borrow()[idx].is_declaration() {
+                    None
+                } else {
+                    Some(Value::Global(idx))
+                }
+
+            },
+            Some(v) => bug!("Expected global, found {:?}", v),
+            None => None,
+        }
     }
 }

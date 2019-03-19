@@ -130,7 +130,14 @@ impl Type {
         match types[*self] {
             OxType::FnType {..} => true,
             OxType::PtrTo {..} => true,
-            ref _ty => false,
+            _ => false,
+        }
+    }
+
+    pub fn is_fn(&self, types: &IndexVec<Type, OxType>) -> bool {
+        match types[*self] {
+            OxType::FnType {..} => true,
+            _ => false,
         }
     }
 
