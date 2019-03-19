@@ -34,8 +34,8 @@ impl OxFunction {
         match cx.types.borrow()[fn_type] {
             OxType::FnType { ref args, ref ret } => {
                 let mut params = Vec::with_capacity(args.len());
-                for (index, arg_ty) in args.iter().enumerate() {
-                    params.push(Value::Param(idx, index, *arg_ty));
+                for (param_idx, ty) in args.iter().enumerate() {
+                    params.push(Value::Param { fn_idx: idx, param_idx, ty: *ty });
                 }
                 let ret = *ret;
                 OxFunction {

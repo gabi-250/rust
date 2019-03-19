@@ -52,34 +52,36 @@ newtype_index! {
     pub struct Type { .. }
 }
 
-/// The actual types.
+/// The type of an IronOx value.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum OxType {
-    /// A function type.
+    /// The type of a function.
     FnType {
         args: Vec<Type>,
         ret: Type
     },
-    /// An array type.
+    /// The type of an array with `len` elements.
     Array {
         len: u64,
         ty: Type,
     },
-    /// A pointer type.
+    /// The type of a pointer that points to a value of type `pointee`.
     PtrTo {
         pointee: Type,
     },
-    /// A scalar type.
+    /// The type of a scalar value.
     Scalar(ScalarType),
-    StructType {
+    /// The type of a named struct.
+    Struct {
         name: Option<String>,
         members: Vec<Type>
     },
+    /// The type of a fat pointer: it contains the pointer itself, and the metadata.
     FatPtr {
         ptr: Type,
         meta: Type,
     },
-    ConstStruct,
+    /// The void type.
     Void,
 }
 
@@ -87,7 +89,7 @@ impl OxType {
     pub fn offset(&self, idx: u64, types: &IndexVec<Type, OxType>) -> u64 {
         // FIXME:?
         match *self {
-            OxType::StructType { ref members, .. } => {
+            OxType::Struct { ref members, .. } => {
                 let idx = idx as usize;
                 let mut offset = 0;
                 for i in 0..idx {
@@ -111,7 +113,7 @@ impl Type {
             OxType::FatPtr { ptr, meta } => {
                 ptr.size(types) + meta.size(types)
             },
-            OxType::StructType { ref members, .. } => {
+            OxType::Struct { ref members, .. } => {
                 let mut struct_size = 0;
                 for mem in members {
                     let size = mem.size(types);
@@ -143,7 +145,7 @@ impl Type {
 
     pub fn ty_at_idx(&self, idx: u64, types: &IndexVec<Type, OxType>) -> Type {
         match types[*self] {
-            OxType::StructType { ref members, .. } => members[idx as usize],
+            OxType::Struct { ref members, .. } => members[idx as usize],
             OxType::FnType { ref ret, .. } => ret.ty_at_idx(idx, types),
             OxType::PtrTo { ref pointee } => *pointee,
             OxType::Array { ref ty, .. } => *ty,
@@ -188,7 +190,7 @@ impl CodegenCx<'ll, 'tcx> {
         _packed: bool
     ) -> Type {
         // FIXME: do something with packed.
-        let struct_type = OxType::StructType {
+        let struct_type = OxType::Struct {
             name: Some(name.to_string()),
             members: els.to_vec(),
         };
@@ -204,11 +206,11 @@ impl CodegenCx<'ll, 'tcx> {
         _packed: bool
     ) {
         let mut types = self.types.borrow_mut();
-        if let OxType::StructType{ ref mut members, .. } = types[ty] {
+        if let OxType::Struct{ ref mut members, .. } = types[ty] {
             *members = els.to_vec();
             return;
         }
-        bug!("expected OxType::StructType, found {:?}", types[ty]);
+        bug!("expected OxType::Struct, found {:?}", types[ty]);
     }
 }
 
@@ -310,7 +312,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         els: &[Type],
         _packed: bool
     ) -> Type {
-        self.add_type(OxType::StructType {
+        self.add_type(OxType::Struct {
             name: None,
             members: els.to_vec(),
         })
@@ -357,17 +359,17 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         match v {
             Value::ConstUint(const_idx) => self.u_consts.borrow()[const_idx].ty,
             Value::ConstInt(const_idx) => self.i_consts.borrow()[const_idx].ty,
-            Value::Param(_, _, ty) => ty,
+            Value::Param { ty, .. } => ty,
             Value::Function(fn_idx) => module.functions[fn_idx].ironox_type,
-            Value::Instruction(fn_idx, bb_idx, inst_idx) => {
+            Value::Instruction { fn_idx, bb_idx, idx } => {
                 let inst = &module
-                    .functions[fn_idx].basic_blocks[bb_idx].instrs[inst_idx];
+                    .functions[fn_idx].basic_blocks[bb_idx].instrs[idx];
                 inst.val_ty(self)
             },
             Value::ConstStruct(_) => self.ty_map.borrow()[&v],
                                        //self.const_structs.borrow()[idx].ty,
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
-            Value::Cast(idx) => self.const_casts.borrow()[idx].ty,
+            Value::ConstCast(idx) => self.const_casts.borrow()[idx].ty,
             Value::ConstFatPtr(idx) => self.val_ty(self.const_fat_ptrs.borrow()[idx].0),
             Value::ConstUndef(ty) => ty,
             Value::ConstBytes(_) | Value::ConstGep { .. } => {

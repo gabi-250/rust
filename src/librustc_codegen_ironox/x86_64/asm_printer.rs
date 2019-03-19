@@ -50,7 +50,7 @@ impl AsmPrinter<'a, 'll, 'tcx> {
                 let directive = self.declare_scalar(u_const.ty, u_const.value);
                 asm.push(MachineInst::Directive(directive));
             }
-            Value::Cast(idx) => {
+            Value::ConstCast(idx) => {
                 let cast_inst = &self.cx.const_casts.borrow()[idx];
                 let name = self.constant_value(cast_inst.value);
                 asm.push(MachineInst::Directive(GasDirective::Quad(
@@ -181,7 +181,6 @@ impl AsmPrinter<'a, 'll, 'tcx> {
     /// The codegen result is a string that contains the x86-64 program that
     /// corresponds to the module from the `CodegenCx` of this printer.
     pub fn codegen(self) -> String {
-        self.pprint();
         let mut asm = String::new();
         // Define the globals.
         for globl in &self.declare_globals() {
