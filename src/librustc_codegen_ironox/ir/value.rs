@@ -19,21 +19,17 @@ pub enum Value {
     /// The parameter of an `IronOxFunction`. This is just a wrapper around a
     /// `Type`. A parameter is an (fnindex, index, type) pair, where 'index' is the
     /// index of the parameter in the list of parameters of the function.
-    Param(usize, usize, Type),
+    Param { fn_idx: usize, param_idx: usize, ty: Type },
     /// An instruction: (functiton index, basic block index, instruction index).
-    Instruction(usize, usize, usize),
-    StructPtr(usize),
-    StaticAddrOf,
+    Instruction { fn_idx: usize, bb_idx: usize, idx: usize },
     Global(usize),
     ConstCstr(usize),
-    Bool(bool),
-    Cast(usize),
+    ConstCast(usize),
     ConstFatPtr(usize),
     ConstBytes(usize),
     /// ptr_idx is the index of a constant struct
     /// offset is the offset into the struct
     ConstGep { ptr_idx: usize, offset: u64 },
-    Intrinsic,
 }
 
 impl Value {

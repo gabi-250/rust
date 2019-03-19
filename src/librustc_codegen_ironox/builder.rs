@@ -100,9 +100,11 @@ impl Builder<'a, 'll, 'tcx> {
         let mut module = self.cx.module.borrow_mut();
         module.get_function(self.build_pos.fn_idx)
             .insert_inst(self.build_pos.bb_idx, self.build_pos.inst_idx, inst);
-        let inst = Value::Instruction(self.build_pos.fn_idx,
-                                      self.build_pos.bb_idx,
-                                      self.build_pos.inst_idx);
+        let inst = Value::Instruction {
+            fn_idx: self.build_pos.fn_idx,
+            bb_idx: self.build_pos.bb_idx,
+            idx: self.build_pos.inst_idx
+        };
         // move to the next instruction
         self.build_pos.inst_idx += 1;
         inst
@@ -987,7 +989,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         landing_pad: Value
     ) {
         match landing_pad {
-            Value::Instruction(fn_idx, bb_idx, idx) => {
+            Value::Instruction { fn_idx, bb_idx, idx } => {
                 let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
                     basic_blocks[bb_idx].instrs[idx];
                 match inst {
@@ -1098,7 +1100,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         dest: BasicBlock
     ) {
         match s {
-            Value::Instruction(fn_idx, bb_idx, idx) => {
+            Value::Instruction { fn_idx, bb_idx, idx } => {
                 let mut inst = &mut self.module.borrow_mut().functions[fn_idx].
                     basic_blocks[bb_idx].instrs[idx];
                 match inst {

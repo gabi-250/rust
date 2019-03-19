@@ -93,9 +93,9 @@ impl ConstCast {
 
 impl OxInstruction {
     fn load_ty(cx: &CodegenCx, val: Value) -> Type {
-        if let Value::Instruction(fn_idx, bb_idx, inst_idx) = val {
+        if let Value::Instruction { fn_idx, bb_idx, idx } = val {
             let inst = &cx.module.borrow().functions[fn_idx].
-                basic_blocks[bb_idx].instrs[inst_idx];
+                basic_blocks[bb_idx].instrs[idx];
             match inst {
                 OxInstruction::Alloca { ty, .. } |
                 OxInstruction::Cast { ty, .. } => ty.pointee_ty(&cx.types.borrow()),
@@ -124,7 +124,7 @@ impl OxInstruction {
                 }
                 _ => unimplemented!("Load from instruction {:?}", inst)
             }
-        } else if let Value::Param(_, _, ty) = val {
+        } else if let Value::Param { ty, .. } = val {
             if let OxType::PtrTo { ref pointee } = cx.types.borrow()[ty] {
                 *pointee
             } else {
@@ -173,10 +173,10 @@ impl OxInstruction {
                     let struct_ptr = &types[struct_ptr];
                     if let OxType::PtrTo { pointee } = struct_ptr {
                         let struct_ty = &types[*pointee];
-                        if let OxType::StructType { ref members, .. } = struct_ty {
+                        if let OxType::Struct { ref members, .. } = struct_ty {
                             members[idx as usize]
                         } else {
-                            bug!("expected OxType::StructType, found {:?}", struct_ty);
+                            bug!("expected OxType::Struct, found {:?}", struct_ty);
                         }
                     } else {
                         bug!("expected OxType::PtrTo, found {:?}", struct_ptr);
@@ -223,7 +223,7 @@ impl OxInstruction {
                         ty
                     },
                     OxType::Scalar(..) => ty,
-                    OxType::StructType { .. } => {
+                    OxType::Struct { .. } => {
                         // The type of a getelementptr on a struct* is a struct*
                         // if the getelementptr uses a single index.
                         // FIXME: explain this better.

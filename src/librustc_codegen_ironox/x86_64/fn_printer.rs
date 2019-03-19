@@ -105,7 +105,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let result = Operand::Immediate(value as isize, acc_mode);
                 CompiledInst::with_result(result)
             }
-            Value::Param(..) => {
+            Value::Param { .. }=> {
                 if let Some(instr_asm) = self.compiled_params.borrow().get(&value) {
                     let result = instr_asm.result.clone();
                     CompiledInst::with_result(result.unwrap())
@@ -113,7 +113,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     bug!("param should've already been compiled!");
                 }
             }
-            Value::Instruction(..) => {
+            Value::Instruction { .. }=> {
                 // If the instruction has already been compiled, return its
                 // cached result.
                 if let Some(inst_asm) = self.compiled_insts.borrow().get(&value) {
@@ -133,7 +133,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let result = Operand::Loc(Location::RipOffset(global.name.clone()));
                 CompiledInst::with_result(result)
             }
-            Value::Cast(idx) => {
+            Value::ConstCast(idx) => {
                 self.codegen_value(self.cx.const_casts.borrow()[idx].value)
             }
             Value::Function(idx) => {
@@ -382,7 +382,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     CompiledInst::new(asm, result)
                 }
             },
-            Value::Instruction(_, _, _) => {
+            Value::Instruction { .. } => {
                 let ptr = self.codegen_value(*callee);
                 let result = ptr.result.clone().unwrap();
                 let acc_mode = result.access_mode();
@@ -447,7 +447,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let OxInstruction::CondBr { cond, then_bb, else_bb } = inst {
             let mut asm = vec![];
             match cond {
-                Value::Instruction(..) => {
+                Value::Instruction { .. }=> {
                     let cond_val = self.codegen_instruction(*cond).result.unwrap();
                     let true_reg = Register::direct(
                         SubRegister::reg(RCX, AccessMode::Low8));
@@ -752,7 +752,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             match types[agg_ty] {
-                OxType::StructType { .. } => {
+                OxType::Struct { .. } => {
                     let offset = types[agg_ty].offset(*idx, &types);
                     assert!(offset % 8 == 0);
                     let offset = offset / 8;
@@ -790,8 +790,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let types = self.cx.types.borrow();
         let agg_ty = self.cx.val_ty(agg);
         let members = match types[agg_ty] {
-            OxType::StructType { ref members, .. } => members,
-            ref ty => bug!("Expected OxType::StructType, found {:?}", ty),
+            OxType::Struct { ref members, .. } => members,
+            ref ty => bug!("Expected OxType::Struct, found {:?}", ty),
         };
 
         // The offset within the aggregated of the member at
@@ -821,7 +821,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 ];
                 CompiledInst::new(asm, agg_dst)
             },
-            Value::Instruction(fn_idx, bb_idx, idx) => {
+            Value::Instruction { fn_idx, bb_idx, idx } => {
                 let inst = &self.cx.module.borrow().functions[fn_idx]
                     .basic_blocks[bb_idx].instrs[idx];
                 let compiled_insts = self.compiled_insts.borrow();
@@ -853,7 +853,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             match types[agg_ty] {
-                OxType::StructType { .. } => {
+                OxType::Struct { .. } => {
                     let agg_dst = self.precompiled_result(inst);
                     self.codegen_insertvalue_struct(agg_dst, *agg, *elt, *idx)
                 }
@@ -947,7 +947,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         ]);
                     }
                 },
-                OxType::StructType { .. } if indices.len() > 1 => {
+                OxType::Struct { .. } if indices.len() > 1 => {
                     unimplemented!("gep({:?}) with indices {:?}", agg_ty, indices);
                 }
                 _ => {
@@ -1082,7 +1082,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             match cond {
                 // FIXME: assert that the condition is either an i1 or a vector
                 // of i1.
-                Value::Instruction(..) => {
+                Value::Instruction { .. }=> {
                     let mut asm = Vec::new();
                     let compiled_cond = self.codegen_instruction(*cond).result.unwrap();
                     let true_lbl = self.cx.get_sym_name("select_true");
@@ -1130,7 +1130,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn codegen_instruction(&self, inst_v: Value) -> CompiledInst {
         let module = self.cx.module.borrow();
-        let inst = if let Value::Instruction(fn_idx, bb_idx, idx) = inst_v {
+        let inst = if let Value::Instruction { fn_idx, bb_idx, idx } = inst_v {
             &module.functions[fn_idx].basic_blocks[bb_idx].instrs[idx]
         } else {
             bug!("can only compile a Value::Instruction; found {:?}", inst_v);
@@ -1184,18 +1184,16 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     pub fn codegen_block(&self, bb: &OxBasicBlock) -> Vec<MachineInst> {
         let mut asm = vec![];
-        for (inst_idx, _) in bb.instrs.iter().enumerate() {
-            let inst = &bb.instrs[inst_idx];
-            if self.already_compiled(Value::Instruction(bb.parent, bb.idx, inst_idx)) {
+        for (idx, _) in bb.instrs.iter().enumerate() {
+            let inst = &bb.instrs[idx];
+            let val_inst = Value::Instruction {
+                fn_idx: bb.parent,
+                bb_idx: bb.idx,
+                idx
+            };
+            if !self.already_compiled(val_inst) || inst.is_branch() {
                 // Always compile branching instructions.
-                if inst.is_branch() {
-                    let mut instr_asm = self.codegen_instruction(
-                        Value::Instruction(bb.parent, bb.idx, inst_idx));
-                    asm.append(&mut instr_asm.asm);
-                }
-            } else {
-                let mut instr_asm = self.codegen_instruction(
-                    Value::Instruction(bb.parent, bb.idx, inst_idx));
+                let mut instr_asm = self.codegen_instruction(val_inst);
                 asm.append(&mut instr_asm.asm);
             }
         }
@@ -1315,7 +1313,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let types = self.cx.types.borrow();
                         let agg_ty = self.cx.val_ty(*agg);
                         let elt_size = match types[agg_ty] {
-                            OxType::StructType { ref members, .. } => {
+                            OxType::Struct { ref members, .. } => {
                                 members[*idx as usize].size(&types)
                             },
                             ref ty => unimplemented!("ExtractValue({:?})", ty),
