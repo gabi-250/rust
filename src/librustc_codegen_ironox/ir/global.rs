@@ -7,11 +7,12 @@ pub struct OxGlobal {
     pub name: String,
     pub constant: bool,
     pub initializer: Option<Value>,
+    pub private: bool,
 }
 
 impl OxGlobal {
-    pub fn new(ty: Type, name: String) -> OxGlobal {
-        OxGlobal { ty, name, constant: false, initializer: None }
+    pub fn new(ty: Type, name: String, private: bool) -> OxGlobal {
+        OxGlobal { ty, name, constant: false, initializer: None, private }
     }
 
     pub fn set_initializer(&mut self, value: Value) {

@@ -122,6 +122,11 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
         for global in self.cx.globals.borrow().iter().rev() {
             asm.push(MachineInst::Label(global.name.clone()));
+            if !global.private {
+                // Mark the symbol as global.
+                asm.push(
+                    MachineInst::Directive(GasDirective::Global(global.name.clone())));
+            }
             match global.initializer {
                 Some(v) => {
                     let codegen = {

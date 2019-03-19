@@ -28,12 +28,18 @@ impl StaticMethods for CodegenCx<'ll, 'tcx> {
         }
         let gv = match kind {
             Some(_kind) if !self.tcx.sess.fewer_names() => {
-                // FIXME: generate name
-                let name = "my_global".to_string();
-                let gv = self.define_global(&name[..],
-                    self.val_ty(cv)).unwrap_or_else(|| {
+                let suffix = kind.unwrap_or("global");
+                let name = self.get_sym_name(suffix);
+                let gv = self.define_global(
+                    &name[..], self.val_ty(cv)).unwrap_or_else(|| {
                         bug!("symbol `{}` is already defined", name);
                 });
+                if let Value::Global(idx) = gv {
+                    // Set the linkage to private:
+                    self.globals.borrow_mut()[idx].private = true;
+                } else {
+                    bug!("Expected Value::Global, found {:?}", gv);
+                }
                 gv
             },
             _ => self.define_private_global(self.val_ty(cv)),
