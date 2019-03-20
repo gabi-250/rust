@@ -69,7 +69,9 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub u_consts: RefCell<Vec<OxUnsignedConst>>,
     /// The signed constants defined in this context.
     pub i_consts: RefCell<Vec<OxSignedConst>>,
+    /// All the globals defined so far, including functions.
     pub globals: RefCell<Vec<OxGlobal>>,
+    /// Map all the names of the globals defined so far to their index in `globals`.
     pub globals_cache: RefCell<FxHashMap<String, usize>>,
     /// The constant globals (which have a static address).
     pub const_structs: RefCell<Vec<OxStruct>>,
@@ -79,7 +81,6 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub const_cstrs: RefCell<Vec<OxConstStr>>,
     pub const_casts: RefCell<Vec<ConstCast>>,
     pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
-    pub ty_map: RefCell<FxHashMap<Value, Type>>,
     pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, Type>>,
     pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), Type>>,
     pub bytes: RefCell<Vec<OxConstBytes>>,
@@ -114,7 +115,6 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             const_cstrs: Default::default(),
             const_casts: Default::default(),
             const_fat_ptrs: Default::default(),
-            ty_map: Default::default(),
             sym_count: Cell::new(0),
             personality_fns: Default::default(),
             scalar_lltypes: Default::default(),
@@ -476,19 +476,18 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
-        // FIXME: use an enum variant instead (Sym::Struct for example). Use the
-        // length of self.const_structs to generate the unique IDs.
         let name = self.get_sym_name("struct");
+        let mut elt_tys = {
+            let mut tys = Vec::with_capacity(elts.len());
+            for v in elts {
+                tys.push(self.val_ty(*v))
+            }
+            tys
+        };
         let mut structs = self.const_structs.borrow_mut();
-        let mut elt_tys = Vec::with_capacity(elts.len());
-        for v in elts {
-            elt_tys.push(self.val_ty(*v))
-        }
         let ty = self.type_struct(&elt_tys[..], packed);
         structs.push(OxStruct::new(name.clone(), elts, ty));
-        let v = Value::ConstStruct(structs.len() - 1);
-        self.ty_map.borrow_mut().insert(v.clone(), ty);
-        v
+        Value::ConstStruct(structs.len() - 1)
     }
 
     fn const_array(&self, _ty: Type, _elts: &[Value]) -> Value {
