@@ -373,8 +373,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                     .functions[fn_idx].basic_blocks[bb_idx].instrs[idx];
                 inst.val_ty(self)
             },
-            Value::ConstStruct(_) => self.ty_map.borrow()[&v],
-                                       //self.const_structs.borrow()[idx].ty,
+            Value::ConstStruct(idx) => self.const_structs.borrow()[idx].ty,
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
             Value::ConstCast(idx) => self.const_casts.borrow()[idx].ty,
             Value::ConstFatPtr(idx) => self.val_ty(self.const_fat_ptrs.borrow()[idx].0),
