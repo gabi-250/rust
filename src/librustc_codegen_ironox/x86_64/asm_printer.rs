@@ -121,6 +121,10 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         let mut asm = vec![
             MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
         for global in self.cx.globals.borrow().iter().rev() {
+            // Functions are handled somewhere else.
+            if global.ty.is_fn(&self.cx.types.borrow()) {
+                continue;
+            }
             asm.push(MachineInst::Label(global.name.clone()));
             if !global.private {
                 // Mark the symbol as global.
