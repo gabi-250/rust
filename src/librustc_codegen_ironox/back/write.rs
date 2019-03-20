@@ -41,7 +41,7 @@ pub unsafe fn codegen(
 
     let module_name = module.name.clone();
     let module_name = Some(&module_name[..]);
-    let obj_path =
+    let _obj_path =
         cgcx.output_filenames.temp_path(OutputType::Object, module_name);
     match module.kind {
         ModuleKind::Regular | ModuleKind::Allocator => {

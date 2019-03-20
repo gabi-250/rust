@@ -376,7 +376,6 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Value::ConstStruct(idx) => self.const_structs.borrow()[idx].ty,
             Value::ConstCstr(idx) => self.const_cstrs.borrow()[idx].ty,
             Value::ConstCast(idx) => self.const_casts.borrow()[idx].ty,
-            Value::ConstFatPtr(idx) => self.val_ty(self.const_fat_ptrs.borrow()[idx].0),
             Value::ConstUndef(ty) => ty,
             Value::ConstBytes(_) | Value::ConstGep { .. } => {
                 let i8_ty = {

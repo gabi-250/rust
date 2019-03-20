@@ -1059,8 +1059,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("add_handler");
     }
 
-    fn set_personality_fn(&mut self, personality: Value) {
-        self.cx.personality_fns.borrow_mut().insert(self.llfn(), personality);
+    fn set_personality_fn(&mut self, _personality: Value) {
+        // FIXME? IronOx doesn't handle personality functions.
     }
 
     fn atomic_cmpxchg(

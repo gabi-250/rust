@@ -25,7 +25,6 @@ pub enum Value {
     Global(usize),
     ConstCstr(usize),
     ConstCast(usize),
-    ConstFatPtr(usize),
     ConstBytes(usize),
     /// ptr_idx is the index of a constant struct
     /// offset is the offset into the struct

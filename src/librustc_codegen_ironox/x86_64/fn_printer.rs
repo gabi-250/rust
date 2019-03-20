@@ -11,7 +11,7 @@ use x86_64::register::{Location, Operand, Register, SubRegister, AccessMode,
                       operand_access_mode, access_mode};
 
 use rustc::util::nodemap::FxHashMap;
-use rustc_codegen_ssa::traits::{BaseTypeMethods, MiscMethods};
+use rustc_codegen_ssa::traits::BaseTypeMethods;
 use std::cell::RefCell;
 
 const FN_ARG_REGS: [GeneralPurposeReg; 6] = [RDI, RSI, RDX, RCX, R8, R9];
@@ -325,7 +325,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             }
             asm.push(MachineInst::push(rax));
         }
-        let remaining_args = remaining_args.len();
         match callee {
             Value::Function(idx) => {
                 let module = self.cx.module.borrow();
@@ -896,7 +895,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     }
 
     fn codegen_gep(&self, inst: &OxInstruction) -> CompiledInst {
-        if let OxInstruction::Gep { ptr: agg, indices, inbounds } = inst {
+        if let OxInstruction::Gep { ptr: agg, indices, .. } = inst {
             let types = self.cx.types.borrow();
             let agg_ty = self.cx.val_ty(*agg);
             // FIXME: normally, the indices of a GEP must be constants (they need

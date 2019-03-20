@@ -19,7 +19,7 @@ impl PreDefineMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn predefine_fn(&self,
                     instance: Instance<'tcx>,
-                    linkage: Linkage,
+                    _linkage: Linkage,
                     visibility: Visibility,
                     symbol_name: &str) {
         let mono_sig = instance.fn_sig(self.tcx);

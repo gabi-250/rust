@@ -3,8 +3,6 @@ use ir::type_::{OxType, ScalarType, Type};
 use ir::value::Value;
 
 use rustc::mir::mono::Visibility;
-use rustc::util::nodemap::FxHashMap;
-use rustc_codegen_ssa::traits::{BaseTypeMethods, MiscMethods};
 use std::cell::RefCell;
 
 use x86_64::fn_printer::FunctionPrinter;
@@ -40,11 +38,6 @@ impl AsmPrinter<'a, 'll, 'tcx> {
     fn codegen_const_global(&self, c: Value) -> Vec<MachineInst> {
         let mut asm = vec![];
         match c {
-            Value::ConstFatPtr(idx) => {
-                let (v1, v2) = self.cx.const_fat_ptrs.borrow()[idx];
-                asm.append(&mut self.codegen_const_global(v1));
-                asm.append(&mut self.codegen_const_global(v2));
-            }
             Value::ConstUint(idx) => {
                 let u_const = self.cx.u_consts.borrow()[idx];
                 let directive = self.declare_scalar(u_const.ty, u_const.value);
