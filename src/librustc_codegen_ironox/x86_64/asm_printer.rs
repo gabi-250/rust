@@ -12,6 +12,7 @@ use x86_64::instruction::MachineInst;
 pub struct AsmPrinter<'a, 'll, 'tcx> {
     /// The codegen context, which also contains the `ModuleIronOx` to be compiled.
     cx: &'a CodegenCx<'ll, 'tcx>,
+    /// The global constants that have already been emitted to the object file.
     codegenned_consts: RefCell<Vec<Value>>,
 }
 
@@ -35,11 +36,14 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         }
     }
 
+    /// Emit the GNU Assembler directives to codegen the constant value `c`.
     fn codegen_const_global(&self, c: Value) -> Vec<MachineInst> {
         let mut asm = vec![];
         match c {
             Value::ConstUint(idx) => {
+                // Get the actual value of the constant.
                 let u_const = self.cx.u_consts.borrow()[idx];
+                // Get the declaration of the constant.
                 let directive = self.declare_scalar(u_const.ty, u_const.value);
                 asm.push(MachineInst::Directive(directive));
             }
@@ -51,7 +55,6 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             }
             Value::ConstStruct(idx) => {
                 let const_struct = &self.cx.const_structs.borrow()[idx];
-
                 self.codegenned_consts.borrow_mut().push(c);
                 asm.push(MachineInst::Label(const_struct.name.clone()));
                 for c in &const_struct.components {
@@ -59,6 +62,9 @@ impl AsmPrinter<'a, 'll, 'tcx> {
                 }
             }
             Value::Function(idx) => {
+                // If the value is a function, it can be represented as
+                // .quad <fn_name>
+                // This essentially behaves like a function pointer.
                 let name = self.cx.module.borrow().functions[idx].name.clone();
                 asm.push(MachineInst::Directive(GasDirective::Quad(
                             vec![BigNum::Sym(name)])));
@@ -91,6 +97,10 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         asm
     }
 
+    /// Return the string representation of the sequence of bytes.
+    ///
+    /// Creates a `String` out of the byte sequence of length `len` pointed to
+    /// by `ptr`.
     fn get_str(&self, ptr: *const u8, len: usize) -> String {
         let mut c_str = String::with_capacity(len);
         for i in 0..len {
@@ -101,6 +111,10 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         c_str
     }
 
+    /// Emit the GNU Assembler directives that add the bytes of a scalar value.
+    ///
+    /// The size of the type of the scalar determines the directive used. The value
+    /// is simply added after the directive.
     fn declare_scalar(&self, ty: Type, value: u128) -> GasDirective {
         match self.cx.types.borrow()[ty] {
             OxType::Scalar(ScalarType::I32) => GasDirective::Long(vec![value as u32]),
@@ -118,6 +132,7 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             if global.ty.is_fn(&self.cx.types.borrow()) {
                 continue;
             }
+            // The data of the global comes after its label
             asm.push(MachineInst::Label(global.name.clone()));
             if !global.private {
                 // Mark the symbol as global.
@@ -125,18 +140,12 @@ impl AsmPrinter<'a, 'll, 'tcx> {
                     MachineInst::Directive(GasDirective::Global(global.name.clone())));
             }
             match global.initializer {
-                Some(v) => {
-                    let codegen = {
-                        !self.codegenned_consts.borrow().contains(&v)
-                    };
-                    if codegen {
-                        asm.extend(self.codegen_const_global(v));
-                        self.codegenned_consts.borrow_mut().push(v);
-                    }
-                }
+                Some(v) => asm.extend(self.codegen_const_global(v)),
                 None => bug!("no initializer found for {:?}", global),
             };
         }
+        // Emit code for all the constant structs. Constant GEP instructions operate
+        // on constant structs.
         for (i, _c_struct) in self.cx.const_structs.borrow().iter().enumerate() {
             let v = Value::ConstStruct(i);
             let codegen = {
@@ -150,17 +159,21 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         asm
     }
 
-
+    /// Declare all the functions in the `ModuleIronOx`.
     fn declare_functions(&self) -> Vec<MachineInst> {
+        // Start writing in the text section.
         let mut asm: Vec<MachineInst> = vec![
-            MachineInst::Directive(GasDirective::Text)];
+            MachineInst::Directive(GasDirective::Text)
+        ];
         let module = self.cx.module.borrow();
         for f in &module.functions {
+            // Currently, each function is global.
             asm.extend(vec![
                 MachineInst::Directive(GasDirective::Global(f.name.clone())),
                 MachineInst::Directive(GasDirective::Type(f.name.clone(),
                                                           GasType::Function)),
             ]);
+            // Declare the visibility of the function.
             match f.visibility {
                 Visibility::Hidden => {
                     asm.push(
@@ -171,7 +184,8 @@ impl AsmPrinter<'a, 'll, 'tcx> {
                         MachineInst::Directive(GasDirective::Protected(f.name.clone())));
                 }
                 Visibility::Default => {
-                    //do nothing
+                    // No need to do anything, default visibility is enabled by
+                    // default.
                 },
             }
         }
@@ -183,25 +197,19 @@ impl AsmPrinter<'a, 'll, 'tcx> {
     /// The codegen result is a string that contains the x86-64 program that
     /// corresponds to the module from the `CodegenCx` of this printer.
     pub fn codegen(self) -> String {
-        let mut asm = String::new();
         // Define the globals.
-        for globl in &self.declare_globals() {
-            asm.push_str(&globl.to_string());
-        }
+        let mut asm = self.declare_globals();
         // Declare the functions.
-        for decl in &self.declare_functions() {
-            asm.push_str(&decl.to_string());
-        }
+        asm.extend(self.declare_functions());
         for f in &self.cx.module.borrow().functions {
+            // Skip the external functions.
             if !f.is_declaration() {
-                let mut fn_asm = String::new();
+                // Generate the instructions for this function.
                 let asm_insts  = FunctionPrinter::new(&self.cx).codegen_function(&f);
-                for inst in asm_insts {
-                    fn_asm.push_str(&format!("{}", inst));
-                }
-                asm.push_str(&fn_asm);
+                asm.extend(asm_insts);
             }
         }
-        asm
+        let asm: Vec<String> = asm.iter().map(|x| x.to_string()).collect();
+        asm.join("")
     }
 }
