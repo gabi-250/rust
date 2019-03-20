@@ -6,7 +6,6 @@
 #![feature(optin_builtin_traits)]
 #![feature(rustc_attrs)]
 #![feature(step_trait)]
-#![allow(unused)]
 
 extern crate rustc_errors;
 #[macro_use] extern crate rustc;

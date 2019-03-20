@@ -54,13 +54,13 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub codegen_unit: Option<Arc<CodegenUnit<'tcx>>>,
     /// Whether to emit overflow checks.
     pub check_overflow: bool,
-    /// The statistics collected while codegnning.
-    pub stats: RefCell<Stats>,
+    /// A cache of declared functions.
     pub instances: RefCell<FxHashMap<Instance<'tcx>, Value>>,
+    /// The IronOx module that contains all the functions in this CGU.
     pub module: RefCell<&'ll mut ModuleIronOx>,
+    /// V-tables cache.
     pub vtables: RefCell<
         FxHashMap<(Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>), Value>>,
-    pub personality_fns: RefCell<FxHashMap<Value, Value>>,
     /// All the types defined in this context.
     pub types: RefCell<IndexVec<Type, OxType>>,
     /// The index of an `OxType` in `types`.
@@ -75,16 +75,26 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub globals_cache: RefCell<FxHashMap<String, usize>>,
     /// The constant globals (which have a static address).
     pub const_structs: RefCell<Vec<OxStruct>>,
-    pub const_structs_cache: RefCell<FxHashMap<(Vec<Value>, bool), Value>>,
+    /// Maps `Value`s to indices in `globals`. This creates globals for the values
+    /// for which static_addr_of is called.
     pub const_globals_cache: RefCell<FxHashMap<Value, usize>>,
+    /// This ensures constant strings are not emitted multiple times.
     pub const_cstr_cache: RefCell<FxHashMap<LocalInternedString, Value>>,
+    /// All the constant strings that need to be emitted.
     pub const_cstrs: RefCell<Vec<OxConstStr>>,
+    /// All the constant casts.
     pub const_casts: RefCell<Vec<ConstCast>>,
-    pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
+    /// Map the Rust type of a scalar to its IronOx Type.
     pub scalar_lltypes: RefCell<FxHashMap<Ty<'tcx>, Type>>,
     pub lltypes: RefCell<FxHashMap<(Ty<'tcx>, Option<VariantIdx>), Type>>,
+    /// All the constant allocations that need to be emitted.
     pub bytes: RefCell<Vec<OxConstBytes>>,
+    /// The statistics collected while codegnning. IronOx doesn't collect statistics.
+    pub stats: RefCell<Stats>,
+    /// The number of symbols generated so far. This is used to produce unique
+    /// symbol names for unnamed structures.
     sym_count: Cell<usize>,
+    /// The error handler.
     eh_personality: Cell<Option<Value>>,
 }
 
@@ -109,14 +119,11 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             globals: Default::default(),
             globals_cache: Default::default(),
             const_structs: Default::default(),
-            const_structs_cache: Default::default(),
             const_globals_cache: Default::default(),
             const_cstr_cache: Default::default(),
             const_cstrs: Default::default(),
             const_casts: Default::default(),
-            const_fat_ptrs: Default::default(),
             sym_count: Cell::new(0),
-            personality_fns: Default::default(),
             scalar_lltypes: Default::default(),
             lltypes: Default::default(),
             bytes: Default::default(),
@@ -193,14 +200,13 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn get_fn(&self, instance: Instance<'tcx>) -> Value {
+        // FIXME: this is a simplified version of what needs to be done...
         let sym_name = self.tcx.symbol_name(instance).as_str();
         if let Some(ref llfn) = self.instances.borrow().get(&instance) {
             // The function has already been defined
             return **llfn;
         }
-
         let llfn = if let Some(llfn) = self.get_declared_value(&sym_name) {
-            // FIXME:
             llfn
         } else {
             // Otherwise, it probably exists in an external lib...
@@ -477,7 +483,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         packed: bool
     ) -> Value {
         let name = self.get_sym_name("struct");
-        let mut elt_tys = {
+        let elt_tys = {
             let mut tys = Vec::with_capacity(elts.len());
             for v in elts {
                 tys.push(self.val_ty(*v))
