@@ -172,11 +172,12 @@ impl OxInstruction {
                     let struct_ptr = cx.val_ty(ptr);
                     let struct_ptr = &types[struct_ptr];
                     if let OxType::PtrTo { pointee } = struct_ptr {
-                        let struct_ty = &types[*pointee];
-                        if let OxType::Struct { ref members, .. } = struct_ty {
-                            members[idx as usize]
-                        } else {
-                            bug!("expected OxType::Struct, found {:?}", struct_ty);
+                        match &types[*pointee] {
+                            OxType::Struct { ref members, .. } => {
+                                members[idx as usize]
+                            },
+                            OxType::Array { ty, .. } => *ty,
+                            ty => unimplemented!("StructGep({:?})", ty)
                         }
                     } else {
                         bug!("expected OxType::PtrTo, found {:?}", struct_ptr);
@@ -213,7 +214,8 @@ impl OxInstruction {
                 assert_eq!(then_ty, cx.val_ty(else_val));
                 then_ty
             },
-            OxInstruction::Icmp { .. }=> cx.type_bool(),
+            OxInstruction::Icmp { .. } |
+            OxInstruction::CheckOverflow { .. } => cx.type_bool(),
             OxInstruction::Gep { ptr, ref indices, .. }=> {
                 let ty = cx.val_ty(ptr);
                 let ty = ty.pointee_ty(&cx.types.borrow());

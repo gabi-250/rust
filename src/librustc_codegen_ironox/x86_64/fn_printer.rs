@@ -1264,6 +1264,15 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     OxInstruction::Mul { .. } |
                     OxInstruction::And { .. } |
                     OxInstruction::Load { .. } |
+                    OxInstruction::Cast { .. } |
+                    OxInstruction::Icmp { .. } |
+                    OxInstruction::CheckOverflow { .. } |
+                    OxInstruction::LandingPad { .. } |
+                    OxInstruction::StructGep { .. } |
+                    OxInstruction::Gep { .. } |
+                    OxInstruction::Select { .. } |
+                    OxInstruction::InsertValue { .. } |
+                    OxInstruction::ExtractValue { .. } |
                     OxInstruction::Not(_) => {
                         let inst_size =
                             inst.val_ty(self.cx).size(&self.cx.types.borrow());
@@ -1313,70 +1322,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         // FIXME: This is not a param move.
                         param_movs.extend(asm.clone());
                         Operand::from(result_addr)
-                    }
-                    OxInstruction::ExtractValue { agg, idx } => {
-                        let types = self.cx.types.borrow();
-                        let agg_ty = self.cx.val_ty(*agg);
-                        let elt_size = match types[agg_ty] {
-                            OxType::Struct { ref members, .. } => {
-                                members[*idx as usize].size(&types)
-                            },
-                            ref ty => unimplemented!("ExtractValue({:?})", ty),
-                        };
-                        size += elt_size as isize / 8;
-                        let acc_mode = access_mode(elt_size);
-                        let result = Location::RbpOffset(-size, acc_mode);
-                        Operand::from(result)
-                    }
-                    OxInstruction::StructGep { .. }| OxInstruction::Gep { .. } => {
-                        // The size of a pointer
-                        size += 8;
-                        let result = Location::RbpOffset(-size, AccessMode::Full);
-                        Operand::from(result)
-                    }
-                    OxInstruction::InsertValue { agg, .. } => {
-                        let agg_size = self.cx.val_ty(*agg).
-                            size(&self.cx.types.borrow()) as isize;
-                        size += agg_size / 8;
-                        let result =
-                            Location::RbpOffset(-size, AccessMode::Full);
-                        Operand::from(result)
-                    }
-                    OxInstruction::Select { then_val, else_val, .. }=> {
-                        let ty = self.cx.val_ty(*then_val);
-                        assert_eq!(ty, self.cx.val_ty(*else_val));
-                        let val_size = ty.size(&self.cx.types.borrow()) as isize;
-                        let acc_mode = access_mode(val_size as u64);
-                        size += val_size / 8;
-                        let result =
-                            Location::RbpOffset(-size, acc_mode);
-                        Operand::from(result)
-                    }
-                    OxInstruction::LandingPad {ty, .. } => {
-                        let pad_size = ty.size(&self.cx.types.borrow()) as isize;
-                        let acc_mode = access_mode(pad_size as u64);
-                        size += pad_size / 8;
-                        let result =
-                            Location::RbpOffset(-size, acc_mode);
-                        Operand::from(result)
-                    }
-                    OxInstruction::Icmp { .. } |
-                    OxInstruction::CheckOverflow { .. } => {
-                        // allocate a bool:
-                        let inst_size = 8;
-                        let acc_mode = access_mode(inst_size);
-                        size += inst_size as isize / 8;
-                        let result =
-                            Location::RbpOffset(-size, acc_mode);
-                        Operand::from(result)
-                    }
-                    OxInstruction::Cast { ty, .. } => {
-                        let inst_size = ty.size(&self.cx.types.borrow());
-                        let acc_mode = access_mode(inst_size);
-                        size += inst_size as isize / 8;
-                        let result =
-                            Location::RbpOffset(-size, acc_mode);
-                        Operand::from(result)
                     }
                     _ => continue,
                 };
