@@ -57,7 +57,8 @@ pub struct FunctionPrinter<'a, 'll, 'tcx> {
     /// A mapping from function parameters to their location on the stack.
     /// Currently, parameters are always pushed to and retrieved from the stack.
     compiled_params: RefCell<FxHashMap<Value, CompiledInst>>,
-    inst_stack_loc: RefCell<FxHashMap<OxInstruction, CompiledInst>>,
+    /// The location on the stack where each `OxInstruction` should be placed.
+    inst_stack_loc: RefCell<FxHashMap<OxInstruction, Operand>>,
 }
 
 impl FunctionPrinter<'a, 'll, 'tcx> {
@@ -81,7 +82,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
         asm.append(&mut param_movs);
         for bb in &f.basic_blocks {
-            asm.push(MachineInst::Label(bb.label.clone()));
             asm.append(&mut self.codegen_block(&bb));
         }
         asm
@@ -177,8 +177,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm2.asm);
             // the size in bits
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
-            let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
-            let reg2 = Register::direct(SubRegister::reg(RCX, access_mode(size)));
+            let reg1 = Register::direct(SubRegister::new(RAX, access_mode(size)));
+            let reg2 = Register::direct(SubRegister::new(RCX, access_mode(size)));
             asm.extend(vec![
                 MachineInst::mov(instr_asm1.result.unwrap(), reg1),
                 MachineInst::mov(instr_asm2.result.unwrap(), reg2),
@@ -202,8 +202,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm2.asm);
             // the size in bits
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
-            let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
-            let reg2 = Register::direct(SubRegister::reg(RCX, access_mode(size)));
+            let reg1 = Register::direct(SubRegister::new(RAX, access_mode(size)));
+            let reg2 = Register::direct(SubRegister::new(RCX, access_mode(size)));
             asm.extend(vec![
                 MachineInst::mov(instr_asm1.result.unwrap(), reg1),
                 MachineInst::mov(instr_asm2.result.unwrap(), reg2),
@@ -226,8 +226,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let mut instr_asm2 = self.codegen_value(*rhs);
             asm.append(&mut instr_asm2.asm);
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
-            let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
-            let reg2 = Register::direct(SubRegister::reg(RCX, access_mode(size)));
+            let reg1 = Register::direct(SubRegister::new(RAX, access_mode(size)));
+            let reg2 = Register::direct(SubRegister::new(RCX, access_mode(size)));
             asm.extend(vec![
                 MachineInst::mov(instr_asm1.result.unwrap(), reg1),
                 MachineInst::mov(instr_asm2.result.unwrap(), reg2),
@@ -248,8 +248,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let mut instr_asm = self.codegen_value(*v);
             asm.append(&mut instr_asm.asm);
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
-            let reg = Register::direct(SubRegister::reg(RAX, access_mode(size)));
-            let mask = Register::direct(SubRegister::reg(RCX, access_mode(size)));
+            let reg = Register::direct(SubRegister::new(RAX, access_mode(size)));
+            let mask = Register::direct(SubRegister::new(RCX, access_mode(size)));
             let result = self.precompiled_result(inst);
             asm.extend(vec![
                 MachineInst::mov(instr_asm.result.unwrap(), reg),
@@ -315,7 +315,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm.asm);
             let arg_size = self.cx.val_ty(**arg).size(&self.cx.types.borrow());
             let acc_mode = access_mode(arg_size);
-            let rax = Register::direct(SubRegister::reg(RAX, acc_mode));
+            let rax = Register::direct(SubRegister::new(RAX, acc_mode));
 
             if let Some(Operand::Loc(Location::RipOffset(_))) = instr_asm.result.clone() {
                 // globals are always treated as addresses
@@ -360,12 +360,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             asm.extend(vec![
                                 MachineInst::mov(
                                     Register::direct(
-                                        SubRegister::reg(RAX, AccessMode::Full)),
+                                        SubRegister::new(RAX, AccessMode::Full)),
                                     result1),
                                 // Load RDX at result + 8
                                 MachineInst::mov(
                                     Register::direct(
-                                        SubRegister::reg(RDX, am2)),
+                                        SubRegister::new(RDX, am2)),
                                     result2),
                             ]);
                         },
@@ -374,7 +374,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         },
                         _ => {
                             asm.push(MachineInst::mov(
-                                Register::direct(SubRegister::reg(RAX, acc_mode)),
+                                Register::direct(SubRegister::new(RAX, acc_mode)),
                                 result.clone()));
                         }
                     };
@@ -385,7 +385,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let ptr = self.codegen_value(*callee);
                 let result = ptr.result.clone().unwrap();
                 let acc_mode = result.access_mode();
-                let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
+                let reg = Register::direct(SubRegister::new(RAX, acc_mode));
                 // dereference result
                 asm.extend(vec![
                     MachineInst::call(result.clone().deref()),
@@ -411,7 +411,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let result2 = instr_asm2.result.unwrap();
                 // mov the value into a register an compare it with the second value
                 let reg = Register::direct(
-                    SubRegister::reg(RAX, operand_access_mode(&result1, &result2)));
+                    SubRegister::new(RAX, operand_access_mode(&result1, &result2)));
                 // FIXME: check the instruction and set RCX to cmp result.
                 // mov cmp result to cmp_res
                 asm.extend(vec![
@@ -419,7 +419,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     MachineInst::cmp(result2, reg),
                 ]);
 
-                let reg = Register::direct(SubRegister::reg(RAX, AccessMode::Low8));
+                let reg = Register::direct(SubRegister::new(RAX, AccessMode::Low8));
                 let set = match op {
                     CompOp::Eq => MachineInst::sete(reg),
                     CompOp::Ne => MachineInst::setne(reg),
@@ -449,9 +449,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 Value::Instruction { .. }=> {
                     let cond_val = self.codegen_instruction(*cond).result.unwrap();
                     let true_reg = Register::direct(
-                        SubRegister::reg(RCX, AccessMode::Low8));
+                        SubRegister::new(RCX, AccessMode::Low8));
                     let cond_reg = Register::direct(
-                        SubRegister::reg(RDI, AccessMode::Low8));
+                        SubRegister::new(RDI, AccessMode::Low8));
                     let then_label = self.cx.module.borrow().bb_label(*then_bb);
                     let else_label = self.cx.module.borrow().bb_label(*else_bb);
 
@@ -505,7 +505,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             let am_full = AccessMode::Full;
                             // Move two quad words from val to dst.
                             let reg =
-                                Register::direct(SubRegister::reg(RCX, am_full));
+                                Register::direct(SubRegister::new(RCX, am_full));
                             let val_word1 = Operand::Loc(
                                 Location::RbpOffset(*val_offset, am_full));
                             let val_word2 = Operand::Loc(
@@ -540,7 +540,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 _ => {
                     let access_mode = val_result.access_mode();
                     let reg =
-                        Register::direct(SubRegister::reg(RCX, access_mode));
+                        Register::direct(SubRegister::new(RCX, access_mode));
                     asm.extend(vec![
                         MachineInst::NOP,
                         MachineInst::NOP,
@@ -599,9 +599,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         MachineInst::mov(instr_asm.result.unwrap(),
                                          Register::direct(RAX)),
                         MachineInst::mov(Register::indirect(RAX),
-                                         Register::direct(SubRegister::reg(RAX,
+                                         Register::direct(SubRegister::new(RAX,
                                                                            acc_mode))),
-                        MachineInst::mov(Register::direct(SubRegister::reg(RAX,
+                        MachineInst::mov(Register::direct(SubRegister::new(RAX,
                                                                            acc_mode)),
                                          result.clone()),
                     ]);
@@ -617,7 +617,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let OxInstruction::CheckOverflow { signed, .. } = inst {
             let result = self.precompiled_result(inst);
             // Get register %dl.
-            let reg = Register::direct(SubRegister::reg(RDX, AccessMode::Low8));
+            let reg = Register::direct(SubRegister::new(RDX, AccessMode::Low8));
             let set_inst = if *signed {
                 MachineInst::setno(reg)
             } else {
@@ -646,9 +646,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     // subregister for example (%ax -> %rax), make sure there
                     // is no junk leftover in the higher order bits.
                     let reg_new = Register::direct(
-                        SubRegister::reg(RAX, new_acc_mode));
+                        SubRegister::new(RAX, new_acc_mode));
                     let reg_old = Register::direct(
-                        SubRegister::reg(RAX, old_acc_mode));
+                        SubRegister::new(RAX, old_acc_mode));
                     v.asm.extend(vec![
                         MachineInst::NOP,
                         MachineInst::NOP,
@@ -662,7 +662,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     ]);
                 } else {
                     let old_acc_mode = op.access_mode();
-                    let rax = Register::direct(SubRegister::reg(RAX, old_acc_mode));
+                    let rax = Register::direct(SubRegister::new(RAX, old_acc_mode));
                     v.asm.extend(vec![
                         MachineInst::mov(op, rax),
                         MachineInst::mov(rax, stack_loc.clone())
@@ -688,9 +688,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
                 if size <= 64 {
                     let reg_full =
-                        Register::direct(SubRegister::reg(RAX, AccessMode::Full));
+                        Register::direct(SubRegister::new(RAX, AccessMode::Full));
                     let reg =
-                        Register::direct(SubRegister::reg(RAX, access_mode(size)));
+                        Register::direct(SubRegister::new(RAX, access_mode(size)));
                     asm.extend(vec![
                         // If we aren't using the entire %rax, make sure there
                         // is no junk left over in the higher order bits.
@@ -704,7 +704,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     let am2 = access_mode(size - 64);
 
                     let rdx = Operand::Loc(Location::Reg(
-                            Register::direct(SubRegister::reg(RDX, am2))));
+                            Register::direct(SubRegister::new(RDX, am2))));
 
                     let offset = result.rbp_offset();
                     let am_full = AccessMode::Full;
@@ -799,7 +799,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         assert!(offset % 8 == 0);
         let offset = offset / 8;
 
-        //let agg_val = self.codegen_value(*agg);
         let compiled_v = self.codegen_value(v).result.unwrap();
         let member_rbp_offset = agg_dst.rbp_offset() + offset;
         let member_rbp_offset = Location::RbpOffset(member_rbp_offset,
@@ -810,7 +809,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // This is because storing an undefined value is a no-op.
             Value::ConstUndef(_) => {
                 let reg =
-                    Register::direct(SubRegister::reg(RCX, member_am));
+                    Register::direct(SubRegister::new(RCX, member_am));
                 let asm = vec![
                     MachineInst::mov(compiled_v, reg),
                     MachineInst::lea(member_rbp_offset,
@@ -825,7 +824,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     .basic_blocks[bb_idx].instrs[idx];
                 let compiled_insts = self.compiled_insts.borrow();
                 let reg =
-                    Register::direct(SubRegister::reg(RCX, member_am));
+                    Register::direct(SubRegister::new(RCX, member_am));
                 if let Some(old_struct) = compiled_insts.get(&agg) {
                     let old_struct_loc = old_struct.result.clone().unwrap();
                     let asm = vec![
@@ -1019,8 +1018,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.append(&mut instr_asm2.asm);
             // The size in bits.
             let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
-            let reg1 = Register::direct(SubRegister::reg(RAX, access_mode(size)));
-            let reg2 = Register::direct(SubRegister::reg(RCX, access_mode(size)));
+            let reg1 = Register::direct(SubRegister::new(RAX, access_mode(size)));
+            let reg2 = Register::direct(SubRegister::new(RCX, access_mode(size)));
             // The result of mul is actually in RDX:RAX. However, we only care
             // about the low order bits from %rax, because multiplying two
             // values of a particular bit width (type) always results in a value
@@ -1051,7 +1050,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // Load the value and compare it with each of the cases
             let acc_mode = access_mode(
                 self.cx.val_ty(*value).size(&self.cx.types.borrow()));
-            let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
+            let reg = Register::direct(SubRegister::new(RAX, acc_mode));
             let mut asm = vec![MachineInst::mov(v_stack_loc, reg)];
             let module = &self.cx.module.borrow();
             for (v, bb) in cases {
@@ -1060,7 +1059,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let compiled_v = compiled_v.result.clone().unwrap();
                 let acc_mode = access_mode(
                     self.cx.val_ty(*v).size(&self.cx.types.borrow()));
-                let v_reg = Register::direct(SubRegister::reg(RCX, acc_mode));
+                let v_reg = Register::direct(SubRegister::new(RCX, acc_mode));
                 let bb = &module.functions[bb.0].basic_blocks[bb.1];
                 asm.extend(vec![
                     MachineInst::mov(compiled_v, v_reg),
@@ -1097,12 +1096,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         self.cx.val_ty(*then_val).size(&self.cx.types.borrow()));
                     let then_val = add_asm_and_get_result(*then_val, &mut asm);
                     let else_val = add_asm_and_get_result(*else_val, &mut asm);
-                    let reg = Register::direct(SubRegister::reg(RAX, acc_mode));
+                    let reg = Register::direct(SubRegister::new(RAX, acc_mode));
                     // The stack location where the result of this instruction
                     // will be stored.
                     let stack_loc = self.precompiled_result(inst);
                     let cond_reg = Register::direct(
-                        SubRegister::reg(RCX, AccessMode::Low8));
+                        SubRegister::new(RCX, AccessMode::Low8));
                     asm.extend(vec![
                         // Check if the condition is true
                         MachineInst::mov(then_val.clone(), cond_reg),
@@ -1127,6 +1126,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
+    /// Codegen instruction `inst_v`, and return the resulting `CompiledInst`.
+    ///
+    /// If this instruction has already been compiled, this returns the cached
+    /// `CompiledInst`.
+    /// Note: `inst_v` *has* to be a Value::Instruction.
     fn codegen_instruction(&self, inst_v: Value) -> CompiledInst {
         let module = self.cx.module.borrow();
         let inst = if let Value::Instruction { fn_idx, bb_idx, idx } = inst_v {
@@ -1164,6 +1168,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             OxInstruction::Switch { .. } => self.codegen_switch(inst),
             OxInstruction::Gep { .. } => self.codegen_gep(inst),
         };
+        // Cache the instruction, and return it on subsequent calls.
         let compiled_inst = if let Some(ref result) = instr_asm.result {
             CompiledInst::new(instr_asm.asm.clone(), result.clone())
         } else {
@@ -1173,28 +1178,33 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         instr_asm
     }
 
+    /// Return the location where the result of `inst` is supposed to go.
+    ///
+    /// The `Operand` returned is always a location on the stack. Since each
+    /// instruction has its own stack location for the result, instructions
+    /// cannot clobber each other's results.
     fn precompiled_result(&self, inst: &OxInstruction) -> Operand {
-        self.inst_stack_loc.borrow()[inst].result.clone().unwrap().clone()
+        self.inst_stack_loc.borrow()[inst].clone()
     }
 
-    fn already_compiled(&self, value: Value) -> bool {
-        self.compiled_insts.borrow().get(&value).is_some()
-    }
-
+    /// Codegen a basic block.
+    ///
+    /// This returns the machine instructions that correspond to each `OxInstruction`'
+    /// in the basic block. The first `MachineInst` in the vector returned a
+    /// `MachineInst::Label`, which is not actually an instruction, but the label
+    /// of the basic block.
     pub fn codegen_block(&self, bb: &OxBasicBlock) -> Vec<MachineInst> {
-        let mut asm = vec![];
+        let mut asm = vec![
+            MachineInst::Label(bb.label.clone())
+        ];
         for (idx, _) in bb.instrs.iter().enumerate() {
-            let inst = &bb.instrs[idx];
             let val_inst = Value::Instruction {
                 fn_idx: bb.parent,
                 bb_idx: bb.idx,
                 idx
             };
-            if !self.already_compiled(val_inst) || inst.is_branch() {
-                // Always compile branching instructions.
-                let mut instr_asm = self.codegen_instruction(val_inst);
-                asm.append(&mut instr_asm.asm);
-            }
+            let mut instr_asm = self.codegen_instruction(val_inst);
+            asm.append(&mut instr_asm.asm);
         }
         asm
     }
@@ -1227,7 +1237,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let acc_mode = access_mode(param_size as u64);
             let result = Location::RbpOffset(-size, acc_mode);
             let reg = FunctionPrinter::get_func_arg(idx);
-            let reg = Register::direct(SubRegister::reg(reg, acc_mode));
+            let reg = Register::direct(SubRegister::new(reg, acc_mode));
             param_movs.push(MachineInst::mov(reg, result.clone()));
             // load from param doesn't work
             let instr_asm =
@@ -1252,7 +1262,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
         for bb in &f.basic_blocks {
             for inst in &bb.instrs {
-                let instr_asm = match inst {
+                let instr_loc = match inst {
                     OxInstruction::Add { .. } |
                     OxInstruction::Sub { .. } |
                     OxInstruction::Mul { .. } |
@@ -1264,7 +1274,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         let acc_mode = access_mode(inst_size as u64);
                         size += (inst_size / 8) as isize;
                         let result = Location::RbpOffset(-size, acc_mode);
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::Call { .. } | OxInstruction::Invoke { .. } => {
                         let ret_ty = inst.val_ty(self.cx);
@@ -1287,7 +1297,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         } else {
                             unimplemented!("return value size: {}", inst_size);
                         };
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::Alloca { ty, .. } => {
                         let types = &self.cx.types.borrow();
@@ -1306,7 +1316,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         ];
                         // FIXME: This is not a param move.
                         param_movs.extend(asm.clone());
-                        CompiledInst::new(asm.clone(), Operand::from(result_addr))
+                        Operand::from(result_addr)
                     }
                     OxInstruction::ExtractValue { agg, idx } => {
                         let types = self.cx.types.borrow();
@@ -1320,21 +1330,20 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         size += elt_size as isize / 8;
                         let acc_mode = access_mode(elt_size);
                         let result = Location::RbpOffset(-size, acc_mode);
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::StructGep { .. }| OxInstruction::Gep { .. } => {
                         // The size of a pointer
                         size += 8;
                         let result = Location::RbpOffset(-size, AccessMode::Full);
-
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::Not(v) => {
                         let val_size =
                             self.cx.val_ty(*v).size(&self.cx.types.borrow()) as isize;
                         size += val_size / 8;
                         let result = Location::RbpOffset(-size, AccessMode::Full);
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::InsertValue { agg, .. } => {
                         let agg_size = self.cx.val_ty(*agg).
@@ -1342,7 +1351,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         size += agg_size / 8;
                         let result =
                             Location::RbpOffset(-size, AccessMode::Full);
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::Select { then_val, else_val, .. }=> {
                         let ty = self.cx.val_ty(*then_val);
@@ -1352,7 +1361,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         size += val_size / 8;
                         let result =
                             Location::RbpOffset(-size, acc_mode);
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::LandingPad {ty, .. } => {
                         let pad_size = ty.size(&self.cx.types.borrow()) as isize;
@@ -1360,7 +1369,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         size += pad_size / 8;
                         let result =
                             Location::RbpOffset(-size, acc_mode);
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::Icmp { .. } |
                     OxInstruction::CheckOverflow { .. } => {
@@ -1370,7 +1379,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         size += inst_size as isize / 8;
                         let result =
                             Location::RbpOffset(-size, acc_mode);
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     OxInstruction::Cast { ty, .. } => {
                         let inst_size = ty.size(&self.cx.types.borrow());
@@ -1378,11 +1387,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         size += inst_size as isize / 8;
                         let result =
                             Location::RbpOffset(-size, acc_mode);
-                        CompiledInst::with_result(Operand::from(result))
+                        Operand::from(result)
                     }
                     _ => continue,
                 };
-                self.inst_stack_loc.borrow_mut().insert((*inst).clone(), instr_asm);
+                self.inst_stack_loc.borrow_mut().insert((*inst).clone(), instr_loc);
             }
         }
         if size % 16 != 0 {

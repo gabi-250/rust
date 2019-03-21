@@ -2,17 +2,15 @@ use std::fmt;
 
 #[derive(Clone, Debug)]
 pub enum GasDirective {
-    Ascii(Vec<String>),
-    Global(String),
-    Hidden(String),
-    Protected(String),
     Section(String),
-    Size(String, usize),
     Text,
-    Type(String, GasType),
+    Global(String),
+    Ascii(Vec<String>),
     Quad(Vec<BigNum>),
     Long(Vec<u32>),
     Byte(Vec<u8>),
+    Hidden(String),
+    Protected(String),
 }
 
 #[derive(Clone, Debug)]
@@ -30,21 +28,6 @@ impl fmt::Display for BigNum {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum GasType {
-    Function,
-    Object,
-}
-
-impl fmt::Display for GasType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            GasType::Function => write!(f, "@function"),
-            GasType::Object => write!(f, "@object"),
-        }
-    }
-}
-
 impl fmt::Display for GasDirective {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -57,11 +40,7 @@ impl fmt::Display for GasDirective {
             GasDirective::Hidden(ref name) => write!(f, ".hidden\t{}", name),
             GasDirective::Protected(ref name) => write!(f, ".protected\t{}", name),
             GasDirective::Section(ref name) => write!(f, ".section\t{}", name),
-            GasDirective::Size(ref name, ref size) => {
-                write!(f, ".size\t{},{}", name, size)
-            },
             GasDirective::Text => write!(f, ".text"),
-            GasDirective::Type(ref name, ref ty) => write!(f, ".type\t{},{}", name, ty),
             GasDirective::Byte(ref nums) => {
                 let nums: Vec<String> = nums.iter().map(|x| x.to_string()).collect();
                 write!(f, ".byte\t{}", nums.join(","))
