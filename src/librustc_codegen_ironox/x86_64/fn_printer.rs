@@ -76,10 +76,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let mut asm = vec![MachineInst::Label(f.name.clone())];
         let (mut param_movs, stack_size) = self.compute_stack_size(&f);
         asm.append(&mut FunctionPrinter::emit_prologue(stack_size));
-        for param in &f.params {
-            let mut inst_asm = self.codegen_value(*param);
-            asm.append(&mut inst_asm.asm);
-        }
         asm.append(&mut param_movs);
         for bb in &f.basic_blocks {
             asm.append(&mut self.codegen_block(&bb));
