@@ -83,7 +83,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         asm
     }
 
-    fn get_func_arg(idx: usize) -> GeneralPurposeReg {
+    fn fn_arg_reg(idx: usize) -> GeneralPurposeReg {
         if idx < 6 {
             return FN_ARG_REGS[idx];
         } else {
@@ -250,7 +250,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             asm.extend(vec![
                 MachineInst::mov(instr_asm.result.unwrap(), reg),
                 MachineInst::xor(mask, mask),
-                MachineInst::mov(Operand::Immediate(1, AccessMode::Full), reg),
+                MachineInst::mov(Operand::Immediate(1, AccessMode::Full), mask),
                 MachineInst::not(mask),
                 MachineInst::not(reg),
                 MachineInst::xor(mask, reg),
@@ -279,7 +279,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         for (idx, arg) in args.iter().take(6).enumerate() {
             let mut instr_asm = self.codegen_value(*arg);
             asm.append(&mut instr_asm.asm);
-            let param = FunctionPrinter::get_func_arg(idx);
+            let param = FunctionPrinter::fn_arg_reg(idx);
             // FIXME: always handle globals correctly
             if let Some(Operand::Loc(Location::RipOffset(_))) = instr_asm.result.clone() {
                 // globals are always treated as addresses
@@ -1232,7 +1232,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             size += param_size / 8;
             let acc_mode = access_mode(param_size as u64);
             let result = Location::RbpOffset(-size, acc_mode);
-            let reg = FunctionPrinter::get_func_arg(idx);
+            let reg = FunctionPrinter::fn_arg_reg(idx);
             let reg = Register::direct(SubRegister::new(reg, acc_mode));
             param_movs.push(MachineInst::mov(reg, result.clone()));
             // load from param doesn't work
@@ -1263,10 +1263,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     OxInstruction::Sub { .. } |
                     OxInstruction::Mul { .. } |
                     OxInstruction::And { .. } |
-                    OxInstruction::Load { .. } => {
+                    OxInstruction::Load { .. } |
+                    OxInstruction::Not(_) => {
                         let inst_size =
                             inst.val_ty(self.cx).size(&self.cx.types.borrow());
-
                         let acc_mode = access_mode(inst_size as u64);
                         size += (inst_size / 8) as isize;
                         let result = Location::RbpOffset(-size, acc_mode);
@@ -1331,13 +1331,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     OxInstruction::StructGep { .. }| OxInstruction::Gep { .. } => {
                         // The size of a pointer
                         size += 8;
-                        let result = Location::RbpOffset(-size, AccessMode::Full);
-                        Operand::from(result)
-                    }
-                    OxInstruction::Not(v) => {
-                        let val_size =
-                            self.cx.val_ty(*v).size(&self.cx.types.borrow()) as isize;
-                        size += val_size / 8;
                         let result = Location::RbpOffset(-size, AccessMode::Full);
                         Operand::from(result)
                     }
