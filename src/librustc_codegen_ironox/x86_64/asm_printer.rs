@@ -6,7 +6,7 @@ use rustc::mir::mono::Visibility;
 use std::cell::RefCell;
 
 use x86_64::fn_printer::FunctionPrinter;
-use x86_64::gas_directive::{BigNum, GasDirective, GasType};
+use x86_64::gas_directive::{BigNum, GasDirective};
 use x86_64::instruction::MachineInst;
 
 pub struct AsmPrinter<'a, 'll, 'tcx> {
@@ -21,14 +21,20 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         AsmPrinter { cx, codegenned_consts: Default::default() }
     }
 
-    fn constant_value(&self, v: Value) -> String {
+    /// Get the name of value `v`.
+    ///
+    /// `v` may be a static operation, such as a ConstGep, or a constant/global
+    /// value.
+    fn global_name(&self, v: Value) -> String {
         match v {
             Value::ConstCstr(idx) => self.cx.const_cstrs.borrow()[idx].name.clone(),
             Value::Global(idx) => {
-                self.constant_value(self.cx.globals.borrow()[idx].initializer.unwrap())
+                // Find the name of the initialiser of the global.
+                self.global_name(self.cx.globals.borrow()[idx].initializer.unwrap())
             },
-            Value::ConstGep { ptr_idx, offset } if offset == 0 => {
-                // FIXME: handle non-zero offsets
+            Value::ConstGep { ptr_idx, offset } => {
+                // FIXME: handle non-zero offsets statically.
+                assert_eq!(offset, 0);
                 let name = self.cx.const_structs.borrow()[ptr_idx].name.clone();
                 name
             }
@@ -48,15 +54,21 @@ impl AsmPrinter<'a, 'll, 'tcx> {
                 asm.push(MachineInst::Directive(directive));
             }
             Value::ConstCast(idx) => {
+                // Find the instruction.
                 let cast_inst = &self.cx.const_casts.borrow()[idx];
-                let name = self.constant_value(cast_inst.value);
-                asm.push(MachineInst::Directive(GasDirective::Quad(
-                            vec![BigNum::Sym(name)])));
+                // Get the name of the value being cast.
+                let name = self.global_name(cast_inst.value);
+                asm.push(
+                    MachineInst::Directive(
+                        GasDirective::Quad(vec![BigNum::Sym(name)])));
             }
             Value::ConstStruct(idx) => {
                 let const_struct = &self.cx.const_structs.borrow()[idx];
+                // Make sure this is not emitted again.
                 self.codegenned_consts.borrow_mut().push(c);
+                // Emit the label of the struct.
                 asm.push(MachineInst::Label(const_struct.name.clone()));
+                // Codegen each of its components.
                 for c in &const_struct.components {
                     asm.extend(self.codegen_const_global(*c));
                 }
@@ -71,25 +83,22 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             }
             Value::ConstCstr(idx) => {
                 let c_str = &self.cx.const_cstrs.borrow()[idx];
+                // Get the content of the string.
                 let const_str = self.get_str(c_str.ptr, c_str.len);
+                // Specify the type of the symbol (object), its size, and finally
+                // the contents.
                 asm.extend(vec![
-                    MachineInst::Directive(
-                        GasDirective::Type(c_str.name.clone(), GasType::Object)),
-                    MachineInst::Directive(
-                        GasDirective::Size(c_str.name.clone(), c_str.len)),
                     MachineInst::Label(c_str.name.clone()),
                     MachineInst::Directive(GasDirective::Ascii(vec![const_str])),
                 ]);
             }
             Value::ConstBytes(idx) => {
                 let const_bytes = &self.cx.bytes.borrow()[idx];
+                // Emit the label of the allocation, the bytes, and its length.
                 asm.extend(vec![
                     MachineInst::Label(const_bytes.name.clone()),
                     MachineInst::Directive(
                         GasDirective::Byte(const_bytes.bytes.clone())),
-                    MachineInst::Directive(
-                        GasDirective::Size(const_bytes.name.clone(),
-                                           const_bytes.len())),
                 ]);
             },
             _ => unimplemented!("codegen_const_global({:?})", c),
@@ -124,6 +133,7 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         }
     }
 
+    /// Emit the GNU Assembler directives that declare the globals of the module.
     fn declare_globals(&self) -> Vec<MachineInst> {
         let mut asm = vec![
             MachineInst::Directive(GasDirective::Section(".rodata".to_string()))];
@@ -170,8 +180,6 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             // Currently, each function is global.
             asm.extend(vec![
                 MachineInst::Directive(GasDirective::Global(f.name.clone())),
-                MachineInst::Directive(GasDirective::Type(f.name.clone(),
-                                                          GasType::Function)),
             ]);
             // Declare the visibility of the function.
             match f.visibility {
@@ -204,8 +212,8 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         for f in &self.cx.module.borrow().functions {
             // Skip the external functions.
             if !f.is_declaration() {
-                // Generate the instructions for this function.
-                let asm_insts  = FunctionPrinter::new(&self.cx).codegen_function(&f);
+                // Generate the instructions of this function.
+                let asm_insts = FunctionPrinter::new(&self.cx).codegen_function(&f);
                 asm.extend(asm_insts);
             }
         }

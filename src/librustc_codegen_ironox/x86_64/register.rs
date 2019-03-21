@@ -1,12 +1,16 @@
 use std::cmp::Ordering;
 use std::fmt;
 
+/// The operand of an x86-64 instruction.
 #[derive(Clone, Debug)]
 pub enum Operand {
+    /// A memory address.
     Loc(Location),
+    /// An immediate value.
     Immediate(isize, AccessMode),
+    /// A symbol.
     Sym(String),
-    // FIXME: immediates can be dereferenced too...
+    /// This is not ideal, but this represents a dereferenced location(`*<loc>`).
     Deref(Location)
 }
 
@@ -105,6 +109,7 @@ impl fmt::Display for Location {
     }
 }
 
+/// The 16 x86-64 general purpose registers.
 #[allow(unused)]
 #[derive(Clone, Copy, Debug)]
 pub enum GeneralPurposeReg {
@@ -126,14 +131,18 @@ pub enum GeneralPurposeReg {
     R15,
 }
 
+/// A subregister is used when only the lower bits of a regiser are needed.
 #[derive(Clone, Copy, Debug)]
 pub struct SubRegister {
+    /// The general-purpose register used.
     reg: GeneralPurposeReg,
+    /// This indicates how many of the lower bits are actually in use.
     access_mode: AccessMode,
 }
 
 impl SubRegister {
-    pub fn reg(reg: GeneralPurposeReg, access_mode: AccessMode) -> SubRegister {
+    /// Create `SubRegister` for register `reg` with access mode `access_mode`.
+    pub fn new(reg: GeneralPurposeReg, access_mode: AccessMode) -> SubRegister {
         SubRegister { reg, access_mode }
     }
 }
@@ -168,11 +177,12 @@ impl Ord for AccessMode {
     }
 }
 
+/// Represents the use of a register in an expression.
 #[derive(Clone, Copy, Debug)]
 pub enum Register {
-    // %rax
+    /// The register itself.
     Direct(SubRegister),
-    // (%rax)
+    /// The value the address stored in the register points to.
     Indirect(SubRegister),
 }
 
@@ -188,11 +198,11 @@ impl Register {
     pub fn with_acc_mode(&self, acc_mode: AccessMode) -> Register {
         match *self {
             Register::Direct(sr) => {
-                let sr = SubRegister::reg(sr.reg, acc_mode);
+                let sr = SubRegister::new(sr.reg, acc_mode);
                 Register::Direct(sr)
             },
             Register::Indirect(sr) => {
-                let sr = SubRegister::reg(sr.reg, acc_mode);
+                let sr = SubRegister::new(sr.reg, acc_mode);
                 Register::Indirect(sr)
             },
         }
@@ -209,10 +219,12 @@ impl From<GeneralPurposeReg> for SubRegister {
 }
 
 impl Register {
+    /// Get a direct register operand. For example, %eax.
     pub fn direct<U: Into<SubRegister>>(r: U) -> Register {
         Register::Direct(r.into())
     }
 
+    /// Get an indirect register operand. For example, (%rax).
     pub fn indirect<U: Into<SubRegister>>(r: U) -> Register {
         Register::Indirect(r.into())
     }
