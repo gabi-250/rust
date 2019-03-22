@@ -59,6 +59,7 @@ pub struct FunctionPrinter<'a, 'll, 'tcx> {
     compiled_params: RefCell<FxHashMap<Value, CompiledInst>>,
     /// The location on the stack where each `OxInstruction` should be placed.
     inst_stack_loc: RefCell<FxHashMap<OxInstruction, Operand>>,
+    stack_size: isize,
 }
 
 impl FunctionPrinter<'a, 'll, 'tcx> {
@@ -69,14 +70,18 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             compiled_insts: Default::default(),
             compiled_params: Default::default(),
             inst_stack_loc: Default::default(),
+            stack_size: 0,
         }
     }
 
-    pub fn codegen_function(&self, f: &OxFunction) -> Vec<MachineInst> {
+    pub fn codegen_function(&mut self, f: &OxFunction) -> Vec<MachineInst> {
         let mut asm = vec![MachineInst::Label(f.name.clone())];
-        let (mut param_movs, stack_size) = self.compute_stack_size(&f);
-        asm.append(&mut FunctionPrinter::emit_prologue(stack_size));
+        let mut param_movs = self.compute_stack_size(f);
+        let mut allocas = self.map_inst_to_stack_loc(f);
+        self.align_stack();
+        asm.append(&mut self.emit_prologue());
         asm.append(&mut param_movs);
+        asm.append(&mut allocas);
         for bb in &f.basic_blocks {
             asm.append(&mut self.codegen_block(&bb));
         }
@@ -1205,11 +1210,11 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         asm
     }
 
-    fn emit_prologue(stack_size: usize) -> Vec<MachineInst> {
+    fn emit_prologue(&self) -> Vec<MachineInst> {
         vec![
             MachineInst::push(Register::direct(RBP)),
             MachineInst::mov(Register::direct(RSP), Register::direct(RBP)),
-            MachineInst::sub(Operand::Immediate(stack_size as isize, AccessMode::Full),
+            MachineInst::sub(Operand::Immediate(self.stack_size as isize, AccessMode::Full),
                              Register::direct(RSP)),
         ]
     }
@@ -1221,17 +1226,91 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         ]
     }
 
-    fn compute_stack_size(&self, f: &OxFunction) -> (Vec<MachineInst>, usize) {
-        let mut size = 0;
-        let mut param_movs = vec![];
+    fn map_inst_to_stack_loc(&mut self, f: &OxFunction) -> Vec<MachineInst> {
+        let mut allocas = vec![];
+        for bb in &f.basic_blocks {
+            for inst in &bb.instrs {
+                let instr_loc = match inst {
+                    OxInstruction::Add { .. } |
+                    OxInstruction::Sub { .. } |
+                    OxInstruction::Mul { .. } |
+                    OxInstruction::And { .. } |
+                    OxInstruction::Load { .. } |
+                    OxInstruction::Cast { .. } |
+                    OxInstruction::Icmp { .. } |
+                    OxInstruction::CheckOverflow { .. } |
+                    OxInstruction::LandingPad { .. } |
+                    OxInstruction::StructGep { .. } |
+                    OxInstruction::Gep { .. } |
+                    OxInstruction::Select { .. } |
+                    OxInstruction::InsertValue { .. } |
+                    OxInstruction::ExtractValue { .. } |
+                    OxInstruction::Not(_) => {
+                        let inst_size =
+                            inst.val_ty(self.cx).size(&self.cx.types.borrow());
+                        let acc_mode = access_mode(inst_size as u64);
+                        self.stack_size += (inst_size / 8) as isize;
+                        let result = Location::RbpOffset(-self.stack_size, acc_mode);
+                        Operand::from(result)
+                    }
+                    OxInstruction::Call { .. } | OxInstruction::Invoke { .. } => {
+                        let ret_ty = inst.val_ty(self.cx);
+                        // If the function doesn't return anything, carry on.
+                        if let OxType::Void = self.cx.types.borrow()[ret_ty] {
+                            continue;
+                        }
+                        let inst_size = ret_ty.size(&self.cx.types.borrow());
+                        let result = if inst_size <= 64 {
+                            let acc_mode = access_mode(inst_size as u64);
+                            // FIXME: check non void ret
+                            self.stack_size += (inst_size / 8) as isize;
+                            Location::RbpOffset(-self.stack_size, acc_mode)
+                        } else if inst_size <= 128 {
+                            // Split the result in two: the first half goes in %rax,
+                            // and the second in %rdx
+                            self.stack_size += (inst_size / 8) as isize;
+                            Location::RbpOffset(-self.stack_size,
+                                                AccessMode::Large(inst_size / 8))
+                        } else {
+                            unimplemented!("return value size: {}", inst_size);
+                        };
+                        Operand::from(result)
+                    }
+                    OxInstruction::Alloca { ty, .. } => {
+                        let types = &self.cx.types.borrow();
+                        let inst_size =
+                            ty.pointee_ty(types).size(types);
+                        let acc_mode = access_mode(inst_size);
+                        self.stack_size += (inst_size / 8) as isize;
+                        let result = Location::RbpOffset(-self.stack_size, acc_mode);
+                        self.stack_size += 8;
+                        let result_addr =
+                            Location::RbpOffset(-self.stack_size, AccessMode::Full);
+                        let asm = vec![
+                            MachineInst::lea(result, Register::direct(RAX)),
+                            MachineInst::mov(Register::direct(RAX),
+                                             result_addr.clone()),
+                        ];
+                        allocas.extend(asm.clone());
+                        Operand::from(result_addr)
+                    }
+                    _ => continue,
+                };
+                self.inst_stack_loc.borrow_mut().insert((*inst).clone(), instr_loc);
+            }
+        }
+        allocas
+    }
 
+    fn compute_stack_size(&mut self, f: &OxFunction) -> Vec<MachineInst> {
+        let mut param_movs = vec![];
         for (idx, param) in f.params.iter().take(6).enumerate() {
             // FIXME:
             let param_size =
                 self.cx.val_ty(*param).size(&self.cx.types.borrow()) as isize;
-            size += param_size / 8;
+            self.stack_size += param_size / 8;
             let acc_mode = access_mode(param_size as u64);
-            let result = Location::RbpOffset(-size, acc_mode);
+            let result = Location::RbpOffset(-self.stack_size, acc_mode);
             let reg = FunctionPrinter::fn_arg_reg(idx);
             let reg = Register::direct(SubRegister::new(reg, acc_mode));
             param_movs.push(MachineInst::mov(reg, result.clone()));
@@ -1256,82 +1335,13 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             pos_rbp_offset += param_size / 8;
         }
 
-        for bb in &f.basic_blocks {
-            for inst in &bb.instrs {
-                let instr_loc = match inst {
-                    OxInstruction::Add { .. } |
-                    OxInstruction::Sub { .. } |
-                    OxInstruction::Mul { .. } |
-                    OxInstruction::And { .. } |
-                    OxInstruction::Load { .. } |
-                    OxInstruction::Cast { .. } |
-                    OxInstruction::Icmp { .. } |
-                    OxInstruction::CheckOverflow { .. } |
-                    OxInstruction::LandingPad { .. } |
-                    OxInstruction::StructGep { .. } |
-                    OxInstruction::Gep { .. } |
-                    OxInstruction::Select { .. } |
-                    OxInstruction::InsertValue { .. } |
-                    OxInstruction::ExtractValue { .. } |
-                    OxInstruction::Not(_) => {
-                        let inst_size =
-                            inst.val_ty(self.cx).size(&self.cx.types.borrow());
-                        let acc_mode = access_mode(inst_size as u64);
-                        size += (inst_size / 8) as isize;
-                        let result = Location::RbpOffset(-size, acc_mode);
-                        Operand::from(result)
-                    }
-                    OxInstruction::Call { .. } | OxInstruction::Invoke { .. } => {
-                        let ret_ty = inst.val_ty(self.cx);
-                        // If the function doesn't return anything, carry on.
-                        if let OxType::Void = self.cx.types.borrow()[ret_ty] {
-                            continue;
-                        }
-                        let inst_size = ret_ty.size(&self.cx.types.borrow());
-                        let result = if inst_size <= 64 {
-                            let acc_mode = access_mode(inst_size as u64);
-                            // FIXME: check non void ret
-                            size += (inst_size / 8) as isize;
-                            Location::RbpOffset(-size, acc_mode)
-                        } else if inst_size <= 128 {
-                            // Split the result in two: the first half goes in %rax,
-                            // and the second in %rdx
-                            size += (inst_size / 8) as isize;
-                            Location::RbpOffset(-size,
-                                                AccessMode::Large(inst_size / 8))
-                        } else {
-                            unimplemented!("return value size: {}", inst_size);
-                        };
-                        Operand::from(result)
-                    }
-                    OxInstruction::Alloca { ty, .. } => {
-                        let types = &self.cx.types.borrow();
-                        let inst_size =
-                            ty.pointee_ty(types).size(types);
-                        //let acc_mode = access_mode(inst_size as u64);
-                        let acc_mode = access_mode(inst_size);
-                        size += (inst_size / 8) as isize;
-                        let result = Location::RbpOffset(-size, acc_mode);
-                        size += 8;
-                        let result_addr = Location::RbpOffset(-size, AccessMode::Full);
-                        let asm = vec![
-                            MachineInst::lea(result, Register::direct(RAX)),
-                            MachineInst::mov(Register::direct(RAX),
-                                             result_addr.clone()),
-                        ];
-                        // FIXME: This is not a param move.
-                        param_movs.extend(asm.clone());
-                        Operand::from(result_addr)
-                    }
-                    _ => continue,
-                };
-                self.inst_stack_loc.borrow_mut().insert((*inst).clone(), instr_loc);
-            }
+        param_movs
+    }
+
+    fn align_stack(&mut self) {
+        if self.stack_size % 16 != 0 {
+            self.stack_size += 16 - self.stack_size % 16;
         }
-        if size % 16 != 0 {
-            size += 16 - size % 16;
-        }
-        (param_movs, size as usize)
     }
 }
 
