@@ -147,6 +147,7 @@ impl SubRegister {
     }
 }
 
+/// This represents the number of relevant bits of an Operand.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AccessMode {
     Full,
