@@ -1262,30 +1262,21 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                             continue;
                         }
                         let inst_size = ret_ty.size(&self.cx.types.borrow());
-                        let result = if inst_size <= 64 {
-                            let acc_mode = access_mode(inst_size as u64);
-                            // FIXME: check non void ret
-                            self.stack_size += (inst_size / 8) as isize;
-                            Location::RbpOffset(-self.stack_size, acc_mode)
-                        } else if inst_size <= 128 {
-                            // Split the result in two: the first half goes in %rax,
-                            // and the second in %rdx
-                            self.stack_size += (inst_size / 8) as isize;
-                            Location::RbpOffset(-self.stack_size,
-                                                AccessMode::Large(inst_size / 8))
-                        } else {
+                        if inst_size > 128 {
                             unimplemented!("return value size: {}", inst_size);
-                        };
+                        }
+                        let acc_mode = access_mode(inst_size as u64);
+                        self.stack_size += (inst_size / 8) as isize;
+                        let result = Location::RbpOffset(-self.stack_size, acc_mode);
                         Operand::from(result)
                     }
                     OxInstruction::Alloca { ty, .. } => {
                         let types = &self.cx.types.borrow();
-                        let inst_size =
-                            ty.pointee_ty(types).size(types);
+                        let inst_size = self.cx.ty_size(ty.pointee_ty(types));
                         let acc_mode = access_mode(inst_size);
-                        self.stack_size += (inst_size / 8) as isize;
+                        self.stack_size += inst_size as isize / 8;
                         let result = Location::RbpOffset(-self.stack_size, acc_mode);
-                        self.stack_size += 8;
+                        self.stack_size += std::mem::size_of::<usize>() as isize;
                         let result_addr =
                             Location::RbpOffset(-self.stack_size, AccessMode::Full);
                         let asm = vec![
