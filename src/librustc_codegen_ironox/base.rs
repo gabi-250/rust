@@ -11,7 +11,7 @@ use rustc_mir::monomorphize::partitioning::CodegenUnitExt;
 use syntax_pos::symbol::InternedString;
 
 use builder::Builder;
-use x86_asm_printer::{compile, ModuleAsm};
+use x86_64_asm_printer::AsmPrinter;
 use context::CodegenCx;
 
 pub fn compile_codegen_unit<'ll, 'tcx>(
@@ -46,7 +46,7 @@ fn codegen_ironox_module<'ll, 'tcx>(
             mono_item.define::<Builder>(&cx);
         }
         maybe_create_entry_wrapper::<Builder>(&cx);
-        compile(ModuleAsm::new(cx))
+        AsmPrinter::new(cx).codegen()
     };
     ironox_module.asm = Some(asm);
     (stats, ModuleCodegen {

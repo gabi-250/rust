@@ -6,6 +6,7 @@ use context::CodegenCx;
 
 use rustc::ty::FnSig;
 use rustc::ty::layout::Align;
+use rustc::util::nodemap::FxHashMap;
 
 /// An IronOx function.
 #[derive(PartialEq, Debug)]
@@ -76,5 +77,9 @@ impl OxFunction {
         let bb = OxBasicBlock::new(cx, label, self, idx);
         self.basic_blocks.push(bb);
         BasicBlock(self.idx, idx)
+    }
+
+    pub fn is_declaration(&self) -> bool {
+        self.basic_blocks.len() == 0
     }
 }

@@ -3,7 +3,8 @@ use context::CodegenCx;
 use ir::value::Value;
 
 use rustc::ty::Ty;
-use rustc_codegen_ssa::traits::IntrinsicCallMethods;
+use rustc_codegen_ssa::common::IntPredicate;
+use rustc_codegen_ssa::traits::{BuilderMethods, ConstMethods, IntrinsicCallMethods};
 use rustc_codegen_ssa::mir::operand::OperandRef;
 use rustc_target::abi::call::FnType;
 use syntax_pos::Span;
@@ -29,6 +30,9 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn expect(&mut self, cond: Value, expected: bool) -> Value {
-        unimplemented!("expect");
+        let expected_val = {
+            self.const_bool(!expected)
+        };
+        self.icmp(IntPredicate::IntEQ, cond, expected_val)
     }
 }

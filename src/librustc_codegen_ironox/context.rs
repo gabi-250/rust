@@ -8,6 +8,7 @@ use rustc::session::Session;
 
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc::ty::layout::{LayoutOf, LayoutError, self, TyLayout, Size};
+use type_of::LayoutIronOxExt;
 use rustc::util::nodemap::FxHashMap;
 use rustc_codegen_ssa::base::wants_msvc_seh;
 use rustc_codegen_ssa::callee::resolve_and_get_fn;
@@ -23,8 +24,13 @@ use syntax::symbol::LocalInternedString;
 use debuginfo::DIScope;
 use ir::basic_block::BasicBlock;
 use ir::constant::{UnsignedConst, SignedConst};
+use ir::instruction::{ConstCast, Instruction};
 use ir::value::Value;
-use ir::type_::{OxType, Type};
+use ir::type_::{OxType, Type, IxLlcx};
+use ir::struct_::OxStruct;
+use consts::{self};
+use const_cstr::ConstCstr;
+use global::Global;
 
 use super::ModuleIronOx;
 
@@ -53,6 +59,16 @@ pub struct CodegenCx<'ll, 'tcx: 'll> {
     pub u_consts: RefCell<Vec<UnsignedConst>>,
     /// The signed constants defined in this context.
     pub i_consts: RefCell<Vec<SignedConst>>,
+    pub globals: RefCell<Vec<Global>>,
+    pub globals_cache: RefCell<FxHashMap<String, usize>>,
+    /// The constant globals (which have a static address).
+    pub const_structs: RefCell<Vec<OxStruct>>,
+    pub const_globals_cache: RefCell<FxHashMap<Value, usize>>,
+    pub const_cstr_cache: RefCell<FxHashMap<LocalInternedString, Value>>,
+    pub const_cstrs: RefCell<Vec<ConstCstr>>,
+    pub const_casts: RefCell<Vec<ConstCast>>,
+    pub const_fat_ptrs: RefCell<Vec<(Value, Value)>>,
+    pub sym_count: Cell<usize>,
 }
 
 impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
@@ -72,12 +88,40 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             type_cache: Default::default(),
             u_consts: Default::default(),
             i_consts: Default::default(),
+            globals: Default::default(),
+            globals_cache: Default::default(),
+            const_structs: Default::default(),
+            const_globals_cache: Default::default(),
+            const_cstr_cache: Default::default(),
+            const_cstrs: Default::default(),
+            const_casts: Default::default(),
+            const_fat_ptrs: Default::default(),
+            sym_count: Cell::new(0),
         }
     }
 
-    pub fn ty_size(&self, ty: Type) -> u64 {
-        // FIXME: implement
-        8
+    pub fn insert_cstr(&self,
+                       name: &str,
+                       c_str: *const u8,
+                       len: usize,
+                       null_terminated: bool) -> Value {
+        let mut const_cstrs = self.const_cstrs.borrow_mut();
+        let idx = const_cstrs.len();
+        // A C string is a char*.
+        let ty = self.type_ptr_to(self.type_i8());
+        const_cstrs.push(ConstCstr::new(name.to_string(),
+                                        ty,
+                                        c_str,
+                                        len,
+                                        null_terminated));
+        Value::ConstCstr(idx)
+    }
+
+    /// Generate a unique symbol name that starts with the specified prefix.
+    pub fn get_sym_name(&self, prefix: &str) -> String {
+        let count = self.sym_count.get();
+        self.sym_count.set(count + 1);
+        format!("{}.{}", prefix, count)
     }
 }
 
@@ -150,27 +194,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn eh_personality(&self) -> Value {
-        if let Some(llpersonality) = self.eh_personality.get() {
-            return llpersonality
-        }
-        let tcx = self.tcx;
-        let llfn = match tcx.lang_items().eh_personality() {
-            Some(def_id) if !wants_msvc_seh(self.sess()) => {
-                resolve_and_get_fn(self, def_id, tcx.intern_substs(&[]))
-            }
-            _ => {
-                let name = if wants_msvc_seh(self.sess()) {
-                    unimplemented!("Unsupported platform: MSVC")
-                } else {
-                    "rust_eh_personality"
-                };
-                let fty = self.type_variadic_func(&[], self.type_i32());
-                self.declare_cfn(name, fty)
-            }
-        };
-        //attributes::apply_target_cpu_attr(self, llfn);
-        self.eh_personality.set(Some(llfn));
-        llfn
+        unimplemented!("eh_personality");
     }
 
     fn eh_unwind_resume(&self) -> Value {
@@ -182,8 +206,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn check_overflow(&self) -> bool {
-        // Don't check for overflow (for now).
-        false
+        true
     }
 
     fn stats(&self) -> &RefCell<Stats> {
@@ -256,7 +279,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_uint(&self, t: Type, i: u64) -> Value {
-        unimplemented!("const_uint");
+        self.const_unsigned(t, i as u128)
     }
 
     fn const_uint_big(&self, t: Type, u: u128) -> Value {
@@ -272,7 +295,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_u32(&self, i: u32) -> Value {
-        unimplemented!("const_u32");
+        self.const_unsigned(self.type_i32(), i as u128)
     }
 
     fn const_u64(&self, i: u64) -> Value {
@@ -280,7 +303,15 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_usize(&self, i: u64) -> Value {
-        unimplemented!("const_usize");
+        let bit_size = self.data_layout().pointer_size.bits();
+        let isize_ty = Type::ix_llcx(self,
+                                     self.tcx.data_layout.pointer_size.bits());
+        if bit_size < 64 {
+            // make sure it doesn't overflow
+            assert!(i < (1<<bit_size));
+        }
+
+        self.const_uint(isize_ty, i)
     }
 
     fn const_u8(&self, i: u8) -> Value {
@@ -292,11 +323,36 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         s: LocalInternedString,
         null_terminated: bool,
     ) -> Value {
-        unimplemented!("const_cstr");
+        // If the cstr has already been defined, return its value from the cache.
+        if let Some(val) = self.const_cstr_cache.borrow().get(&s) {
+            return *val;
+        }
+        // Create a unique name for this symbol.
+        let symbol_name = self.get_sym_name("str");
+        let str_val = self.insert_cstr(&symbol_name,
+                                       s.as_ptr() as *const u8,
+                                       s.len(),
+                                       null_terminated);
+        let gv = self.define_global(&symbol_name[..],
+                                    self.val_ty(str_val))
+            .unwrap_or_else(|| {
+                bug!("symbol `{}' is already defined", symbol_name);
+            });
+        match gv {
+            Value::Global(idx) => {
+                self.globals.borrow_mut()[idx].set_initializer(str_val);
+            },
+            _ => bug!("expected global, found {:?}", gv),
+        };
+        self.const_cstr_cache.borrow_mut().insert(s, gv);
+        gv
     }
 
     fn const_str_slice(&self, s: LocalInternedString) -> Value {
-        unimplemented!("const_str_slice");
+        let len = s.len();
+        let cs = consts::ptrcast(self, self.const_cstr(s, false),
+            self.type_ptr_to(self.layout_of(self.tcx.mk_str()).ironox_type(self)));
+        self.const_fat_ptr(cs, self.const_usize(len as u64))
     }
 
     fn const_fat_ptr(
@@ -304,7 +360,9 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         ptr: Value,
         meta: Value
     ) -> Value {
-        unimplemented!("const_fat_ptr");
+        let mut const_fat_ptrs = self.const_fat_ptrs.borrow_mut();
+        const_fat_ptrs.push((ptr, meta));
+        Value::ConstFatPtr(const_fat_ptrs.len() - 1)
     }
 
     fn const_struct(
@@ -312,9 +370,15 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         elts: &[Value],
         packed: bool
     ) -> Value {
-        unimplemented!("const struct {:?}", elts);
-        // FIXME calculate the size of the struct
-        Value::None
+        let name = self.get_sym_name("struct");
+        let mut structs = self.const_structs.borrow_mut();
+        let mut elt_tys = Vec::with_capacity(elts.len());
+        for v in elts {
+            elt_tys.push(self.val_ty(*v))
+        }
+        let ty = self.type_struct(&elt_tys[..], packed);
+        structs.push(OxStruct::new(name, elts, ty));
+        Value::ConstStruct(structs.len() - 1)
     }
 
     fn const_array(&self, ty: Type, elts: &[Value]) -> Value {
@@ -358,7 +422,7 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_ptrcast(&self, val: Value, ty: Type) -> Value {
-        unimplemented!("const_ptrcast");
+        consts::ptrcast(self, val, ty)
     }
 
     fn scalar_to_backend(
@@ -376,8 +440,12 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             Scalar::Bits { bits, size } => {
                 assert_eq!(size as u64, layout.value.size(self).bytes());
                 let llval = self.const_uint_big(self.type_ix(bitsize), bits);
-                // FIXME
-                llval
+                if layout.value == layout::Pointer {
+                    unimplemented!("scalar_to_backend: layout::Pointer");
+                } else {
+                    // FIXME? bitcast llval to llty
+                    llval
+                }
             },
             Scalar::Ptr(ptr) => {
                 unimplemented!("Scalar::Ptr");

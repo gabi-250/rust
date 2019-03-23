@@ -6,11 +6,9 @@ use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::base::to_immediate;
 use rustc_codegen_ssa::mir::operand::{OperandValue, OperandRef};
 use rustc_codegen_ssa::mir::place::PlaceRef;
-use context::CodegenCx;
-use ir::value::Value;
 use rustc::hir::def_id::DefId;
 use rustc::ty::{self, Ty, TyCtxt};
-use rustc::ty::layout::{Align, Size, TyLayout};
+use rustc::ty::layout::{self, Align, Size, TyLayout};
 use rustc_codegen_ssa::traits::*;
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -18,9 +16,12 @@ use std::ffi::CStr;
 use std::ops::{Deref, Range};
 use syntax;
 
+use context::CodegenCx;
 use ir::basic_block::BasicBlock;
-use ir::type_::Type;
 use ir::instruction::Instruction;
+use ir::type_::Type;
+use ir::value::Value;
+use type_of::LayoutIronOxExt;
 
 impl BackendTypes for Builder<'_, 'll, 'tcx> {
     type Value = <CodegenCx<'ll, 'tcx> as BackendTypes>::Value;
@@ -103,8 +104,8 @@ impl Builder<'a, 'll, 'tcx> {
         module.get_function(self.builder.fn_idx)
             .insert_inst(self.builder.bb_idx, self.builder.inst_idx, inst);
         let inst = Value::Instruction(self.builder.fn_idx,
-                                     self.builder.bb_idx,
-                                     self.builder.inst_idx);
+                                      self.builder.bb_idx,
+                                      self.builder.inst_idx);
         // move to the next instruction
         self.builder.inst_idx += 1;
         inst
@@ -119,7 +120,38 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value,
     ) -> (Value, Value) {
-        unimplemented!("checked_binop");
+        use syntax::ast::IntTy::*;
+        use syntax::ast::UintTy::*;
+        use rustc::ty::{Int, Uint};
+
+        let new_sty = match ty.sty {
+            Int(Isize) => Int(self.tcx.sess.target.isize_ty),
+            Uint(Usize) => Uint(self.tcx.sess.target.usize_ty),
+            ref t @ Uint(_) | ref t @ Int(_) => t.clone(),
+            _ => panic!("tried to get overflow intrinsic for op applied to non-int type")
+        };
+        let (ty, signed) = match new_sty {
+            Uint(U8) => (self.type_i8(), false),
+            Uint(U16) => (self.type_i16(), false),
+            Uint(U32) => (self.type_i32(), false),
+            Uint(U64) => (self.type_i64(), false),
+            Uint(U128) => unimplemented!("u128"),
+
+            Int(I8) => (self.type_i8(), true),
+            Int(I16) => (self.type_i16(), true),
+            Int(I32) => (self.type_i32(), true),
+            Int(I64) => (self.type_i64(), true),
+            Int(I128) => unimplemented!("I128"),
+
+            _ => unreachable!()
+        };
+        let inst = match oop {
+            OverflowOp::Add => Instruction::Add(lhs, rhs),
+            OverflowOp::Sub => Instruction::Sub(lhs, rhs),
+            _ => unimplemented!("overflow op"),
+        };
+        let inst = self.emit_instr(inst);
+        (inst, self.emit_instr(Instruction::CheckOverflow(inst, ty, signed)))
     }
 
     fn new_block<'b>(
@@ -172,7 +204,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn set_value_name(&mut self, value: Value, name: &str) {
-        // FIXME: rename the value
+        // Do nothing. Value names don't matter.
     }
 
     fn position_at_end(&mut self, llbb: BasicBlock) {
@@ -182,7 +214,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // the basic block.
         let instr =
             self.cx.module.borrow().functions[llfn].basic_blocks[llbb].instrs.len();
-        self.builder = BuilderPosition::new(llfn, llbb, instr);
+        self.builder = {
+            BuilderPosition::new(llfn, llbb, instr)
+        };
     }
 
     fn position_at_start(&mut self, llbb: BasicBlock) {
@@ -190,15 +224,19 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn ret_void(&mut self) {
-        unimplemented!("ret_void");
+        let _ = self.emit_instr(Instruction::Ret(None));
     }
 
     fn ret(&mut self, v: Value) {
-        // FIXME: add a return instruction at the current builder position
+        let _ = self.emit_instr(Instruction::Ret(Some(v)));
     }
 
     fn br(&mut self, dest: BasicBlock) {
-        unimplemented!("br");
+        let label = {
+            let module = self.cx.module.borrow();
+            module.functions[dest.0].basic_blocks[dest.1].label.clone()
+        };
+        let _ = self.emit_instr(Instruction::Br(label));
     }
 
     fn cond_br(
@@ -207,7 +245,12 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         then_llbb: BasicBlock,
         else_llbb: BasicBlock,
     ) {
-        unimplemented!("cond_br");
+        let (true_label, false_label) = {
+            let module = self.cx.module.borrow();
+            (module.functions[then_llbb.0].basic_blocks[then_llbb.1].label.clone(),
+             module.functions[else_llbb.0].basic_blocks[else_llbb.1].label.clone())
+        };
+        self.emit_instr(Instruction::CondBr(cond, true_label, false_label));
     }
 
     fn switch(
@@ -231,7 +274,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn unreachable(&mut self) {
-        // FIXME?
+        self.emit_instr(Instruction::Unreachable);
     }
 
     fn add(
@@ -239,7 +282,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        unimplemented!("add");
+        self.emit_instr(Instruction::Add(lhs, rhs))
     }
 
     fn fadd(
@@ -263,7 +306,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         lhs: Value,
         rhs: Value
     )-> Value {
-        unimplemented!("sub");
+        self.emit_instr(Instruction::Sub(lhs, rhs))
     }
 
     fn fsub(
@@ -460,7 +503,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ty: Type,
         name: &str, align: Align
     )-> Value {
-        unimplemented!("alloca");
+        self.emit_instr(Instruction::Alloca(name.to_string(), ty, align))
     }
 
     fn dynamic_alloca(
@@ -486,7 +529,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         align: Align
     )-> Value {
-        unimplemented!("load");
+        // FIXME: ignore the alignment for now
+        self.emit_instr(Instruction::Load(ptr, align))
     }
 
     fn volatile_load(
@@ -522,7 +566,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         align: Align
     )-> Value {
-        unimplemented!("store");
+        self.store_with_flags(val, ptr, align, MemFlags::empty())
     }
 
     fn atomic_store(
@@ -542,7 +586,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         flags: MemFlags,
     )-> Value {
-        unimplemented!("store_with_flags");
+        // FIXME: ignore the flags for now
+        self.emit_instr(Instruction::Store(ptr, val))
     }
 
     fn gep(
@@ -566,7 +611,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         ptr: Value,
         idx: u64
     )-> Value {
-        unimplemented!("struct_gep");
+        self.emit_instr(Instruction::StructGep(ptr, idx))
     }
 
     fn trunc(
@@ -574,7 +619,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        unimplemented!("trunc");
+        // FIXME: implement trunc
+        val
     }
 
     fn sext(
@@ -654,7 +700,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        unimplemented!("bitcast");
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn intcast(
@@ -663,7 +709,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         dest_ty: Type,
         is_signed: bool
     )-> Value {
-        val
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn pointercast(
@@ -671,8 +717,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         val: Value,
         dest_ty: Type
     )-> Value {
-        // FIXME? nothing to do
-        val
+        self.emit_instr(Instruction::Cast(val, dest_ty))
     }
 
     fn icmp(
@@ -680,7 +725,15 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         op: IntPredicate,
         lhs: Value, rhs: Value
     )-> Value {
-        unimplemented!("icmp");
+        match op {
+            IntPredicate::IntEQ => {
+                self.emit_instr(Instruction::Eq(lhs, rhs))
+            },
+            IntPredicate::IntULT | IntPredicate::IntSLT => {
+                self.emit_instr(Instruction::Lt(lhs, rhs))
+            },
+            _ => unimplemented!("icmp"),
+        }
     }
 
     fn fcmp(
@@ -1040,8 +1093,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         typ: &str,
         llfn: Value,
         args: &'b [Value]
-    ) -> Cow<'b, [Value]>
-        where [Value] : ToOwned {
+    ) -> Cow<'b, [Value]> {
         unimplemented!("check_call");
     }
 
@@ -1059,8 +1111,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         args: &[Value],
         funclet: Option<&Self::Funclet>,
     )-> Value {
-        // FIXME: return a call instruction
-        Value::None
+        if funclet.is_some() {
+            unimplemented!("call funclet: {:?}", funclet);
+        }
+        self.emit_instr(Instruction::Call(llfn, args.to_vec()))
     }
 
     fn zext(
@@ -1117,9 +1171,38 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     fn load_operand(&mut self, place: PlaceRef<'tcx, Value>)
         -> OperandRef<'tcx, Value> {
         // FIXME?
-        let imm = to_immediate(self, place.llval, place.layout);
+        let val = if let Some(llextra) = place.llextra {
+            OperandValue::Ref(place.llval, Some(llextra), place.align)
+        } else if place.layout.is_ironox_immediate() {
+            let mut const_llval = None;
+            // FIXME: If this is a constant global, get its initializer.
+            let llval = const_llval.unwrap_or_else(|| {
+                self.load(place.llval, place.align)
+            });
+            OperandValue::Immediate(to_immediate(self, llval, place.layout))
+        } else if let layout::Abi::ScalarPair(ref a, ref b) = place.layout.abi {
+            // FIXME
+            let b_offset = a.value.size(self).align_to(b.value.align(self).abi);
+
+            let mut load = |i, scalar: &layout::Scalar, align| {
+                let llptr = self.struct_gep(place.llval, i as u64);
+                let load = self.load(llptr, align);
+                if scalar.is_bool() {
+                    let ty = {
+                        self.type_i1()
+                    };
+                    self.trunc(load, ty)
+                } else {
+                    load
+                }
+            };
+            OperandValue::Pair(load(0, a, place.align),
+                               load(1, b, place.align.restrict_for_offset(b_offset)))
+        } else {
+            OperandValue::Ref(place.llval, None, place.align)
+        };
         OperandRef {
-            val: OperandValue::Immediate(imm),
+            val,
             layout: place.layout,
         }
     }
