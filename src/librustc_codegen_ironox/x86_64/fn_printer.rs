@@ -1164,12 +1164,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             OxInstruction::Gep { .. } => self.codegen_gep(inst),
         };
         // Cache the instruction, and return it on subsequent calls.
-        let compiled_inst = if let Some(ref result) = instr_asm.result {
-            CompiledInst::new(instr_asm.asm.clone(), result.clone())
-        } else {
-            CompiledInst::with_instructions(instr_asm.asm.clone())
-        };
-        self.compiled_insts.insert(inst_v, compiled_inst);
+        self.compiled_insts.insert(inst_v, instr_asm.clone());
         instr_asm
     }
 
