@@ -55,7 +55,7 @@ pub struct FunctionPrinter<'a, 'll, 'tcx> {
     compiled_insts: FxHashMap<Value, CompiledInst>,
     /// A mapping from function parameters to their location on the stack.
     /// Currently, parameters are always pushed to and retrieved from the stack.
-    arg_loc: FxHashMap<Value, CompiledInst>,
+    arg_loc: FxHashMap<Value, Operand>,
     /// The location on the stack where each `OxInstruction` should be placed.
     inst_loc: FxHashMap<OxInstruction, Operand>,
     /// The amount of stack space to allocate for this function.
@@ -110,9 +110,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 CompiledInst::with_result(result)
             }
             Value::Param { .. }=> {
-                if let Some(instr_asm) = self.arg_loc.get(&value) {
-                    let result = instr_asm.result.clone();
-                    CompiledInst::with_result(result.unwrap())
+                if let Some(result) = self.arg_loc.get(&value) {
+                    CompiledInst::with_result(result.clone())
                 } else {
                     bug!("param should've already been compiled!");
                 }
@@ -1308,17 +1307,15 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     fn map_args_to_stack_locs(&mut self, f: &OxFunction) -> Vec<MachineInst> {
         let mut param_movs = vec![];
         for (idx, param) in f.params.iter().take(6).enumerate() {
-            let param_size = self.cx.val_size(*param) as isize;
-            self.stack_size += param_size / 8;
-            let acc_mode = access_mode(param_size as u64);
-            let result = Location::RbpOffset(-self.stack_size, acc_mode);
+            let param_size = self.cx.val_size(*param);
+            self.stack_size += param_size as isize / 8;
+            let acc_mode = access_mode(param_size);
             let reg = FunctionPrinter::fn_arg_reg(idx);
             let reg = Register::direct(SubRegister::new(reg, acc_mode));
+            let result = Operand::from(
+                Location::RbpOffset(-self.stack_size, acc_mode));
             param_movs.push(MachineInst::mov(reg, result.clone()));
-            // load from param doesn't work
-            let instr_asm =
-                CompiledInst::new(param_movs.clone(), Operand::from(result));
-            self.arg_loc.insert(*param, instr_asm);
+            self.arg_loc.insert(*param, result);
         }
 
         let remaining_params: Vec<&Value> = f.params.iter().skip(6).collect();
@@ -1326,13 +1323,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let mut pos_rbp_offset = 16;
         // The remaining arguments are pushed to the stack in reverse order.
         for param in remaining_params.iter().rev() {
-            let param_size = self.cx.val_size(**param) as isize;
-            let acc_mode = access_mode(param_size as u64);
-            let result = Location::RbpOffset(pos_rbp_offset, acc_mode);
-            let instr_asm =
-                CompiledInst::with_result(Operand::from(result));
-            self.arg_loc.insert(**param, instr_asm);
-            pos_rbp_offset += param_size / 8;
+            let param_size = self.cx.val_size(**param);
+            let acc_mode = access_mode(param_size);
+            let result = Operand::from(
+                Location::RbpOffset(pos_rbp_offset, acc_mode));
+            self.arg_loc.insert(**param, result);
+            pos_rbp_offset += param_size as isize / 8;
         }
 
         param_movs
