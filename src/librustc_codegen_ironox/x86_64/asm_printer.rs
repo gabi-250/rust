@@ -1,4 +1,5 @@
 use context::CodegenCx;
+use ir::global::OxGlobal;
 use ir::type_::{OxType, ScalarType, Type};
 use ir::value::Value;
 
@@ -133,6 +134,23 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         }
     }
 
+    /// Codegen a single global.
+    fn codegen_global(&self, global: &OxGlobal) -> Vec<MachineInst> {
+        let mut asm = vec![];
+        // The data of the global comes after its label
+        asm.push(MachineInst::Label(global.name.clone()));
+        if !global.private {
+            // Mark the symbol as global.
+            asm.push(
+                MachineInst::Directive(GasDirective::Global(global.name.clone())));
+        }
+        match global.initializer {
+            Some(v) => asm.extend(self.codegen_const_global(v)),
+            None => bug!("no initializer found for {:?}", global),
+        };
+        asm
+    }
+
     /// Emit the GNU Assembler directives that declare the globals of the module.
     fn declare_globals(&self) -> Vec<MachineInst> {
         let mut asm = vec![
@@ -142,21 +160,11 @@ impl AsmPrinter<'a, 'll, 'tcx> {
             if global.ty.is_fn(&self.cx.types.borrow()) {
                 continue;
             }
-            // The data of the global comes after its label
-            asm.push(MachineInst::Label(global.name.clone()));
-            if !global.private {
-                // Mark the symbol as global.
-                asm.push(
-                    MachineInst::Directive(GasDirective::Global(global.name.clone())));
-            }
-            match global.initializer {
-                Some(v) => asm.extend(self.codegen_const_global(v)),
-                None => bug!("no initializer found for {:?}", global),
-            };
+            asm.extend(self.codegen_global(&global));
         }
         // Emit code for all the constant structs. Constant GEP instructions operate
         // on constant structs.
-        for (i, _c_struct) in self.cx.const_structs.borrow().iter().enumerate() {
+        for (i, _c_struct) in self.cx.const_structs.borrow().iter().rev().enumerate() {
             let v = Value::ConstStruct(i);
             let codegen = {
                 !self.codegenned_consts.borrow().contains(&v)
