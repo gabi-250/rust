@@ -152,6 +152,18 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
         self.sym_count.set(count + 1);
         format!(".L{}.{}", prefix, count)
     }
+
+    /// Return the size of value `v`. The size is expressed as the number of bits
+    /// needed to represent `v`.
+    pub fn val_size(&self, v: Value) -> u64 {
+        self.ty_size(self.val_ty(v))
+    }
+
+    /// Return the size of type `ty`. The size is expressed as the number of bits
+    /// needed to represent `ty`.
+    pub fn ty_size(&self, ty: Type) -> u64 {
+        ty.size(&self.types.borrow())
+    }
 }
 
 impl ty::layout::HasTyCtxt<'tcx> for CodegenCx<'ll, 'tcx> {

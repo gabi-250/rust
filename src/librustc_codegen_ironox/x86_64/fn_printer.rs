@@ -57,7 +57,7 @@ pub struct FunctionPrinter<'a, 'll, 'tcx> {
     /// Currently, parameters are always pushed to and retrieved from the stack.
     arg_loc: FxHashMap<Value, CompiledInst>,
     /// The location on the stack where each `OxInstruction` should be placed.
-    inst_stack_loc: FxHashMap<OxInstruction, Operand>,
+    inst_loc: FxHashMap<OxInstruction, Operand>,
     /// The amount of stack space to allocate for this function.
     stack_size: isize,
 }
@@ -69,7 +69,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             cx,
             compiled_insts: Default::default(),
             arg_loc: Default::default(),
-            inst_stack_loc: Default::default(),
+            inst_loc: Default::default(),
             stack_size: 0,
         }
     }
@@ -103,7 +103,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let module = self.cx.module.borrow();
         match value {
             Value::ConstUint(idx) => {
-                let imm_size = self.cx.val_ty(value).size(&self.cx.types.borrow());
+                let imm_size = self.cx.val_size(value);
                 let acc_mode = access_mode(imm_size as u64);
                 let value = self.cx.u_consts.borrow()[idx].value;
                 let result = Operand::Immediate(value as isize, acc_mode);
@@ -302,7 +302,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let mut total_arg_size = 0;
 
         for arg in remaining_args.iter().rev() {
-            let arg_size = self.cx.val_ty(**arg).size(&self.cx.types.borrow());
+            let arg_size = self.cx.val_size(**arg);
             total_arg_size += arg_size / 8;
         }
         let padding = total_arg_size % 16;
@@ -317,7 +317,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         for arg in remaining_args.iter().rev() {
             let mut instr_asm = self.codegen_value(**arg);
             asm.append(&mut instr_asm.asm);
-            let arg_size = self.cx.val_ty(**arg).size(&self.cx.types.borrow());
+            let arg_size = self.cx.val_size(**arg);
             let acc_mode = access_mode(arg_size);
             let rax = Register::direct(SubRegister::new(RAX, acc_mode));
 
@@ -1180,7 +1180,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     /// instruction has its own stack location for the result, instructions
     /// cannot clobber each other's results.
     fn precompiled_result(&self, inst: &OxInstruction) -> Operand {
-        self.inst_stack_loc[inst].clone()
+        self.inst_loc[inst].clone()
     }
 
     /// Codegen a basic block.
@@ -1299,7 +1299,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     }
                     _ => continue,
                 };
-                self.inst_stack_loc.insert((*inst).clone(), instr_loc);
+                self.inst_loc.insert((*inst).clone(), instr_loc);
             }
         }
         allocas
@@ -1308,9 +1308,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     fn map_args_to_stack_locs(&mut self, f: &OxFunction) -> Vec<MachineInst> {
         let mut param_movs = vec![];
         for (idx, param) in f.params.iter().take(6).enumerate() {
-            // FIXME:
-            let param_size =
-                self.cx.val_ty(*param).size(&self.cx.types.borrow()) as isize;
+            let param_size = self.cx.val_size(*param) as isize;
             self.stack_size += param_size / 8;
             let acc_mode = access_mode(param_size as u64);
             let result = Location::RbpOffset(-self.stack_size, acc_mode);
@@ -1328,8 +1326,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let mut pos_rbp_offset = 16;
         // The remaining arguments are pushed to the stack in reverse order.
         for param in remaining_params.iter().rev() {
-            let param_size =
-                self.cx.val_ty(**param).size(&self.cx.types.borrow()) as isize;
+            let param_size = self.cx.val_size(**param) as isize;
             let acc_mode = access_mode(param_size as u64);
             let result = Location::RbpOffset(pos_rbp_offset, acc_mode);
             let instr_asm =
