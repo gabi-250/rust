@@ -1,7 +1,7 @@
 TOOLCHAIN := ironox
 STDLIB_SO := ../../llvm_build/x86_64-unknown-linux-gnu/stage1-std/x86_64-unknown-linux-gnu/release/libstd.so
-LIBS := ../../llvm_build/x86_64-unknown-linux-gnu/stage1/lib
-LLVM_STAGE1 := ../../llvm_build/x86_64-unknown-linux-gnu/stage1/bin/rustc
+LIBS := ../../build/x86_64-unknown-linux-gnu/stage1/lib
+IRONOX_STAGE1 := ../../build/x86_64-unknown-linux-gnu/stage1/bin/rustc
 PROJ_DIR := ./cargo_projs/$(proj)
 TEST_NAME := test_$(proj)
 CARGO := ../../build/x86_64-unknown-linux-gnu/stage0/bin/cargo
@@ -26,7 +26,7 @@ $(TEST_NAME): $(PROJ_DIR)/$(TEST_NAME).c rust_proj | $(BUILD_DIR)
 	$(CC) -o $@ $(STDLIB_SO) $(CARGO_BUILD_DIR)/*.s $(PROJ_DIR)/$@.c && mv $@ ./$(BUILD_DIR)
 
 rust_proj:
-	LD_LIBRARY_PATH=$(LIBS) RUSTFLAGS="$(RUSTFLAGS)" RUSTC=$(LLVM_STAGE1) $(CARGO) build $(MANIFEST_PATH)
+	LD_LIBRARY_PATH=$(LIBS) RUSTFLAGS="$(RUSTFLAGS)" RUSTC=$(IRONOX_STAGE1) $(CARGO) build $(MANIFEST_PATH)
 
 clean:
 	rm -f $(BUILD_DIR)/$(TEST_NAME); $(CARGO) clean $(MANIFEST_PATH)
