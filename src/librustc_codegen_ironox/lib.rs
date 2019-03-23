@@ -1,4 +1,5 @@
 #![feature(box_syntax)]
+#![feature(cell_update)]
 #![feature(crate_visibility_modifier)]
 #![feature(libc)]
 #![feature(in_band_lifetimes)]
@@ -71,16 +72,21 @@ mod asm;
 mod base;
 mod builder;
 mod consts;
+mod const_cstr;
 mod context;
 mod debuginfo;
 mod declare;
+mod global;
 mod intrinsic;
 mod type_of;
 mod metadata;
 mod mono_item;
-mod x86_asm_printer;
+mod x86_64_asm_printer;
+mod x86_64_instruction;
+mod x86_64_register;
 
 use context::CodegenCx;
+use ir::constant::{UnsignedConst, SignedConst};
 use ir::type_::Type;
 use ir::value::Value;
 use ir::function::OxFunction;
