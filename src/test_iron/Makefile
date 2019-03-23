@@ -22,8 +22,11 @@ all: $(TEST_NAME)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(TEST_NAME): $(PROJ_DIR)/$(TEST_NAME).c rust_proj | $(BUILD_DIR)
-	$(CC) -o $@ $(STDLIB_SO) $(CARGO_BUILD_DIR)/*.s $(PROJ_DIR)/$@.c && mv $@ ./$(BUILD_DIR)
+extract_rlib: rust_proj
+	cd $(CARGO_BUILD_DIR); ar x *.rlib; cd -
+
+$(TEST_NAME): extract_rlib $(PROJ_DIR)/$(TEST_NAME).c | $(BUILD_DIR)
+	$(CC) -o $@ $(STDLIB_SO) $(CARGO_BUILD_DIR)/*.o $(PROJ_DIR)/$@.c && mv $@ ./$(BUILD_DIR)
 
 rust_proj:
 	LD_LIBRARY_PATH=$(LIBS) RUSTFLAGS="$(RUSTFLAGS)" RUSTC=$(IRONOX_STAGE1) $(CARGO) build $(MANIFEST_PATH)
