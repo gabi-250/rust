@@ -169,7 +169,17 @@ impl Ord for AccessMode {
             return Ordering::Equal;
         }
         match (*self, *other) {
-            (AccessMode::Full, _) |
+            (AccessMode::Large(x), AccessMode::Large(y)) => {
+                if x > y {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+            (AccessMode::Large(_), _ ) |
+            (AccessMode::Full, AccessMode::Low32) |
+            (AccessMode::Full, AccessMode::Low16) |
+            (AccessMode::Full, AccessMode::Low8) |
             (AccessMode::Low32, AccessMode::Low16) |
             (AccessMode::Low32, AccessMode::Low8) |
             (AccessMode::Low16, AccessMode::Low8) => Ordering::Greater,
