@@ -109,7 +109,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let result = Operand::Immediate(value as isize, acc_mode);
                 CompiledInst::with_result(result)
             }
-            Value::Param { .. }=> {
+            Value::Param { .. } => {
                 if let Some(result) = self.arg_loc.get(&value) {
                     CompiledInst::with_result(result.clone())
                 } else {
@@ -331,7 +331,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         match callee {
             Value::Function(idx) => {
                 let module = self.cx.module.borrow();
-                // Move the result to the stack, and assume its size is 8.
                 let fn_name = if !module.functions[*idx].is_codegenned() {
                     format!("{}@PLT", &module.functions[*idx].name)
                 } else {
@@ -380,7 +379,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     ]);
                 },
                 AccessMode::Large(bytes) => {
-                    unimplemented!("AccessMode::Large({}))", bytes);
+                    bug!("Return value of size: {}bytes", bytes);
                 },
                 _ => {
                     asm.push(MachineInst::mov(
@@ -441,7 +440,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let OxInstruction::CondBr { cond, then_bb, else_bb } = inst {
             let mut asm = vec![];
             match cond {
-                Value::Instruction { .. }=> {
+                Value::Instruction { .. } => {
                     let cond_val = self.codegen_instruction(*cond).result.unwrap();
                     let true_reg = Register::direct(
                         SubRegister::new(RCX, AccessMode::Low8));
@@ -485,48 +484,41 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     fn codegen_store(&mut self, inst: &OxInstruction) -> CompiledInst {
         if let OxInstruction::Store { ptr, val } = inst {
             let mut asm = vec![];
-            let mut comp_inst1 = self.codegen_value(*ptr);
-            asm.append(&mut comp_inst1.asm);
-            let mut comp_inst2 = self.codegen_value(*val);
-            asm.append(&mut comp_inst2.asm);
-            let ptr_result = comp_inst1.result.clone().unwrap();
-            let val_result = comp_inst2.result.unwrap();
+            let mut comp_ptr = self.codegen_value(*ptr);
+            asm.append(&mut comp_ptr.asm);
+            let mut comp_val = self.codegen_value(*val);
+            asm.append(&mut comp_val.asm);
+            let ptr_result = comp_ptr.result.clone().unwrap();
+            let val_result = comp_val.result.unwrap();
             let val_am = val_result.access_mode();
             match val_am {
                 AccessMode::Large(16) => {
-                    match (&val_result, &ptr_result) {
-                        (Operand::Loc(Location::RbpOffset(val_offset, _sam)),
-                         Operand::Loc(Location::RbpOffset(_dst_offset, dam))) => {
-                            let am_full = AccessMode::Full;
-                            // Move two quad words from val to dst.
-                            let reg =
-                                Register::direct(SubRegister::new(RCX, am_full));
-                            let val_word1 = Operand::Loc(
-                                Location::RbpOffset(*val_offset, am_full));
-                            let val_word2 = Operand::Loc(
-                                Location::RbpOffset(val_offset + 8, am_full));
-                            // check if ptr result is a ptr?
-                            asm.extend(vec![
-                                // Move the first word.
-                                MachineInst::mov(ptr_result.clone(),
-                                                 Register::direct(RAX)),
-                                MachineInst::mov(val_word1, reg),
-                                MachineInst::mov(reg, Register::indirect(RAX))
-                            ]);
-                            if let AccessMode::Large(16) = dam {
-                                asm.extend(vec![
-                                    // Move the second word.
-                                    MachineInst::add(Operand::Immediate(8, am_full),
-                                                     Register::direct(RAX)),
-                                    MachineInst::mov(val_word2, reg),
-                                    MachineInst::mov(reg, Register::indirect(RAX)),
-                                ]);
-                            }
-                         },
-                         _ => {
-                            bug!("Invalid val-dst pair: ({:?}, {:?})",
-                                 val_result, ptr_result)
-                         }
+                    let val_offset = val_result.rbp_offset();
+                    let ptr_am = ptr_result.access_mode();
+                    let am_full = AccessMode::Full;
+                    // Move two quad words from val to dst.
+                    let reg =
+                        Register::direct(SubRegister::new(RCX, am_full));
+                    let val_word1 = Operand::Loc(
+                        Location::RbpOffset(val_offset, am_full));
+                    let val_word2 = Operand::Loc(
+                        Location::RbpOffset(val_offset + 8, am_full));
+                    // check if ptr result is a ptr?
+                    asm.extend(vec![
+                        // Move the first word.
+                        MachineInst::mov(ptr_result.clone(),
+                                         Register::direct(RAX)),
+                        MachineInst::mov(val_word1, reg),
+                        MachineInst::mov(reg, Register::indirect(RAX))
+                    ]);
+                    if let AccessMode::Large(16) = ptr_am {
+                        asm.extend(vec![
+                            // Move the second word.
+                            MachineInst::add(Operand::Immediate(8, am_full),
+                                             Register::direct(RAX)),
+                            MachineInst::mov(val_word2, reg),
+                            MachineInst::mov(reg, Register::indirect(RAX)),
+                        ]);
                     }
                 },
                 AccessMode::Large(bytes) => {
@@ -543,7 +535,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     ]);
                 }
             }
-            CompiledInst::new(asm, comp_inst1.result.unwrap())
+            CompiledInst::new(asm, comp_ptr.result.unwrap())
         } else {
             bug!("expected OxInstruction::Store, found {:?}", inst);
         }
