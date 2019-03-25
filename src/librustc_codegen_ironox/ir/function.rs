@@ -32,7 +32,7 @@ impl OxFunction {
         idx: usize,
         fn_type: Type) -> OxFunction {
         match cx.types.borrow()[fn_type] {
-            OxType::FnType { ref args, ref ret } => {
+            OxType::Function { ref args, ref ret } => {
                 let mut params = Vec::with_capacity(args.len());
                 for (param_idx, ty) in args.iter().enumerate() {
                     params.push(Value::Param { fn_idx: idx, param_idx, ty: *ty });
@@ -49,7 +49,7 @@ impl OxFunction {
                     is_codegenned: false,
                 }
             },
-            _ => bug!("Expected OxType::FnType, found {:?}", fn_type)
+            _ => bug!("Expected OxType::Function, found {:?}", fn_type)
         }
     }
 

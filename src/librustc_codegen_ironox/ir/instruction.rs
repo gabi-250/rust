@@ -152,9 +152,10 @@ impl OxInstruction {
             OxInstruction::Call { callee, .. } => {
                 let fn_ty = cx.val_ty(callee);
                 match cx.types.borrow()[fn_ty] {
-                    OxType::FnType { ref ret, .. } => *ret,
+                    OxType::Function { ref ret, .. } => *ret,
                     OxType::PtrTo { ref pointee } => {
-                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[*pointee] {
+                        let pointee = &cx.types.borrow()[*pointee];
+                        if let OxType::Function { ref ret, .. } = pointee {
                             *ret
                         } else {
                             bug!("Cannot call callee {:?}", callee);
@@ -194,9 +195,10 @@ impl OxInstruction {
             // FIXME: is that right?
             OxInstruction::Invoke { callee, .. } => {
                 match cx.types.borrow()[cx.val_ty(callee)] {
-                    OxType::FnType { ref ret, .. } => *ret,
+                    OxType::Function { ref ret, .. } => *ret,
                     OxType::PtrTo { ref pointee } => {
-                        if let OxType::FnType { ref ret, .. } = cx.types.borrow()[*pointee] {
+                        let pointee = &cx.types.borrow()[*pointee];
+                        if let OxType::Function { ref ret, .. } = pointee {
                             *ret
                         } else {
                             bug!("Cannot call value {:?}", callee);
