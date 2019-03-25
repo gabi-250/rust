@@ -56,7 +56,7 @@ newtype_index! {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum OxType {
     /// The type of a function.
-    FnType {
+    Function {
         args: Vec<Type>,
         ret: Type
     },
@@ -109,7 +109,7 @@ impl Type {
     pub fn size(&self, types: &IndexVec<Type, OxType>) -> u64 {
         match types[*self] {
             OxType::Scalar(sty) => sty.size(),
-            OxType::PtrTo { .. } | OxType::FnType { .. } => 64,
+            OxType::PtrTo { .. } | OxType::Function { .. } => 64,
             OxType::FatPtr { ptr, meta } => {
                 ptr.size(types) + meta.size(types)
             },
@@ -128,7 +128,7 @@ impl Type {
 
     pub fn is_ptr(&self, types: &IndexVec<Type, OxType>) -> bool {
         match types[*self] {
-            OxType::FnType {..} => true,
+            OxType::Function {..} => true,
             OxType::PtrTo {..} => true,
             _ => false,
         }
@@ -136,7 +136,7 @@ impl Type {
 
     pub fn is_fn(&self, types: &IndexVec<Type, OxType>) -> bool {
         match types[*self] {
-            OxType::FnType {..} => true,
+            OxType::Function {..} => true,
             _ => false,
         }
     }
@@ -153,7 +153,7 @@ impl Type {
     pub fn ty_at_idx(&self, idx: u64, types: &IndexVec<Type, OxType>) -> Type {
         match types[*self] {
             OxType::Struct { ref members, .. } => members[idx as usize],
-            OxType::FnType { ref ret, .. } => ret.ty_at_idx(idx, types),
+            OxType::Function { ref ret, .. } => ret.ty_at_idx(idx, types),
             OxType::PtrTo { ref pointee } => *pointee,
             OxType::Array { ref ty, .. } => *ty,
             ref ty => unimplemented!("Type at index {} for {:?}", idx, ty),
@@ -298,8 +298,8 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         for arg in args {
             ll_args.push(arg.clone());
         }
-        // return a FnType that can be used to declare a function
-        let fn_type = OxType::FnType {
+        // return a Function that can be used to declare a function
+        let fn_type = OxType::Function {
             args: ll_args,
             ret: ret.clone(),
         };
