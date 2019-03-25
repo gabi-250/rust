@@ -686,10 +686,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn ptrtoint(
         &mut self,
-        _val: Value,
-        _dest_ty: Type
+        val: Value,
+        dest_ty: Type
     )-> Value {
-        unimplemented!("ptrtoint");
+        self.emit_instr(OxInstruction::Cast { val, ty: dest_ty })
     }
 
     fn inttoptr(

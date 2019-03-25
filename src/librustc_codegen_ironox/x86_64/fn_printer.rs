@@ -439,33 +439,26 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     fn codegen_condbr(&mut self, inst: &OxInstruction) -> CompiledInst {
         if let OxInstruction::CondBr { cond, then_bb, else_bb } = inst {
             let mut asm = vec![];
-            match cond {
-                Value::Instruction { .. } => {
-                    let cond_val = self.codegen_instruction(*cond).result.unwrap();
-                    let true_reg = Register::direct(
-                        SubRegister::new(RCX, AccessMode::Low8));
-                    let cond_reg = Register::direct(
-                        SubRegister::new(RDI, AccessMode::Low8));
-                    let then_label = self.cx.module.borrow().bb_label(*then_bb);
-                    let else_label = self.cx.module.borrow().bb_label(*else_bb);
+            let cond_val = self.codegen_value(*cond).result.unwrap();
+            let true_reg = Register::direct(
+                SubRegister::new(RCX, AccessMode::Low8));
+            let cond_reg = Register::direct(
+                SubRegister::new(RDI, AccessMode::Low8));
+            let then_label = self.cx.module.borrow().bb_label(*then_bb);
+            let else_label = self.cx.module.borrow().bb_label(*else_bb);
 
-                    asm.extend(vec![
-                        // Check if the condition is true
-                        MachineInst::mov(
-                            Operand::Immediate(1, AccessMode::Low8), true_reg),
-                        MachineInst::mov(cond_val, cond_reg),
-                        // Compile the result of evaluating the condition with 1.
-                        MachineInst::cmp(cond_reg, true_reg),
-                        // If the condition is true.
-                        MachineInst::je(then_label),
-                    ]);
-                    asm.push(MachineInst::jmp(else_label));
-                    CompiledInst::with_instructions(asm)
-                }
-                _ => {
-                    bug!("cond must be a Value::Instruction, not {:?}", cond);
-                }
-            }
+            asm.extend(vec![
+                // Check if the condition is true
+                MachineInst::mov(
+                    Operand::Immediate(1, AccessMode::Low8), true_reg),
+                MachineInst::mov(cond_val, cond_reg),
+                // Compile the result of evaluating the condition with 1.
+                MachineInst::cmp(cond_reg, true_reg),
+                // If the condition is true.
+                MachineInst::je(then_label),
+            ]);
+            asm.push(MachineInst::jmp(else_label));
+            CompiledInst::with_instructions(asm)
         } else {
             bug!("expected OxInstruction::CondBr, found {:?}", inst);
         }
@@ -1027,7 +1020,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let acc_mode = access_mode(
                 self.cx.val_ty(*value).size(&self.cx.types.borrow()));
             let reg = Register::direct(SubRegister::new(RAX, acc_mode));
-            let mut asm = vec![MachineInst::mov(v_stack_loc, reg)];
+            let mut asm = Vec::with_capacity(5 * cases.len() + 1);
             let module = &self.cx.module.borrow();
             for (v, bb) in cases {
                 let compiled_v = self.codegen_value(*v);
@@ -1039,6 +1032,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 let bb = &module.functions[bb.0].basic_blocks[bb.1];
                 asm.extend(vec![
                     MachineInst::mov(compiled_v, v_reg),
+                    MachineInst::mov(v_stack_loc.clone(), reg),
                     MachineInst::cmp(reg, v_reg),
                     MachineInst::je(bb.label.clone()),
                 ]);
