@@ -2,27 +2,35 @@ import json
 import os
 
 
-CARGO_PROJS = 'cargo_projs'
+PROJ_DIR = 'cargo_projs'
+
+
+class TestData:
+    def __init__(self, data, test_type):
+        self.__dict__.update(data)
+        self.test_type = test_type
+
 
 
 def get_test_dir(filename):
     return  os.path.join(os.path.dirname(os.path.realpath(filename)),
-                         CARGO_PROJS)
+                         PROJ_DIR)
 
 
 def get_tests(filename):
     test_dir = get_test_dir(filename)
     tests = []
     for name in os.listdir(test_dir):
-        test_name = name
         proj_dir = os.path.join(test_dir, name)
         json_files = extract_files_with_extension(os.path.join(test_dir, name),
                                                   'json')
         for test_file in json_files:
             with open(os.path.join(proj_dir, test_file)) as f:
                 data = json.load(f)
-                for test in data:
-                    tests.append((test_name, test['input'], test['output']))
+                for test_json in data['tests']:
+                    test_json['name'] = name
+                    test_data = TestData(test_json, data['proj_type'])
+                    tests.append(test_data)
     return tests
 
 

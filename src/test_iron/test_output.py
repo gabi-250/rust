@@ -7,14 +7,12 @@ import unittest
 
 
 class TestOutput(unittest.TestCase):
-    def __init__(self, test_name, test_in, test_out):
+    def __init__(self, test_data):
         super(TestOutput, self).__init__()
-        self.test_name = test_name
-        self.test_in = test_in
-        self.test_out = test_out
+        self.test_data = test_data
 
     def clean_subproject(self):
-        cmd = "make proj={} clean".format(self.test_name)
+        cmd = "make proj={} clean".format(self.test_data.name)
         p = subprocess.run(cmd.split(),
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE)
@@ -25,7 +23,8 @@ class TestOutput(unittest.TestCase):
 
     def build_subproject(self):
         self.clean_subproject()
-        cmd = "make proj={}".format(self.test_name)
+        cmd = "make {}_tests proj={}".format(self.test_data.test_type,
+                                             self.test_data.name)
         p = subprocess.run(cmd.split(),
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE)
@@ -38,17 +37,25 @@ class TestOutput(unittest.TestCase):
         self.build_subproject()
 
     def runTest(self):
-        cmd = "./build/test_{} {}".format(self.test_name, self.test_in)
+        cmd = "./build/test_{} {}".format(self.test_data.name,
+                                          self.test_data.input)
         p = subprocess.run(cmd.split(),
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE)
-        assert p.stdout == bytes(self.test_out, encoding='ascii')
+        self.assertEqual(p.returncode, self.test_data.exit_code,
+                         "{}: in={} out={}".format(self.test_data.name,
+                                                   self.test_data.input,
+                                                   self.test_data.output))
+        self.assertEqual(p.stdout, bytes(self.test_data.output, encoding='ascii'),
+                         "{}: in={} out={}".format(self.test_data.name,
+                                                   self.test_data.input,
+                                                   self.test_data.output))
 
 
 if __name__ == '__main__':
     suite = unittest.TestSuite()
-    test_data = test_collector.get_tests(__file__)
-    tests = [TestOutput(name, t_in, t_out) for name, t_in, t_out in test_data]
+    output_tests = test_collector.get_tests(__file__)
+    tests = [TestOutput(test) for test in output_tests]
     suite.addTests(tests)
     result = unittest.TextTestRunner().run(suite)
     sys.exit(0 if result.wasSuccessful() else 1)
