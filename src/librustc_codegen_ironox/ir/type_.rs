@@ -383,11 +383,7 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
                 };
                 self.type_ptr_to(i8_ty)
             },
-            _ => {
-                // FIXME
-                //Type(0)
-                unimplemented!("Type of {:?}", v);
-            }
+            Value::Global(idx) => self.globals.borrow()[idx].ty,
         }
     }
 
