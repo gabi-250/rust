@@ -1,0 +1,30 @@
+{
+  "proj_type": "bin",
+  "tests": [
+    {
+      "input": "",
+      "output": "",
+      "exit_code": 5
+    },
+    {
+      "input": "arg1",
+      "output": "",
+      "exit_code": 6
+    },
+    {
+      "input": "arg1 arg2",
+      "output": "",
+      "exit_code": 5
+    },
+    {
+      "input": "arg1 arg2 arg3",
+      "output": "",
+      "exit_code": 5
+    },
+    {
+      "input": "arg1 arg2 arg3 arg4",
+      "output": "",
+      "exit_code": 6
+    }
+  ]
+}

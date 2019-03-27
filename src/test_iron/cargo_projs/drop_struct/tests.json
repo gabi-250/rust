@@ -1,0 +1,20 @@
+{
+  "proj_type": "bin",
+  "tests": [
+    {
+      "input": "",
+      "output": "Dropping Bob!\n",
+      "exit_code": 9
+    },
+    {
+      "input": "arg1",
+      "output": "Dropping Bob!\n",
+      "exit_code": 18
+    },
+    {
+      "input": "arg1 arg2",
+      "output": "Dropping Bob!\n",
+      "exit_code": 27
+    }
+  ]
+}

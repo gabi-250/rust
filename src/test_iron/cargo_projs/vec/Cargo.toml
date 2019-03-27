@@ -1,0 +1,8 @@
+[package]
+name = "vec"
+version = "0.1.0"
+
+[profile.dev]
+debug = false
+
+[workspace]

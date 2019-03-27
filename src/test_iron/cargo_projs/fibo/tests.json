@@ -1,22 +1,30 @@
-[
-  {
-    "input": "0",
-    "output": "0\n"
-  },
-  {
-    "input": "1",
-    "output": "1\n"
-  },
-  {
-    "input": "2",
-    "output": "1\n"
-  },
-  {
-    "input": "3",
-    "output": "2\n"
-  },
-  {
-    "input": "40",
-    "output": "102334155\n"
-  }
-]
+{
+  "proj_type": "lib",
+  "tests": [
+    {
+      "input": "0",
+      "output": "0\n",
+      "exit_code": 0
+    },
+    {
+      "input": "1",
+      "output": "1\n",
+      "exit_code": 0
+    },
+    {
+      "input": "2",
+      "output": "1\n",
+      "exit_code": 0
+    },
+    {
+      "input": "3",
+      "output": "2\n",
+      "exit_code": 0
+    },
+    {
+      "input": "40",
+      "output": "102334155\n",
+      "exit_code": 0
+    }
+  ]
+}

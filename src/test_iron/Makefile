@@ -13,11 +13,15 @@ CODEGEN_FLAGS := -Cdebuginfo=0 -Cno-integrated-as -Cpanic=abort
 RUSTFLAGS := $(NIGHTLY_FLAGS) $(CODEGEN_FLAGS)
 CARGO_BUILD_DIR := $(PROJ_DIR)/target/debug/deps
 BUILD_DIR := build
+RUST_BUILD_DIR := /target/debug
 MANIFEST_PATH := --manifest-path $(PROJ_DIR)/Cargo.toml
 
-.PHONY: all clean rust_proj
+.PHONY: lib_tests bin_tests clean rust_proj
 
-all: $(TEST_NAME)
+bin_tests: rust_proj | $(BUILD_DIR)
+	mv $(PROJ_DIR)/$(RUST_BUILD_DIR)/$(proj) ./$(BUILD_DIR)/test_$(proj)
+
+lib_tests: $(TEST_NAME)
 
 $(BUILD_DIR):
 	mkdir -p $@
