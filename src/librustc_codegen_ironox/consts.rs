@@ -224,7 +224,10 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             });
         match gv {
             Value::Global(idx) => {
-                self.globals.borrow_mut()[idx].set_initializer(str_val);
+                let mut global = &mut self.globals.borrow_mut()[idx];
+                global.set_initializer(str_val);
+                // A string always has private linkage.
+                global.private = true;
             },
             _ => bug!("expected global, found {:?}", gv),
         };
