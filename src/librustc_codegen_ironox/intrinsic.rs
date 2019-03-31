@@ -5,9 +5,10 @@ use ir::value::Value;
 use rustc::ty::{self, Ty};
 use rustc::ty::layout::LayoutOf;
 use rustc_codegen_ssa::common::IntPredicate;
+use rustc_codegen_ssa::glue;
 use rustc_codegen_ssa::traits::{BaseTypeMethods, BuilderMethods, ConstMethods,
                                 IntrinsicCallMethods};
-use rustc_codegen_ssa::mir::operand::OperandRef;
+use rustc_codegen_ssa::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa::mir::place::PlaceRef;
 use rustc_codegen_ssa::MemFlags;
 use rustc_target::abi::call::FnType;
@@ -117,7 +118,32 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
                 }
                 None
             }
+            "size_of_val" => {
+                let tp_ty = substs.type_at(0);
+                let tp_size = self.cx.layout_of(tp_ty).size;
+                let val_size = if let OperandValue::Pair(_, meta) = args[0].val {
+                    let (llsize, _) =
+                        glue::size_and_align_of_dst(self, tp_ty, Some(meta));
+                    llsize
+                } else {
+                    self.const_usize(tp_size.bytes())
+                };
+                Some(val_size)
+            }
+            "min_align_of_val" => {
+                let tp_ty = substs.type_at(0);
+                let tp_align = self.cx.layout_of(tp_ty).align.abi;
+                let min_align = if let OperandValue::Pair(_, meta) = args[0].val {
+                    let (_, llalign) =
+                        glue::size_and_align_of_dst(self, tp_ty, Some(meta));
+                    llalign
+                } else {
+                    self.const_usize(tp_align.bytes())
+                };
+                Some(min_align)
+            }
             _ => {
+                eprintln!("ignoring intrinsic: {}", name);
                 // FIXME: Do nothing.
                 None
             }
