@@ -406,8 +406,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 // mov the value into a register an compare it with the second value
                 let reg = Register::direct(
                     SubRegister::new(RAX, operand_access_mode(&result1, &result2)));
-                // FIXME: check the instruction and set RCX to cmp result.
-                // mov cmp result to cmp_res
                 asm.extend(vec![
                     MachineInst::mov(result1, reg),
                     MachineInst::cmp(result2, reg),

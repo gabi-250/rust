@@ -1182,6 +1182,15 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         // No need to do anything. IronOx never inlines.
     }
 
+    /// This loops `size` times, copying each byte at `src` to `dst`.
+    ///
+    /// It is roughly equivalent to:
+    /// while size > 0 {
+    ///     *dst = *src;
+    ///     dst = dst + 1;
+    ///     src = src + 1;
+    ///     size = size - 1;
+    /// }
     fn memcpy(
         &mut self,
         dst: Self::Value,
@@ -1191,42 +1200,54 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         size: Self::Value,
         _flags: MemFlags,
     ) {
+        // The basic block that checks how many more bytes need to be copied.
+        let mut memcpy_cond = self.build_sibling_block("memcpy_cond");
+        // The body of the loop.
         let mut memcpy_start = self.build_sibling_block("memcpy_start");
+        // The block to jump to once the `memcpy` is done.
         let memcpy_end = self.build_sibling_block("memcpy_end");
+
+        // Helper variables:
         let i8p = self.type_i8p();
-        // Enough space for a pointer
         let i64_ty = self.type_i64();
         let const_one = memcpy_start.cx.const_uint(
             memcpy_start.cx.type_i64(), 1);
         let const_zero = memcpy_start.cx.const_uint(
             memcpy_start.cx.type_i64(), 0);
         let size_align = Align::from_bytes(8).unwrap();
-        // FIXME: check if size is 0.
+
+        // Store the source and destination pointers, and the size on the stack.
         let src = self.pointercast(src, i8p);
         let dst = self.pointercast(dst, i8p);
-        // FIXME: cast size to i64
-        // Store the source and destination pointers to the stack.
         let src_loc = self.alloca(i8p, "memcpy_src", src_align);
         let dst_loc = self.alloca(i8p, "memcpy_dst", dst_align);
         let size_loc = self.alloca(i64_ty, "memcpy_size", size_align);
         self.store(src, src_loc, src_align);
         self.store(dst, dst_loc, dst_align);
         self.store(size, size_loc, size_align);
-        // Branch to memcpy_start.
-        self.br(memcpy_start.llbb());
+
+        // Branch to the block which evaluates the condition of the memcpy.
+        self.br(memcpy_cond.llbb());
+        let size = memcpy_cond.load(size_loc, size_align);
+        let cond = memcpy_cond.icmp(IntPredicate::IntUGT, size, const_zero);
+        let memcpy_start_bb = memcpy_start.llbb();
+        let memcpy_end_bb = memcpy_end.llbb();
+        memcpy_cond.cond_br(cond, memcpy_start_bb, memcpy_end_bb);
+
         // Load the pointers from the stack.
         let src = memcpy_start.load(src_loc, src_align);
         let dst = memcpy_start.load(dst_loc, dst_align);
-        let size = memcpy_start.load(size_loc, size_align);
-        // Load the first byte pointed to by src.
+
+        // Load the first byte pointed to by `src`, and store it at `dst`.
         let src_val = memcpy_start.load(src, src_align);
         memcpy_start.store(src_val, dst, dst_align);
-        //memcpy_start.store(src, dst, dst_align);
 
-        // src += 1; dst += 1;
+        // Advance the two pointers to the next byte.
         let src = memcpy_start.pointercast(src, self.cx.type_i64());
         let dst = memcpy_start.pointercast(dst, self.cx.type_i64());
 
+        // Update the size: there is one less byte to copy.
+        let size = memcpy_start.load(size_loc, size_align);
         let new_src = memcpy_start.add(src, const_one);
         let new_dst = memcpy_start.add(dst, const_one);
         let new_size = memcpy_start.sub(size, const_one);
@@ -1236,10 +1257,8 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         memcpy_start.store(new_dst, dst_loc, dst_align);
         memcpy_start.store(new_size, size_loc, size_align);
 
-        let cond = memcpy_start.icmp(IntPredicate::IntUGT, new_size, const_zero);
-        let memcpy_start_bb = memcpy_start.llbb();
-        let memcpy_end_bb = memcpy_end.llbb();
-        memcpy_start.cond_br(cond, memcpy_start_bb, memcpy_end_bb);
+        // Jump back, and re-evaluate the condition.
+        memcpy_start.br(memcpy_cond.llbb());
         *self = memcpy_end;
     }
 
@@ -1255,6 +1274,14 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("memmove");
     }
 
+    /// This loops `size` times, setting each byte of `ptr` to `fill_byte`.
+    ///
+    /// It is roughly equivalent to:
+    /// while size > 0 {
+    ///     *ptr = fill_byte;
+    ///     ptr = ptr + 1;
+    ///     size = size - 1;
+    /// }
     fn memset(
         &mut self,
         ptr: Value,
@@ -1263,42 +1290,58 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         align: Align,
         _flags: MemFlags,
     ) {
+        // The basic block that checks how many more bytes need to be copied.
+        let mut memset_cond = self.build_sibling_block("memset_cond");
+        // The body of the loop.
         let mut memset_start = self.build_sibling_block("memset_start");
+        // The block to jump to once the `memset` is done.
         let memset_end = self.build_sibling_block("memset_end");
-        let i8p = self.type_i8p();
-        // Enough space for a pointer
+        // Helper variables:
         let i64_ty = self.type_i64();
+        let i8p = self.type_i8p();
         let const_one = memset_start.cx.const_uint(
             memset_start.cx.type_i64(), 1);
         let const_zero = memset_start.cx.const_uint(
             memset_start.cx.type_i64(), 0);
         let size_align = Align::from_bytes(8).unwrap();
 
-        let ptr = self.pointercast(ptr, i8p);
+        // The address where the pointer is stored on the stack.
         let ptr_loc = self.alloca(i8p, "memset_ptr", align);
+        // The address where the size is stored on the stack.
         let size_loc = self.alloca(i64_ty, "memset_size", size_align);
+        let ptr = self.pointercast(ptr, i8p);
         self.store(ptr, ptr_loc, align);
         self.store(size, size_loc, size_align);
-        // Branch to memset_start.
-        self.br(memset_start.llbb());
+
+        // Branch to the block which evaluates the condition of the memset.
+        self.br(memset_cond.llbb());
+        // Load the value of the size, and check if it is greater than zero.
+        let size = memset_cond.load(size_loc, size_align);
+        let cond = memset_cond.icmp(IntPredicate::IntUGT, size, const_zero);
+        let memset_start_bb = memset_start.llbb();
+        let memset_end_bb = memset_end.llbb();
+
+        // Begin memsetting if size > 0.
+        memset_cond.cond_br(cond, memset_start_bb, memset_end_bb);
+
         // Load the pointer from the stack.
         let ptr = memset_start.load(ptr_loc, align);
-        let size = memset_start.load(size_loc, size_align);
+        // Store `fill_byte` into the pointer.
         memset_start.store(fill_byte, ptr, align);
 
-        // ptr += 1
+        // Advance the pointer to the next byte.
         let ptr = memset_start.pointercast(ptr, self.cx.type_i64());
 
+        // Subtract 1 from the total size, as there is one less byte to copy.
+        let size = memset_start.load(size_loc, size_align);
         let new_size = memset_start.sub(size, const_one);
 
         // Store the pointers and the size back to the stack.
         memset_start.store(ptr, ptr_loc, align);
         memset_start.store(new_size, size_loc, size_align);
 
-        let cond = memset_start.icmp(IntPredicate::IntUGT, new_size, const_zero);
-        let memset_start_bb = memset_start.llbb();
-        let memset_end_bb = memset_end.llbb();
-        memset_start.cond_br(cond, memset_start_bb, memset_end_bb);
+        // Jump back, and re-evaluate the condition.
+        memset_start.br(memset_cond.llbb());
         *self = memset_end;
     }
 

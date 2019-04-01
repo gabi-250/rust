@@ -293,7 +293,6 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
                 index as u64
             }
             layout::FieldPlacement::Arbitrary { .. } => {
-                // FIXME:
                 1 + (self.fields.memory_index(index) as u64) * 2
             }
         }
