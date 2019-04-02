@@ -174,6 +174,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         let expected_val = {
             self.const_bool(expected)
         };
+        eprintln!("expect intrinsic: {:?} {} {:?}", cond, expected, expected_val);
         self.icmp(IntPredicate::IntEQ, cond, expected_val)
     }
 }

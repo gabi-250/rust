@@ -19,6 +19,7 @@ pub enum MachineInst {
     JE(Operand),
     JL(Operand),
     NOT(Operand),
+    NEG(Operand),
     SETO(Operand),
     SETNO(Operand),
     SETE(Operand),
@@ -133,6 +134,10 @@ impl MachineInst {
         MachineInst::NOT(op.into())
     }
 
+    pub fn neg<U: Into<Operand>>(op: U) -> MachineInst {
+        MachineInst::NEG(op.into())
+    }
+
     pub fn push<U: Into<Operand>>(op: U) -> MachineInst {
         MachineInst::PUSH(op.into())
     }
@@ -214,6 +219,7 @@ impl fmt::Display for MachineInst {
            MachineInst::JE(ref op) => write!(f, "\tje {}\n", op),
            MachineInst::JL(ref op) => write!(f, "\tjl {}\n", op),
            MachineInst::NOT(ref op) => write!(f, "\tnot {}\n", op),
+           MachineInst::NEG(ref op) => write!(f, "\tneg {}\n", op),
            MachineInst::SETO(ref op) => write!(f, "\tseto {}\n", op),
            MachineInst::SETNO(ref op) => write!(f, "\tsetno {}\n", op),
            MachineInst::SETE(ref op) => write!(f, "\tsete {}\n", op),

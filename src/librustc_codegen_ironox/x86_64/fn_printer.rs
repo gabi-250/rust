@@ -268,6 +268,26 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
+    fn codegen_neg(&mut self, inst: &OxInstruction) -> CompiledInst {
+        if let OxInstruction::Neg(v) = inst {
+            let mut asm = vec![];
+            let mut comp_inst = self.codegen_value(*v);
+            asm.append(&mut comp_inst.asm);
+            let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
+            let reg = Register::direct(SubRegister::new(RAX, access_mode(size)));
+            let result = self.precompiled_result(inst);
+            asm.extend(vec![
+                MachineInst::mov(comp_inst.result.unwrap(), reg),
+                MachineInst::neg(reg),
+                MachineInst::mov(reg, result.clone()),
+            ]);
+            CompiledInst::new(asm, result)
+        } else {
+            bug!("expected OxInstruction::Neg, found {:?}", inst);
+        }
+    }
+
+
     fn codegen_call(&mut self, inst: &OxInstruction) -> CompiledInst {
         let (callee, args) = match inst {
             OxInstruction::Call { callee, ref args } |
@@ -1131,6 +1151,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             OxInstruction::InsertValue { .. } => self.codegen_insertvalue(inst),
             OxInstruction::StructGep { .. } => self.codegen_structgep(inst),
             OxInstruction::Not(..) => self.codegen_not(inst),
+            OxInstruction::Neg(..) => self.codegen_neg(inst),
             OxInstruction::And { .. } => self.codegen_and(inst),
             OxInstruction::Invoke {..} => self.codegen_invoke(inst),
             OxInstruction::Resume(..)=> self.codegen_resume(inst),
@@ -1218,7 +1239,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     OxInstruction::Select { .. } |
                     OxInstruction::InsertValue { .. } |
                     OxInstruction::ExtractValue { .. } |
-                    OxInstruction::Not(_) => {
+                    OxInstruction::Not(_) |
+                    OxInstruction::Neg(_) => {
                         let inst_size =
                             inst.val_ty(self.cx).size(&self.cx.types.borrow());
                         let acc_mode = access_mode(inst_size as u64);

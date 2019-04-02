@@ -480,9 +480,9 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn neg(
         &mut self,
-        _v: Value
+        v: Value
     )-> Value {
-        unimplemented!("neg");
+        self.emit_instr(OxInstruction::Neg(v))
     }
 
     fn fneg(

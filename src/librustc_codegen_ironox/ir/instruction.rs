@@ -38,6 +38,8 @@ pub enum OxInstruction {
     Icmp { lhs: Value, rhs: Value, op: CompOp },
     /// Negate a boolean value.
     Not(Value),
+    /// Negate an integer value.
+    Neg(Value),
     /// Compute the bitwise and of `lhs` and `rhs` and return the result.
     And { lhs: Value, rhs: Value },
     /// Check overflow: (instruction, type, signed).
@@ -210,6 +212,7 @@ impl OxInstruction {
                 }
             },
             OxInstruction::Not(v) => cx.val_ty(v),
+            OxInstruction::Neg(v) => cx.val_ty(v),
             OxInstruction::InsertValue { agg, .. } => cx.val_ty(agg),
             OxInstruction::Select { then_val, else_val, .. } => {
                 let then_ty = cx.val_ty(then_val);
