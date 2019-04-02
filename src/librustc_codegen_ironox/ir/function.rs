@@ -4,7 +4,7 @@ use ir::value::Value;
 use ir::instruction::OxInstruction;
 use super::basic_block::{BasicBlock, OxBasicBlock};
 
-use rustc::mir::mono::Visibility;
+use rustc::mir::mono::{Linkage, Visibility};
 
 /// An IronOx function.
 #[derive(PartialEq, Debug)]
@@ -21,8 +21,9 @@ pub struct OxFunction {
     pub params: Vec<Value>,
     /// The return type of the function.
     pub ret: Type,
-    pub visibility: Visibility,
-    pub is_codegenned: bool,
+    visibility: Visibility,
+    linkage: Linkage,
+    is_codegenned: bool,
 }
 
 impl OxFunction {
@@ -46,6 +47,7 @@ impl OxFunction {
                     params,
                     ret,
                     visibility: Visibility::Default,
+                    linkage: Linkage::External,
                     is_codegenned: false,
                 }
             },
@@ -73,6 +75,18 @@ impl OxFunction {
 
     pub fn set_visibility(&mut self, visibility: Visibility) {
         self.visibility = visibility;
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        self.visibility
+    }
+
+    pub fn set_linkage(&mut self, linkage: Linkage) {
+        self.linkage = linkage;
+    }
+
+    pub fn linkage(&self) -> Linkage {
+        self.linkage
     }
 
     /// Add a new basic block to this function.

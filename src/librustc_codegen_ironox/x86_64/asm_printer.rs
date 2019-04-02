@@ -3,7 +3,7 @@ use ir::global::OxGlobal;
 use ir::type_::{OxType, ScalarType, Type};
 use ir::value::Value;
 
-use rustc::mir::mono::Visibility;
+use rustc::mir::mono::{Linkage, Visibility};
 use std::cell::RefCell;
 
 use x86_64::fn_printer::FunctionPrinter;
@@ -185,12 +185,17 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         ];
         let module = self.cx.module.borrow();
         for f in &module.functions {
-            // Currently, each function is global.
-            asm.extend(vec![
-                MachineInst::Directive(GasDirective::Global(f.name.clone())),
-            ]);
+            match f.linkage() {
+                Linkage::External => {
+                    asm.extend(vec![
+                        MachineInst::Directive(GasDirective::Global(f.name.clone())),
+                    ]);
+                },
+                Linkage::Internal => { /* Nothing to do for now. */ },
+                linkage => unimplemented!("Function linkage {:?}", linkage),
+            }
             // Declare the visibility of the function.
-            match f.visibility {
+            match f.visibility() {
                 Visibility::Hidden => {
                     asm.push(
                         MachineInst::Directive(GasDirective::Hidden(f.name.clone())));

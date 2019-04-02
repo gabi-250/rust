@@ -41,9 +41,8 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     /// Declare a function of a particular `Type`.
     ///
-    /// This does not check if a function with the specified named has already been
-    /// declared. As such, this will cause problems if it called with the same
-    /// function name twice.
+    /// If a function with the specified named has already been declared, this simply
+    /// returns its `Value`.
     ///
     /// FIXME: This is supposed to follow the C calling convention. IronOx currently
     /// only supports the Rust calling convention.
