@@ -301,7 +301,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // actually need in the function call).
             self.codegen_value(*arg);
         }
-        // Prepare the function arguments.
+        // Prepare the function arguments. The first 6 go in registers.
         for (idx, arg) in args.iter().take(6).enumerate() {
             let mut comp_inst = self.codegen_value(*arg);
             asm.append(&mut comp_inst.asm);
@@ -317,20 +317,15 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             }
         }
         let remaining_args: Vec<&Value> = args.iter().skip(6).collect();
-        let mut total_arg_size = 0;
+        let total_arg_size = 8 * remaining_args.len();
 
-        for arg in remaining_args.iter().rev() {
-            let arg_size = self.cx.val_size(**arg);
-            total_arg_size += arg_size / 8;
-        }
         let padding = total_arg_size % 16;
-        if remaining_args.len() > 0 {
-            // Align the stack:
+        if padding {
+            // Align the stack on a 16-byte boundary.
             asm.push(MachineInst::sub(
                 Operand::Immediate(padding as isize, AccessMode::Full),
                 Register::direct(RSP)));
         }
-
         // The remaining arguments are pushed to the stack in reverse order.
         for arg in remaining_args.iter().rev() {
             let mut comp_inst = self.codegen_value(**arg);
@@ -338,14 +333,14 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             let arg_size = self.cx.val_size(**arg);
             let acc_mode = access_mode(arg_size);
             let rax = Register::direct(SubRegister::new(RAX, acc_mode));
-
             if let Some(Operand::Loc(Location::RipOffset(_))) = comp_inst.result.clone() {
-                // globals are always treated as addresses
+                // Globals are always assumed to be addresses...
                 asm.push(MachineInst::lea(comp_inst.result.unwrap(), rax));
             } else {
                 asm.push(MachineInst::mov(comp_inst.result.unwrap(), rax));
             }
-            asm.push(MachineInst::push(rax));
+            // `push` always pushed a 64-bit value, so push the full %rax register.
+            asm.push(MachineInst::push(Register::direct(RAX)));
         }
         // Emit the call
         match callee {
@@ -361,7 +356,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             Value::Instruction { .. } => {
                 let ptr = self.codegen_value(*callee);
                 let result = ptr.result.clone().unwrap();
-                // dereference result
+                // Dereference the value.
                 asm.extend(vec![
                     MachineInst::call(result.clone().deref()),
                 ]);
@@ -423,7 +418,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 asm.append(&mut comp_inst2.asm);
                 let result1 = comp_inst1.result.unwrap();
                 let result2 = comp_inst2.result.unwrap();
-                // mov the value into a register an compare it with the second value
+                // Move the value into a register an compare it with the second value.
                 let reg = Register::direct(
                     SubRegister::new(RAX, operand_access_mode(&result1, &result2)));
                 asm.extend(vec![
@@ -464,7 +459,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 SubRegister::new(RDI, AccessMode::Low8));
             let then_label = self.cx.module.borrow().bb_label(*then_bb);
             let else_label = self.cx.module.borrow().bb_label(*else_bb);
-
             asm.extend(vec![
                 // Check if the condition is true
                 MachineInst::mov(
@@ -575,7 +569,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                                          Register::direct(RAX)),
                         MachineInst::mov(Register::indirect(RAX),
                                          Register::direct(RSI)),
-
                         MachineInst::lea(result.clone(),
                                          Register::direct(RAX)),
                         MachineInst::mov(Register::direct(RDI),
@@ -586,7 +579,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         MachineInst::mov(Register::direct(RSI),
                                          Register::indirect(RAX)),
                     ]);
-
                 },
                 AccessMode::Large(_) => bug!("Unsupported mode: {:?}", acc_mode),
                 _ => {
@@ -1301,20 +1293,17 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             param_movs.push(MachineInst::mov(reg, result.clone()));
             self.arg_loc.insert(*param, result);
         }
-
         let remaining_params: Vec<&Value> = f.params.iter().skip(6).collect();
-        // The first argument is at rbp + 16.
-        let mut pos_rbp_offset = 16;
         // The remaining arguments are pushed to the stack in reverse order.
-        for param in remaining_params.iter().rev() {
-            let param_size = self.cx.val_size(**param);
-            let acc_mode = access_mode(param_size);
+        for (i, param) in remaining_params.iter().rev().enumerate() {
+            let real_param_size = self.cx.val_size(**param);
+            let acc_mode = access_mode(real_param_size);
+            // The first argument is at rbp + 16. All the remaining arguments of
+            // the function are on the stack, aligned on an 8-byte boundary.
             let result = Operand::from(
-                Location::RbpOffset(pos_rbp_offset, acc_mode));
+                Location::RbpOffset(16 + i as isize * 8, acc_mode));
             self.arg_loc.insert(**param, result);
-            pos_rbp_offset += param_size as isize / 8;
         }
-
         param_movs
     }
 
