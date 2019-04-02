@@ -343,25 +343,30 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         let mut asm = vec![];
         let result = self.precompiled_result(inst);
         let acc_mode = result.access_mode();
+        // Check the size of the return value.
         match acc_mode {
+            // A return value that fits in registers %rax and %rdx.
             AccessMode::Large(bytes) if bytes <= 16 => {
                 let offset = result.rbp_offset();
-                let result1 = Location::RbpOffset(offset, AccessMode::Full);
-                let am2 = access_mode(8 * (bytes - 8));
-                let result2 = Location::RbpOffset(offset + 8, am2);
-                let rax = Register::direct(
-                            SubRegister::new(RAX, AccessMode::Full));
-                let rdx = Register::direct(SubRegister::new(RDX, am2));
+                let result_low = Location::RbpOffset(offset, AccessMode::Full);
+                // This represents the size of the register that will contain the
+                // bits left after moving the lower 64 bits into %rax.
+                let acc_mode_high = access_mode(8 * (bytes - 8));
+                let result_high = Location::RbpOffset(offset + 8, acc_mode_high);
+                let rax = Register::direct(SubRegister::new(RAX, AccessMode::Full));
+                let rdx = Register::direct(SubRegister::new(RDX, acc_mode_high));
                 asm.extend(vec![
-                    MachineInst::mov(rax, result1),
-                    // Load RDX at result + 8
-                    MachineInst::mov(rdx, result2),
+                    // Move the low order bits of the result in %rax.
+                    MachineInst::mov(rax, result_low),
+                    // Move the remaining bits of the result in %rdx.
+                    MachineInst::mov(rdx, result_high),
                 ]);
             },
             AccessMode::Large(bytes) => {
-                bug!("Return value of size: {}bytes", bytes);
+                bug!("Return value of size: {} bytes", bytes);
             },
             _ => {
+                // The return value is small enough to fit in %rax.
                 asm.push(MachineInst::mov(
                     Register::direct(SubRegister::new(RAX, acc_mode)),
                     result.clone()));
@@ -424,36 +429,35 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 // These instructions have a boolean result.
                 let cmp_res = self.precompiled_result(inst);
                 let mut asm = vec![];
-                let mut comp_inst1 = self.codegen_value(lhs);
-                asm.append(&mut comp_inst1.asm);
-                let mut comp_inst2 = self.codegen_value(rhs);
-                asm.append(&mut comp_inst2.asm);
-                let result1 = comp_inst1.result.unwrap();
-                let result2 = comp_inst2.result.unwrap();
+                let mut comp_lhs = self.codegen_value(lhs);
+                asm.append(&mut comp_lhs.asm);
+                let mut comp_rhs = self.codegen_value(rhs);
+                asm.append(&mut comp_rhs.asm);
+                let result_lhs = comp_lhs.result.unwrap();
+                let result_rhs = comp_rhs.result.unwrap();
+                let acc_mode = operand_access_mode(&result_lhs, &result_rhs);
                 // Move the value into a register an compare it with the second value.
-                let reg = Register::direct(
-                    SubRegister::new(RAX, operand_access_mode(&result1, &result2)));
+                let rax = Register::direct(SubRegister::new(RAX, acc_mode));
                 asm.extend(vec![
-                    MachineInst::mov(result1, reg),
-                    MachineInst::cmp(result2, reg),
+                    MachineInst::mov(result_lhs, rax),
+                    MachineInst::cmp(result_rhs, rax),
                 ]);
-
-                let reg = Register::direct(SubRegister::new(RAX, AccessMode::Low8));
+                let rax = Register::direct(SubRegister::new(RAX, AccessMode::Low8));
                 let set = match op {
-                    CompOp::Eq => MachineInst::sete(reg),
-                    CompOp::Ne => MachineInst::setne(reg),
-                    CompOp::Ugt => MachineInst::seta(reg),
-                    CompOp::Sgt => MachineInst::setg(reg),
-                    CompOp::Uge => MachineInst::setae(reg),
-                    CompOp::Sge => MachineInst::setge(reg),
-                    CompOp::Ult => MachineInst::setb(reg),
-                    CompOp::Slt => MachineInst::setl(reg),
-                    CompOp::Ule => MachineInst::setbe(reg),
-                    CompOp::Sle => MachineInst::setle(reg),
+                    CompOp::Eq => MachineInst::sete(rax),
+                    CompOp::Ne => MachineInst::setne(rax),
+                    CompOp::Ugt => MachineInst::seta(rax),
+                    CompOp::Sgt => MachineInst::setg(rax),
+                    CompOp::Uge => MachineInst::setae(rax),
+                    CompOp::Sge => MachineInst::setge(rax),
+                    CompOp::Ult => MachineInst::setb(rax),
+                    CompOp::Slt => MachineInst::setl(rax),
+                    CompOp::Ule => MachineInst::setbe(rax),
+                    CompOp::Sle => MachineInst::setle(rax),
                 };
                 asm.extend(vec![
                     set,
-                    MachineInst::mov(reg, cmp_res.clone()),
+                    MachineInst::mov(rax, cmp_res.clone()),
                 ]);
                 CompiledInst::new(asm, cmp_res)
             },
