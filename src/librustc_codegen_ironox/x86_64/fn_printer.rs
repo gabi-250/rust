@@ -287,13 +287,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
-
-    fn codegen_call(&mut self, inst: &OxInstruction) -> CompiledInst {
-        let (callee, args) = match inst {
-            OxInstruction::Call { callee, ref args } |
-            OxInstruction::Invoke { callee, ref args, .. } => (callee, args),
-            _ => bug!("Expected invoke or call, found {:?}", inst)
-        };
+    fn codegen_args(&mut self, args: &Vec<Value>) -> (Vec<MachineInst>, isize) {
         let mut asm = vec![];
         for arg in args.iter() {
             // Compile everything before actually passing the argument to the
@@ -317,10 +311,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             }
         }
         let remaining_args: Vec<&Value> = args.iter().skip(6).collect();
-        let total_arg_size = 8 * remaining_args.len();
+        let total_arg_size = 8 * remaining_args.len() as isize;
 
         let padding = total_arg_size % 16;
-        if padding {
+        if padding > 0 {
             // Align the stack on a 16-byte boundary.
             asm.push(MachineInst::sub(
                 Operand::Immediate(padding as isize, AccessMode::Full),
@@ -342,6 +336,47 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // `push` always pushed a 64-bit value, so push the full %rax register.
             asm.push(MachineInst::push(Register::direct(RAX)));
         }
+        (asm, total_arg_size + padding)
+    }
+
+    fn codegen_call_ret(&mut self, inst: &OxInstruction) -> CompiledInst {
+        let mut asm = vec![];
+        let result = self.precompiled_result(inst);
+        let acc_mode = result.access_mode();
+        match acc_mode {
+            AccessMode::Large(bytes) if bytes <= 16 => {
+                let offset = result.rbp_offset();
+                let result1 = Location::RbpOffset(offset, AccessMode::Full);
+                let am2 = access_mode(8 * (bytes - 8));
+                let result2 = Location::RbpOffset(offset + 8, am2);
+                let rax = Register::direct(
+                            SubRegister::new(RAX, AccessMode::Full));
+                let rdx = Register::direct(SubRegister::new(RDX, am2));
+                asm.extend(vec![
+                    MachineInst::mov(rax, result1),
+                    // Load RDX at result + 8
+                    MachineInst::mov(rdx, result2),
+                ]);
+            },
+            AccessMode::Large(bytes) => {
+                bug!("Return value of size: {}bytes", bytes);
+            },
+            _ => {
+                asm.push(MachineInst::mov(
+                    Register::direct(SubRegister::new(RAX, acc_mode)),
+                    result.clone()));
+            }
+        };
+        CompiledInst::new(asm, result)
+    }
+
+    fn codegen_call(&mut self, inst: &OxInstruction) -> CompiledInst {
+        let (callee, args) = match inst {
+            OxInstruction::Call { callee, ref args } |
+            OxInstruction::Invoke { callee, ref args, .. } => (callee, args),
+            _ => bug!("Expected invoke or call, found {:?}", inst)
+        };
+        let (mut asm, total_arg_size) = self.codegen_args(args);
         // Emit the call
         match callee {
             Value::Function(idx) => {
@@ -363,12 +398,12 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             },
             _ => unimplemented!("call to {:?}", callee),
         };
+        // Clean up the stack after the call.
         if total_arg_size > 0 {
             // Pop all the pushed arguments:
             asm.push(
                 MachineInst::add(
-                    Operand::Immediate((total_arg_size + padding) as isize,
-                                       AccessMode::Full),
+                    Operand::Immediate(total_arg_size, AccessMode::Full),
                     Register::direct(RSP)));
         }
         let ret_ty = inst.val_ty(self.cx);
@@ -376,33 +411,10 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let OxType::Void = self.cx.types.borrow()[ret_ty] {
             CompiledInst::with_instructions(asm)
         } else {
-            let result = self.precompiled_result(inst);
-            let acc_mode = result.access_mode();
-            match acc_mode {
-                AccessMode::Large(bytes) if bytes <= 16 => {
-                    let offset = result.rbp_offset();
-                    let result1 = Location::RbpOffset(offset, AccessMode::Full);
-                    let am2 = access_mode(8 * (bytes - 8));
-                    let result2 = Location::RbpOffset(offset + 8, am2);
-                    let rax = Register::direct(
-                                SubRegister::new(RAX, AccessMode::Full));
-                    let rdx = Register::direct(SubRegister::new(RDX, am2));
-                    asm.extend(vec![
-                        MachineInst::mov(rax, result1),
-                        // Load RDX at result + 8
-                        MachineInst::mov(rdx, result2),
-                    ]);
-                },
-                AccessMode::Large(bytes) => {
-                    bug!("Return value of size: {}bytes", bytes);
-                },
-                _ => {
-                    asm.push(MachineInst::mov(
-                        Register::direct(SubRegister::new(RAX, acc_mode)),
-                        result.clone()));
-                }
-            };
-            CompiledInst::new(asm, result)
+            // Load the return value, and store it on the stack.
+            let ret_insts = self.codegen_call_ret(inst);
+            asm.extend(ret_insts.asm);
+            CompiledInst::new(asm, ret_insts.result.unwrap())
         }
     }
 
