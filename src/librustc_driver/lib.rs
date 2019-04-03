@@ -327,11 +327,6 @@ fn get_codegen_sysroot(backend_name: &str) -> fn() -> Box<dyn CodegenBackend> {
 
     let mut file: Option<PathBuf> = None;
 
-    let expected_name = if backend_name == "ironox" {
-        format!("rustc_codegen_{}-{}", backend_name, backend_name)
-    } else {
-        format!("rustc_codegen_llvm-{}", backend_name)
-    };
     for entry in d.filter_map(|e| e.ok()) {
         let path = entry.path();
         let filename = match path.file_name().and_then(|s| s.to_str()) {
@@ -339,10 +334,6 @@ fn get_codegen_sysroot(backend_name: &str) -> fn() -> Box<dyn CodegenBackend> {
             None => continue,
         };
         if !(filename.starts_with(DLL_PREFIX) && filename.ends_with(DLL_SUFFIX)) {
-            continue
-        }
-        let name = &filename[DLL_PREFIX.len() .. filename.len() - DLL_SUFFIX.len()];
-        if name != expected_name {
             continue
         }
         if let Some(ref prev) = file {
