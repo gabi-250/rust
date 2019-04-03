@@ -4,7 +4,6 @@ use ir::value::Value;
 
 use rustc::ty::{self, Ty};
 use rustc::ty::layout::LayoutOf;
-use rustc_codegen_ssa::common::IntPredicate;
 use rustc_codegen_ssa::glue;
 use rustc_codegen_ssa::traits::{BaseTypeMethods, BuilderMethods, ConstMethods,
                                 IntrinsicCallMethods};
@@ -170,11 +169,8 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         // Do nothing.
     }
 
-    fn expect(&mut self, cond: Value, expected: bool) -> Value {
-        let expected_val = {
-            self.const_bool(expected)
-        };
-        eprintln!("expect intrinsic: {:?} {} {:?}", cond, expected, expected_val);
-        self.icmp(IntPredicate::IntEQ, cond, expected_val)
+    fn expect(&mut self, cond: Value, _expected: bool) -> Value {
+        // expect is always lowered to cond.
+        cond
     }
 }

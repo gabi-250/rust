@@ -622,9 +622,9 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // Get register %dl.
             let reg = Register::direct(SubRegister::new(RDX, AccessMode::Low8));
             let set_inst = if *signed {
-                MachineInst::setno(reg)
+                MachineInst::seto(reg)
             } else {
-                MachineInst::setnb(reg)
+                MachineInst::setb(reg)
             };
             let asm = vec![
                 set_inst,
@@ -1050,19 +1050,19 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                 // The size in bits.
                 let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
                 let rax = Register::direct(SubRegister::new(RAX, access_mode(size)));
-                let rcx = Register::direct(SubRegister::new(RCX, access_mode(size)));
+                let rsi = Register::direct(SubRegister::new(RSI, access_mode(size)));
                 let rdx = Register::direct(SubRegister::new(RDX, access_mode(size)));
-                // The quotient is stored in %rax, and the remainder in %rdx.
                 asm.push(MachineInst::xor(rdx, rdx));
+                // The quotient is stored in %rax, and the remainder in %rdx.
                 let div_inst = if *signed {
-                    MachineInst::idiv(rcx)
+                    unimplemented!("Signed division");
                 } else {
-                    MachineInst::div(rcx)
+                    MachineInst::div(rsi)
                 };
                 let result = self.precompiled_result(inst);
                 asm.extend(vec![
                     MachineInst::mov(comp_lhs.result.unwrap(), rax),
-                    MachineInst::mov(comp_rhs.result.unwrap(), rcx),
+                    MachineInst::mov(comp_rhs.result.unwrap(), rsi),
                     div_inst
                 ]);
                 if let OxInstruction::Div { .. } = inst {
