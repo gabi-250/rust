@@ -352,10 +352,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn udiv(
         &mut self,
-        _lhs: Value,
-        _rhs: Value
+        lhs: Value,
+        rhs: Value
     )-> Value {
-        unimplemented!("udiv");
+        self.emit_instr(OxInstruction::Div { lhs, rhs, signed: false })
     }
 
     fn exactudiv(
@@ -368,10 +368,10 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn sdiv(
         &mut self,
-        _lhs: Value,
-        _rhs: Value
+        lhs: Value,
+        rhs: Value
     )-> Value {
-        unimplemented!("sdiv");
+        self.emit_instr(OxInstruction::Div { lhs, rhs, signed: true })
     }
 
     fn exactsdiv(
@@ -400,18 +400,18 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
 
     fn urem(
         &mut self,
-        _lhs: Value,
-        _rhs: Value
+        lhs: Value,
+        rhs: Value
     )-> Value {
-        unimplemented!("urem");
+        self.emit_instr(OxInstruction::Rem { lhs, rhs, signed: false })
     }
 
     fn srem(
         &mut self,
-        _lhs: Value,
-        _rhs: Value
+        lhs: Value,
+        rhs: Value
     )-> Value {
-        unimplemented!("srem");
+        self.emit_instr(OxInstruction::Rem { lhs, rhs, signed: true })
     }
 
     fn frem(

@@ -1038,6 +1038,44 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
     }
 
+    fn codegen_division(&mut self, inst: &OxInstruction) -> CompiledInst {
+        match inst {
+            OxInstruction::Div { lhs, rhs, signed } |
+            OxInstruction::Rem { lhs, rhs, signed } => {
+                let mut asm = vec![];
+                let mut comp_lhs = self.codegen_value(*lhs);
+                asm.append(&mut comp_lhs.asm);
+                let mut comp_rhs = self.codegen_value(*rhs);
+                asm.append(&mut comp_rhs.asm);
+                // The size in bits.
+                let size = inst.val_ty(self.cx).size(&self.cx.types.borrow());
+                let rax = Register::direct(SubRegister::new(RAX, access_mode(size)));
+                let rcx = Register::direct(SubRegister::new(RCX, access_mode(size)));
+                let rdx = Register::direct(SubRegister::new(RDX, access_mode(size)));
+                // The quotient is stored in %rax, and the remainder in %rdx.
+                asm.push(MachineInst::xor(rdx, rdx));
+                let div_inst = if *signed {
+                    MachineInst::idiv(rcx)
+                } else {
+                    MachineInst::div(rcx)
+                };
+                let result = self.precompiled_result(inst);
+                asm.extend(vec![
+                    MachineInst::mov(comp_lhs.result.unwrap(), rax),
+                    MachineInst::mov(comp_rhs.result.unwrap(), rcx),
+                    div_inst
+                ]);
+                if let OxInstruction::Div { .. } = inst {
+                    asm.push(MachineInst::mov(rax, result.clone()));
+                } else {
+                    asm.push(MachineInst::mov(rdx, result.clone()));
+                }
+                CompiledInst::new(asm, result)
+            }
+            _ => bug!("expected division instruction, found {:?}", inst),
+        }
+    }
+
     fn codegen_switch(&mut self, inst: &OxInstruction) -> CompiledInst {
         if let OxInstruction::Switch { value, default, cases } = inst {
             let compiled_v = self.codegen_value(*value);
@@ -1147,6 +1185,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             OxInstruction::Add { .. } => self.codegen_add(inst),
             OxInstruction::Sub { .. } => self.codegen_sub(inst),
             OxInstruction::Mul { .. } => self.codegen_mul(inst),
+            OxInstruction::Div { .. } |
+            OxInstruction::Rem { .. } => self.codegen_division(inst),
             OxInstruction::Call { .. }=> self.codegen_call(inst),
             OxInstruction::Alloca { .. } => self.codegen_alloca(inst),
             OxInstruction::Icmp { .. } => self.codegen_icmp(inst),
@@ -1236,6 +1276,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                     OxInstruction::Add { .. } |
                     OxInstruction::Sub { .. } |
                     OxInstruction::Mul { .. } |
+                    OxInstruction::Div { .. } |
+                    OxInstruction::Rem { .. } |
                     OxInstruction::And { .. } |
                     OxInstruction::Load { .. } |
                     OxInstruction::Cast { .. } |

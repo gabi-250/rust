@@ -12,6 +12,8 @@ pub enum MachineInst {
     SUB(Operand, Operand),
     MUL(Operand),
     IMUL(Operand),
+    DIV(Operand),
+    IDIV(Operand),
     XOR(Operand, Operand),
     LEA(Operand, Operand),
     CMP(Operand, Operand),
@@ -98,6 +100,22 @@ impl MachineInst {
         let loc = loc.into();
         match loc {
             Operand::Loc(_) => MachineInst::IMUL(loc),
+            _ => bug!("destination has to be a location"),
+        }
+    }
+
+    pub fn div<V: Into<Operand>>(loc: V) -> MachineInst {
+        let loc = loc.into();
+        match loc {
+            Operand::Loc(_) => MachineInst::DIV(loc),
+            _ => bug!("destination has to be a location"),
+        }
+    }
+
+    pub fn idiv<V: Into<Operand>>(loc: V) -> MachineInst {
+        let loc = loc.into();
+        match loc {
+            Operand::Loc(_) => MachineInst::IDIV(loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -212,6 +230,8 @@ impl fmt::Display for MachineInst {
            MachineInst::SUB(ref op, ref loc) => write!(f, "\tsub {}, {}\n", op, loc),
            MachineInst::MUL(ref loc) => write!(f, "\tmul {}\n", loc),
            MachineInst::IMUL(ref loc) => write!(f, "\timul {}\n", loc),
+           MachineInst::DIV(ref loc) => write!(f, "\tdiv {}\n", loc),
+           MachineInst::IDIV(ref loc) => write!(f, "\tidiv {}\n", loc),
            MachineInst::XOR(ref op, ref loc) => write!(f, "\txor {}, {}\n", op, loc),
            MachineInst::LEA(ref op, ref loc) => write!(f, "\tlea {}, {}\n", op, loc),
            MachineInst::CMP(ref op, ref loc) => write!(f, "\tcmp {}, {}\n", op, loc),

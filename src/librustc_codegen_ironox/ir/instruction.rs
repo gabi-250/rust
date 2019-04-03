@@ -32,6 +32,10 @@ pub enum OxInstruction {
     Add { lhs: Value, rhs: Value },
     /// Multiply `lhs` by `rhs` and return the result.
     Mul { lhs: Value, rhs: Value, signed: bool },
+    /// Divide `lhs` by `rhs` and return the quotient.
+    Div { lhs: Value, rhs: Value, signed: bool },
+    /// Divide `lhs` by `rhs` and return the remainder.
+    Rem { lhs: Value, rhs: Value, signed: bool },
     /// Subtract `rhs` from `lhs` and return the result.
     Sub { lhs: Value, rhs: Value},
     /// Compare `lhs` with `rhs` using the comparison operator `op`. Returns a bool.
@@ -145,6 +149,7 @@ impl OxInstruction {
             OxInstruction::Cast { ty, .. } => ty,
             OxInstruction::Ret(Some(v)) => cx.val_ty(v),
             OxInstruction::Add { lhs, rhs } | OxInstruction::Sub { lhs, rhs } |
+            OxInstruction::Div { lhs, rhs, .. } | OxInstruction::Rem { lhs, rhs, .. } |
             OxInstruction::Mul { lhs, rhs, .. } | OxInstruction::And { lhs, rhs } => {
                 let ty1 = cx.val_ty(lhs);
                 let ty2 = cx.val_ty(rhs);
