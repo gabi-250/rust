@@ -1311,7 +1311,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         }
         let remaining_params: Vec<&Value> = f.params.iter().skip(6).collect();
         // The remaining arguments are pushed to the stack in reverse order.
-        for (i, param) in remaining_params.iter().rev().enumerate() {
+        for (i, param) in remaining_params.iter().enumerate() {
             let real_param_size = self.cx.val_size(**param);
             let acc_mode = access_mode(real_param_size);
             // The first argument is at rbp + 16. All the remaining arguments of
