@@ -235,7 +235,7 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
             let instance_def_id = instance.def_id();
             // This is a non-generic function
             self.module.borrow_mut().functions[llfn.fn_idx()]
-                .set_is_codegenned(self.tcx.is_codegened_item(instance_def_id));
+                .is_codegenned = self.tcx.is_codegened_item(instance_def_id);
             // FIXME: visibility, linkage.
             llfn
         };

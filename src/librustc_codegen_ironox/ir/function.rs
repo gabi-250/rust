@@ -11,18 +11,20 @@ use rustc::mir::mono::Linkage;
 pub struct OxFunction {
     /// The name of the function.
     pub name: String,
-    /// The index of the function in the module.
-    pub idx: usize,
-    /// The type of the function.
-    pub ironox_type: Type,
     /// The basic blocks of the function.
     pub basic_blocks: Vec<OxBasicBlock>,
     /// The parameters of the function.
     pub params: Vec<Value>,
+    /// The index of the function in the module.
+    pub idx: usize,
+    /// The type of the function.
+    pub ironox_type: Type,
     /// The return type of the function.
     pub ret: Type,
-    linkage: Linkage,
-    is_codegenned: bool,
+    /// The linkage of the function.
+    pub linkage: Linkage,
+    /// Whether this function has been defined in the local crate.
+    pub is_codegenned: bool,
 }
 
 impl OxFunction {
@@ -71,14 +73,6 @@ impl OxFunction {
         self.params[index]
     }
 
-    pub fn set_linkage(&mut self, linkage: Linkage) {
-        self.linkage = linkage;
-    }
-
-    pub fn linkage(&self) -> Linkage {
-        self.linkage
-    }
-
     /// Add a new basic block to this function.
     ///
     /// The basic block is inserted after the last basic block in the function.
@@ -87,14 +81,6 @@ impl OxFunction {
         let bb = OxBasicBlock::new(cx, label, self, idx);
         self.basic_blocks.push(bb);
         BasicBlock(self.idx, idx)
-    }
-
-    pub fn set_is_codegenned(&mut self, is_codegenned: bool) {
-        self.is_codegenned = is_codegenned
-    }
-
-    pub fn is_codegenned(&self) -> bool {
-        self.is_codegenned
     }
 
     pub fn is_declaration(&self) -> bool {

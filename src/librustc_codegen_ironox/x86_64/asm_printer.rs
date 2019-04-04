@@ -185,7 +185,7 @@ impl AsmPrinter<'a, 'll, 'tcx> {
         ];
         let module = self.cx.module.borrow();
         for f in &module.functions {
-            match f.linkage() {
+            match f.linkage {
                 Linkage::External => {
                     asm.extend(vec![
                         MachineInst::Directive(GasDirective::Global(f.name.clone())),

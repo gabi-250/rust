@@ -141,7 +141,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             }
             Value::Function(idx) => {
                 // Move the result to the stack, and assume its size is 8.
-                let function_name = if !module.functions[idx].is_codegenned() {
+                let function_name = if !module.functions[idx].is_codegenned {
                     format!("{}@PLT", &module.functions[idx].name)
                 } else {
                     format!("{}(%rip)", &module.functions[idx].name)
@@ -386,7 +386,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         match callee {
             Value::Function(idx) => {
                 let module = self.cx.module.borrow();
-                let fn_name = if !module.functions[*idx].is_codegenned() {
+                let fn_name = if !module.functions[*idx].is_codegenned {
                     format!("{}@PLT", &module.functions[*idx].name)
                 } else {
                     module.functions[*idx].name.clone()

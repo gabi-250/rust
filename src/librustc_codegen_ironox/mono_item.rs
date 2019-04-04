@@ -26,8 +26,8 @@ impl PreDefineMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         let mono_sig = instance.fn_sig(self.tcx);
         // Create an IronOx function for this instance.
         let fn_decl = self.declare_fn(symbol_name, mono_sig);
-        self.module.borrow_mut().functions[fn_decl.fn_idx()].set_linkage(linkage);
-        self.module.borrow_mut().functions[fn_decl.fn_idx()].set_is_codegenned(true);
+        self.module.borrow_mut().functions[fn_decl.fn_idx()].linkage = linkage;
+        self.module.borrow_mut().functions[fn_decl.fn_idx()].is_codegenned = true;
         // Map the instance to the IronOx function it corresponds to.
         self.instances.borrow_mut().insert(instance, fn_decl);
     }
