@@ -1,3 +1,4 @@
+
 use abi::{IronOxType, PassMode};
 use builder::Builder;
 use ir::value::Value;
@@ -13,6 +14,8 @@ use rustc_codegen_ssa::MemFlags;
 use rustc_target::abi::call::FnType;
 use syntax_pos::Span;
 
+/// This function is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/intrinsic.rs
 fn memset_intrinsic(
     bx: &mut Builder<'a, 'll, 'tcx>,
     volatile: bool,
@@ -36,6 +39,8 @@ fn memset_intrinsic(
 }
 
 impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
+    /// This function is copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/intrinsic.rs
     fn codegen_intrinsic_call(
         &mut self,
         callee_ty: Ty<'tcx>,
@@ -170,7 +175,7 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn expect(&mut self, cond: Value, _expected: bool) -> Value {
-        // expect is always lowered to cond.
+        // `expect` is always lowered to `cond`.
         cond
     }
 }

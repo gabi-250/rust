@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use rustc_mir::monomorphize::partitioning::CodegenUnit;
 
 use libc::c_uint;
@@ -40,6 +39,9 @@ impl BackendTypes for CodegenCx<'ll, 'tcx> {
     type DIScope = &'ll DIScope;
 }
 
+/// Some of the attributes of this structure resemble the ones from the `CodegenCx`
+/// defined here:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/context.rs
 pub struct CodegenCx<'ll, 'tcx: 'll> {
     /// The typing context of this codegen context.
     pub tcx: TyCtxt<'ll, 'tcx, 'tcx>,
@@ -166,12 +168,16 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/context.rs
 impl ty::layout::HasTyCtxt<'tcx> for CodegenCx<'ll, 'tcx> {
     fn tcx<'b>(&'b self) -> TyCtxt<'b, 'tcx, 'tcx> {
         self.tcx
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/context.rs
 impl LayoutOf for CodegenCx<'ll, 'tcx> {
     type Ty = Ty<'tcx>;
     type TyLayout = TyLayout<'tcx>;
@@ -186,12 +192,16 @@ impl LayoutOf for CodegenCx<'ll, 'tcx> {
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/context.rs
 impl ty::layout::HasDataLayout for CodegenCx<'ll, 'tcx> {
     fn data_layout(&self) -> &ty::layout::TargetDataLayout {
         &self.tcx.data_layout
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/context.rs
 impl HasTargetSpec for CodegenCx<'ll, 'tcx> {
     fn target_spec(&self) -> &Target {
         &self.tcx.sess.target.target
@@ -241,6 +251,8 @@ impl MiscMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         self.module.borrow().functions[llfn_index].get_param(index as usize)
     }
 
+    /// The implementation of this function is copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/context.rs
     fn eh_personality(&self) -> Value {
         if let Some(llpersonality) = self.eh_personality.get() {
             return llpersonality

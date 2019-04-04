@@ -3,13 +3,13 @@ use context::CodegenCx;
 use ir::value::Value;
 use type_of::LayoutIronOxExt;
 
-use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods};
-use rustc_codegen_ssa::common::TypeKind;
-use rustc::util::nodemap::FxHashMap;
-use rustc_target::abi::call::{CastTarget, FnType, Reg};
 use rustc::ty::{layout, Ty};
 use rustc::ty::layout::TyLayout;
+use rustc::util::nodemap::FxHashMap;
+use rustc_codegen_ssa::traits::{BaseTypeMethods, LayoutTypeMethods};
+use rustc_codegen_ssa::common::TypeKind;
 use rustc_data_structures::indexed_vec::{Idx, IndexVec};
+use rustc_target::abi::call::{CastTarget, FnType, Reg};
 
 use std::cell::RefCell;
 
@@ -33,7 +33,7 @@ pub enum ScalarType {
 }
 
 impl ScalarType {
-    /// The size in bits.
+    /// The size of the scalar (in bits).
     pub fn size(&self) -> u64 {
         match *self {
             ScalarType::I1 => 8,
@@ -86,8 +86,9 @@ pub enum OxType {
 }
 
 impl OxType {
+    /// The offset in bits of the element at index `idx` in this aggregare type.
+    /// The type can be a structure, or an array.
     pub fn offset(&self, idx: u64, types: &IndexVec<Type, OxType>) -> u64 {
-        // FIXME:?
         match *self {
             OxType::Struct { ref members, .. } => {
                 let idx = idx as usize;
@@ -106,6 +107,7 @@ impl OxType {
 }
 
 impl Type {
+    /// The size of the type (in bits).
     pub fn size(&self, types: &IndexVec<Type, OxType>) -> u64 {
         match types[*self] {
             OxType::Scalar(sty) => sty.size(),
@@ -161,16 +163,6 @@ impl Type {
     }
 }
 
-pub trait IxLlcx {
-    fn ix_llcx(cx: &CodegenCx, num_bits: u64) -> Type;
-}
-
-impl IxLlcx for Type {
-    fn ix_llcx(cx: &CodegenCx, num_bits: u64) -> Type {
-        cx.type_ix(num_bits)
-    }
-}
-
 impl CodegenCx<'ll, 'tcx> {
     /// Add the specified `OxType` to the vector of `Type`s for this context.
     ///
@@ -196,7 +188,7 @@ impl CodegenCx<'ll, 'tcx> {
         els: &[Type],
         _packed: bool
     ) -> Type {
-        // FIXME: do something with packed.
+        // FIXME: `packed` is ignored.
         let struct_type = OxType::Struct {
             name: Some(name.to_string()),
             members: els.to_vec(),
@@ -204,7 +196,7 @@ impl CodegenCx<'ll, 'tcx> {
         self.add_type(struct_type)
     }
 
-    /// If two structs have the same Type `ty`, this will modify the type of both
+    /// If two structs have the same Type `ty`, this will modify the body of both
     /// structs.
     crate fn set_struct_body(
         &self,
@@ -293,12 +285,12 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         args: &[Type],
         ret: Type
     ) -> Type {
-        // define the types of the arguments of the function
+        // Define the types of the arguments of the function.
         let mut ll_args = Vec::with_capacity(args.len());
         for arg in args {
             ll_args.push(arg.clone());
         }
-        // return a Function that can be used to declare a function
+        // Return a Value::Function that can be used to declare a function.
         let fn_type = OxType::Function {
             args: ll_args,
             ret: ret.clone(),
@@ -392,6 +384,8 @@ impl BaseTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     }
 }
 
+/// The implementation of this trait was inspired by
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/type_.rs
 impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn backend_type(&self, ty: TyLayout<'tcx>) -> Type {
         ty.ironox_type(self)
@@ -448,9 +442,5 @@ impl LayoutTypeMethods<'tcx> for CodegenCx<'ll, 'tcx> {
 
     fn fn_ptr_backend_type(&self, ty: &FnType<'tcx, Ty<'tcx>>) -> Type {
         ty.ptr_to_ironox_type(self)
-        //let arg_tys: Vec<Type> = vec![];
-        //let ret_ty = self.type_void();
-        //let fn_ty = self.type_func(&arg_tys, ret_ty);
-        //self.add_type(OxType::PtrTo { pointee: fn_ty })
     }
 }

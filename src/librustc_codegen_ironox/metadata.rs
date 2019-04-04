@@ -14,9 +14,14 @@ pub use rustc_data_structures::sync::MetadataRef;
 pub struct IronOxMetadataLoader;
 
 impl MetadataLoader for IronOxMetadataLoader {
-    fn get_rlib_metadata(&self, _: &Target, filename: &Path) -> Result<MetadataRef, String> {
+    fn get_rlib_metadata(
+        &self,
+        _: &Target,
+        filename: &Path
+    ) -> Result<MetadataRef, String> {
         let input_file =
-            File::open(filename).map_err(|_e| format!("failed to read {}", filename.display()))?;
+            File::open(filename).map_err(|_e| format!("failed to read {}",
+                                                      filename.display()))?;
         let mut archive = ar::Archive::new(input_file);
         let mut buf = vec![];
         while let Some(entry) = archive.next_entry() {
@@ -32,9 +37,14 @@ impl MetadataLoader for IronOxMetadataLoader {
         Ok(rustc_erase_owner!(buf))
     }
 
-    fn get_dylib_metadata(&self, target: &Target, filename: &Path) -> Result<MetadataRef, String> {
+    fn get_dylib_metadata(
+        &self,
+        target: &Target,
+        filename: &Path
+    ) -> Result<MetadataRef, String> {
         let mut input_file =
-            File::open(filename).map_err(|_e| format!("failed to read {}", filename.display()))?;
+            File::open(filename).map_err(|_e| format!("failed to read {}",
+                                                      filename.display()))?;
         let mut buf = vec![];
         input_file
             .read_to_end(&mut buf)

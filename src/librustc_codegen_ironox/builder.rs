@@ -55,6 +55,8 @@ pub struct Builder<'a, 'll: 'a, 'tcx: 'll> {
     pub build_pos: BuilderPosition,
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/builder.rs
 impl ty::layout::LayoutOf for Builder<'_, '_, 'tcx> {
     type Ty = Ty<'tcx>;
     type TyLayout = TyLayout<'tcx>;
@@ -64,18 +66,24 @@ impl ty::layout::LayoutOf for Builder<'_, '_, 'tcx> {
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/builder.rs
 impl ty::layout::HasDataLayout for Builder<'_, '_, '_> {
     fn data_layout(&self) -> &ty::layout::TargetDataLayout {
         self.cx.data_layout()
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/builder.rs
 impl ty::layout::HasTyCtxt<'tcx> for Builder<'_, '_, 'tcx> {
     fn tcx<'a>(&'a self) -> TyCtxt<'a, 'tcx, 'tcx> {
         self.cx.tcx
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/builder.rs
 impl Deref for Builder<'_, 'll, 'tcx> {
     type Target = CodegenCx<'ll, 'tcx>;
 
@@ -84,6 +92,8 @@ impl Deref for Builder<'_, 'll, 'tcx> {
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/builder.rs
 impl HasCodegen<'tcx> for Builder<'a, 'll, 'tcx> {
     type CodegenCx = CodegenCx<'ll, 'tcx>;
 }
@@ -95,7 +105,7 @@ impl StaticBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
 }
 
 impl Builder<'a, 'll, 'tcx> {
-    /// Add the instruction at the current `BuilderPosition`.
+    /// Add `inst` to the module at the current `BuilderPosition`.
     fn emit_instr(&mut self, inst: OxInstruction) -> Value {
         let mut module = self.cx.module.borrow_mut();
         module.get_function(self.build_pos.fn_idx)
@@ -112,6 +122,9 @@ impl Builder<'a, 'll, 'tcx> {
 }
 
 impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
+
+    /// The implementation of this function is partially copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/builder.rs
     fn checked_binop(
         &mut self,
         oop: OverflowOp,
@@ -172,7 +185,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn with_cx(cx: &'a Self::CodegenCx) -> Self {
-        // FIXME? this is an invalid position and must be overwritten
         Builder {
             cx,
             build_pos: BuilderPosition::new(0, 0, 0)
@@ -1060,7 +1072,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn set_personality_fn(&mut self, _personality: Value) {
-        // FIXME? IronOx doesn't handle personality functions.
+        // FIXME: IronOx doesn't handle personality functions.
     }
 
     fn atomic_cmpxchg(
@@ -1127,7 +1139,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("set_invariant_load");
     }
 
-    /// Returns the ptr value that should be used for storing `val`.
     fn check_store(
         &mut self,
         _val: Value,
@@ -1136,7 +1147,6 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         unimplemented!("check_store");
     }
 
-    /// Returns the args that should be used for a call to `llfn`.
     fn check_call<'b>(
         &mut self,
         _typ: &str,
@@ -1147,11 +1157,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
     }
 
     fn lifetime_start(&mut self, _ptr: Value, _size: Size) {
-        // FIXME? nothing to do for now
+        // FIXME? nothing to do for now.
     }
 
     fn lifetime_end(&mut self, _ptr: Value, _size: Size) {
-        // FIXME? nothing to do for now
+        // FIXME? nothing to do for now.
     }
 
     fn call(
@@ -1345,9 +1355,11 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
         *self = memset_end;
     }
 
+    /// The implementation of this function is heavily inspired by the `load_operand`
+    /// function from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/builder.rs
     fn load_operand(&mut self, place: PlaceRef<'tcx, Value>)
         -> OperandRef<'tcx, Value> {
-        // FIXME?
         let val = if let Some(llextra) = place.llextra {
             OperandValue::Ref(place.llval, Some(llextra), place.align)
         } else if place.layout.is_ironox_immediate() {
@@ -1362,7 +1374,7 @@ impl BuilderMethods<'a, 'tcx> for Builder<'a, 'll, 'tcx> {
             });
             OperandValue::Immediate(to_immediate(self, llval, place.layout))
         } else if let layout::Abi::ScalarPair(ref a, ref b) = place.layout.abi {
-            // FIXME: also handle the metadata
+            // FIXME: also handle the metadata.
             let b_offset = a.value.size(self).align_to(b.value.align(self).abi);
             // Load and return both elements of the pair.
             let a_ptr = self.struct_gep(place.llval, 0);

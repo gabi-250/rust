@@ -1,3 +1,6 @@
+//! All functions here are copied from
+//! https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/back/link.rs
+
 use rustc::hir::def_id::CrateNum;
 use rustc::middle::cstore::METADATA_FILENAME;
 use rustc::session::Session;
@@ -28,7 +31,6 @@ use std::process::{Command as ShellCommand, Output, Stdio};
 use std::str;
 use syntax::attr;
 
-// FIXME: duplicated code: see `librustc_codegen_llvm/back/link.rs`.
 fn get_file_path(sess: &Session, name: &str) -> PathBuf {
     let fs = sess.target_filesearch(PathKind::Native);
     let file_path = fs.get_lib_path().join(name);

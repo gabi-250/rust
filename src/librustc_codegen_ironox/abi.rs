@@ -1,3 +1,6 @@
+//! All functions here are copied from
+//! https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/abi.rs
+
 use builder::Builder;
 use context::CodegenCx;
 use ir::value::Value;
@@ -20,7 +23,7 @@ impl AbiBuilderMethods<'tcx> for Builder<'a, 'll, 'tcx> {
         _ty: &FnType<'tcx, Ty<'tcx>>,
         _callsite: Value
     ) {
-        // FIXME?
+        // FIXME: maybe handle attributes.
     }
 }
 
@@ -49,7 +52,6 @@ fn store(
     }
 }
 
-// FIXME: copied from LLVM:
 pub trait IronOxType {
     fn ironox_type(&self, cx: &CodegenCx<'ll, '_>) -> Type;
 }
@@ -71,7 +73,6 @@ impl IronOxType for Reg {
         }
     }
 }
-
 
 impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     fn store_fn_arg(
@@ -112,7 +113,6 @@ impl ArgTypeMethods<'tcx> for Builder<'a, 'll, 'tcx> {
     }
 }
 
-// FIXME: copied from the llvm backend.
 impl IronOxType for CastTarget {
     fn ironox_type(&self, cx: &CodegenCx<'ll, '_>) -> Type {
         let rest_ll_unit = self.rest.unit.ironox_type(cx);
@@ -361,4 +361,3 @@ impl AbiMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         FnType::of_instance(&self, instance)
     }
 }
-

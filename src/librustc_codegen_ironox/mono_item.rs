@@ -5,7 +5,6 @@ use rustc_codegen_ssa::traits::*;
 use rustc_mir::monomorphize::Instance;
 
 pub use rustc::mir::mono::MonoItem;
-
 pub use rustc_mir::monomorphize::item::MonoItemExt as BaseMonoItemExt;
 
 impl PreDefineMethods<'tcx> for CodegenCx<'ll, 'tcx> {
@@ -17,6 +16,8 @@ impl PreDefineMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         unimplemented!("predefine_static");
     }
 
+    /// The implementation of this function is partially copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/mono_item.rs
     fn predefine_fn(&self,
                     instance: Instance<'tcx>,
                     linkage: Linkage,

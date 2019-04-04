@@ -4,7 +4,7 @@ use ir::constant::{OxUnsignedConst, OxSignedConst};
 use ir::instruction::ConstCast;
 use ir::value::Value;
 use ir::struct_::OxStruct;
-use ir::type_::{Type, IxLlcx};
+use ir::type_::Type;
 use type_of::LayoutIronOxExt;
 
 use rustc_codegen_ssa::traits::*;
@@ -55,6 +55,8 @@ impl CodegenCx<'ll, 'tcx> {
         Value::ConstUint(consts.len() - 1)
     }
 
+    /// The implementation of this function is copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/consts.rs
     fn const_alloc_to_ironox(
         &self,
         alloc: &Allocation,
@@ -101,6 +103,9 @@ impl CodegenCx<'ll, 'tcx> {
     }
 }
 
+
+/// The implementation of this trait was inspired by the `StaticMethods` trait from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/consts.rs
 impl StaticMethods for CodegenCx<'ll, 'tcx> {
     fn static_addr_of(
         &self,
@@ -186,10 +191,11 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         unimplemented!("const_u64");
     }
 
+    /// The implementation of this function is partially copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/common.rs
     fn const_usize(&self, i: u64) -> Value {
         let bit_size = self.data_layout().pointer_size.bits();
-        let isize_ty = Type::ix_llcx(self,
-                                     self.tcx.data_layout.pointer_size.bits());
+        let isize_ty = self.type_ix(self.tcx.data_layout.pointer_size.bits());
         if bit_size < 64 {
             // make sure it doesn't overflow
             assert!(i < (1<<bit_size));
@@ -235,6 +241,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         gv
     }
 
+    /// The implementation of this function is copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/common.rs
     fn const_str_slice(&self, s: LocalInternedString) -> Value {
         let len = s.len();
         let cs = self.const_cast(
@@ -243,6 +251,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         self.const_fat_ptr(cs, self.const_usize(len as u64))
     }
 
+    /// The implementation of this function is copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/common.rs
     fn const_fat_ptr(
         &self,
         ptr: Value,
@@ -320,6 +330,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         self.const_cast(val, ty)
     }
 
+    /// The implementation of this function is partially copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/common.rs
     fn scalar_to_backend(
         &self,
         cv: Scalar,
@@ -357,6 +369,8 @@ impl ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         }
     }
 
+    /// The implementation of this function is partially copied from:
+    /// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/common.rs
     fn from_const_alloc(
         &self,
         layout: TyLayout<'tcx>,

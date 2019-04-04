@@ -39,6 +39,7 @@ impl Value {
         }
     }
 
+    /// If this `Value` is a `Function`, return its index. Otherwise, panic.
     pub fn fn_idx(&self) -> usize {
         match *self {
             Value::Function(idx) => idx,

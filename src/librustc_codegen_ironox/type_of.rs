@@ -1,3 +1,6 @@
+//! All functions here are copied from, or heavily inspired by:
+//! https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/type_of.rs
+
 use abi::{FnType, FnTypeExt};
 use context::CodegenCx;
 use ir::type_::Type;
@@ -59,7 +62,6 @@ fn struct_field_types(
         result.push(cx.type_padding_filler(padding, padding_align));
         assert_eq!(result.len(), 1 + field_count * 2);
     }
-
     result
 }
 
@@ -111,9 +113,6 @@ impl LayoutIronOxExt<'tcx> for TyLayout<'tcx> {
         }
         assert!(!self.ty.has_escaping_bound_vars(),
                 "{:?} has escaping bound vars", self.ty);
-
-        // FIXME? extracted from llvm's type_of:
-        //
         // Make sure lifetimes are erased, to avoid generating distinct LLVM
         // types for Rust types that only differ in the choice of lifetimes.
         let normal_ty = cx.tcx.erase_regions(&self.ty);

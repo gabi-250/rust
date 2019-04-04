@@ -1,16 +1,21 @@
 use libc::c_uint;
 
-use rustc::middle::allocator::AllocatorKind;
-use rustc::ty::TyCtxt;
-use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
-use rustc_codegen_ssa::traits::{BaseTypeMethods, BuilderMethods, DeclareMethods,
-                                MiscMethods};
-
 use builder::Builder;
 use context::CodegenCx;
 use x86_64::asm_printer::AsmPrinter;
 use ModuleIronOx;
 
+use rustc::middle::allocator::AllocatorKind;
+use rustc::mir::mono::Visibility;
+use rustc::ty::TyCtxt;
+use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
+use rustc_codegen_ssa::traits::{BaseTypeMethods, BuilderMethods, DeclareMethods,
+                                MiscMethods};
+
+/// The implementation of this function somewhat resembles the `codegen` function from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/allocator.rs
+/// However, this function creates a CodegenCx to create the allocator function.
+/// LLVM, on the other hand, uses the LLVM context it stores in `module`.
 pub(crate) fn codegen<'ll, 'tcx: 'll>(
     tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     module: &'ll mut ModuleIronOx,
@@ -48,9 +53,10 @@ pub(crate) fn codegen<'ll, 'tcx: 'll>(
             let fn_ty = cx.type_func(&args[..], output.unwrap_or(cx.type_void()));
             let name = format!("__rust_{}", method.name);
             let llfn = cx.declare_cfn(&name, fn_ty);
-            // FIXME: set the visibility
             let callee = kind.fn_name(method.name);
             let callee = cx.declare_cfn(&callee, fn_ty);
+            cx.module.borrow_mut().functions[callee.fn_idx()]
+                .set_visibility(Visibility::Hidden);
             let mut builder = Builder::new_block(&cx, llfn, "entry");
             let args = args.iter().enumerate().map(|(i, _)| {
                 cx.get_param(llfn, i as c_uint)

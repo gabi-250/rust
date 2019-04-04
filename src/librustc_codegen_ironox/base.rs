@@ -1,3 +1,10 @@
+//! All functions here were inspired by:
+//! https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/base.rs
+
+use builder::Builder;
+use context::CodegenCx;
+use x86_64::asm_printer::AsmPrinter;
+
 use super::{IronOxCodegenBackend, ModuleIronOx};
 use rustc::mir::mono::Stats;
 use rustc::ty::TyCtxt;
@@ -9,10 +16,6 @@ use rustc_codegen_ssa::mono_item::MonoItemExt;
 use rustc_mir::monomorphize::partitioning::CodegenUnitExt;
 use syntax_pos::symbol::InternedString;
 
-use builder::Builder;
-use x86_64::asm_printer::AsmPrinter;
-use context::CodegenCx;
-
 pub fn compile_codegen_unit<'ll, 'tcx>(
     tcx: TyCtxt<'ll, 'tcx, 'tcx>,
     cgu_name: InternedString,
@@ -22,7 +25,8 @@ pub fn compile_codegen_unit<'ll, 'tcx>(
                                                        tcx,
                                                        cgu_name,
                                                        codegen_ironox_module);
-    let cost = 0; // FIXME may need to compute the 'cost'
+    // FIXME: we may need to compute the 'cost'.
+    let cost = 0;
     submit_codegened_module_to_llvm(&IronOxCodegenBackend(()), tcx, module, cost);
     return stats;
 }

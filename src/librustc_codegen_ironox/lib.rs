@@ -178,6 +178,7 @@ impl ModuleIronOx {
         }
     }
 
+    /// Get the label of the `bb` basic block.
     pub fn bb_label(&self, bb: BasicBlock) -> String {
         self.functions[bb.0].basic_blocks[bb.1].label.to_string()
     }
@@ -314,6 +315,8 @@ impl IronOxCodegenBackend {
     }
 }
 
+/// The implementation of this trait is copied from:
+/// https://github.com/rust-lang/rust/blob/14ea6e50c1534a23cb51375552c14568db9ee130/src/librustc_codegen_llvm/lib.rs
 impl CodegenBackend for IronOxCodegenBackend {
     fn init(&self, _sess: &Session) {}
 
