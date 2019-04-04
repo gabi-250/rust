@@ -13,7 +13,7 @@ else ifeq ($(RUST_BACKEND),cranelift)
 	CLIF_FLAGS :=  --sysroot $(CLIF_DIR)/build_sysroot/sysroot
 	CARGO_FLAGS := +nightly
 	CARGO := cargo
-else
+else ifeq ($(RUST_BACKEND),llvm)
 	LLVM_SO := librustc_codegen_llvm-llvm.so
 	LLVM_BUILD_DIR := ../../llvm_build
 	LLVM_DIR := $(realpath $(LLVM_BUILD_DIR))
@@ -37,10 +37,10 @@ MANIFEST_PATH := --manifest-path $(PROJ_DIR)/Cargo.toml
 .PHONY: bench_build clean
 
 bench_build:
-	$(MULTITIME) -n 30 sh -c "${CARGO} clean ${MANIFEST_PATH} && LD_LIBRARY_PATH=${LIBS} RUSTFLAGS=\"${RUSTFLAGS}\" ${CUSTOM_RUSTC} ${CARGO} ${CARGO_FLAGS} build ${MANIFEST_PATH} > /dev/null 2>&1"
+	$(MULTITIME) -n $(num_obs) sh -c "${CARGO} clean ${MANIFEST_PATH} && LD_LIBRARY_PATH=${LIBS} RUSTFLAGS=\"${RUSTFLAGS}\" ${CUSTOM_RUSTC} ${CARGO} ${CARGO_FLAGS} build ${MANIFEST_PATH} > /dev/null 2>&1"
 
 bench_run: clean build
-	$(MULTITIME) -n 30 sh -c "LD_LIBRARY_PATH=${LIBS} RUSTFLAGS=\"${RUSTFLAGS}\" ${CUSTOM_RUSTC} ${CARGO} ${CARGO_FLAGS} run ${MANIFEST_PATH} > /dev/null 2>&1"
+	$(MULTITIME) -n $(num_obs) sh -c "LD_LIBRARY_PATH=${LIBS} RUSTFLAGS=\"${RUSTFLAGS}\" ${CUSTOM_RUSTC} ${CARGO} ${CARGO_FLAGS} run ${MANIFEST_PATH} > /dev/null 2>&1"
 
 build:
 	LD_LIBRARY_PATH=${LIBS} RUSTFLAGS="${RUSTFLAGS}" ${CUSTOM_RUSTC} ${CARGO} ${CARGO_FLAGS} build ${MANIFEST_PATH} > /dev/null 2>&1

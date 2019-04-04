@@ -1,13 +1,9 @@
 [package]
-name = "fibo_repeated"
+name = "fibonacci"
 version = "0.1.0"
 
 [profile.dev]
 debug = false
 panic = "abort"
-
-[lib]
-name = "fibo_repeated"
-path = "src/lib.rs"
 
 [workspace]
