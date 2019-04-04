@@ -9,8 +9,6 @@ pub enum GasDirective {
     Quad(Vec<BigNum>),
     Long(Vec<u32>),
     Byte(Vec<u8>),
-    Hidden(String),
-    Protected(String),
 }
 
 #[derive(Clone, Debug)]
@@ -37,8 +35,6 @@ impl fmt::Display for GasDirective {
                 write!(f, ".ascii\t{}", strs.join(","))
             }
             GasDirective::Global(ref name) => write!(f, ".globl\t{}", name),
-            GasDirective::Hidden(ref name) => write!(f, ".hidden\t{}", name),
-            GasDirective::Protected(ref name) => write!(f, ".protected\t{}", name),
             GasDirective::Section(ref name) => write!(f, ".section\t{}", name),
             GasDirective::Text => write!(f, ".text"),
             GasDirective::Byte(ref nums) => {

@@ -3,7 +3,7 @@ use ir::global::OxGlobal;
 use ir::type_::{OxType, ScalarType, Type};
 use ir::value::Value;
 
-use rustc::mir::mono::{Linkage, Visibility};
+use rustc::mir::mono::Linkage;
 use std::cell::RefCell;
 
 use x86_64::fn_printer::FunctionPrinter;
@@ -193,21 +193,6 @@ impl AsmPrinter<'a, 'll, 'tcx> {
                 },
                 Linkage::Internal => { /* Nothing to do for now. */ },
                 linkage => unimplemented!("Function linkage {:?}", linkage),
-            }
-            // Declare the visibility of the function.
-            match f.visibility() {
-                Visibility::Hidden => {
-                    asm.push(
-                        MachineInst::Directive(GasDirective::Hidden(f.name.clone())));
-                },
-                Visibility::Protected => {
-                    asm.push(
-                        MachineInst::Directive(GasDirective::Protected(f.name.clone())));
-                }
-                Visibility::Default => {
-                    // No need to do anything, default visibility is enabled by
-                    // default.
-                },
             }
         }
         asm

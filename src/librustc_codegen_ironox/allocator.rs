@@ -6,7 +6,6 @@ use x86_64::asm_printer::AsmPrinter;
 use ModuleIronOx;
 
 use rustc::middle::allocator::AllocatorKind;
-use rustc::mir::mono::Visibility;
 use rustc::ty::TyCtxt;
 use rustc_allocator::{ALLOCATOR_METHODS, AllocatorTy};
 use rustc_codegen_ssa::traits::{BaseTypeMethods, BuilderMethods, DeclareMethods,
@@ -55,8 +54,6 @@ pub(crate) fn codegen<'ll, 'tcx: 'll>(
             let llfn = cx.declare_cfn(&name, fn_ty);
             let callee = kind.fn_name(method.name);
             let callee = cx.declare_cfn(&callee, fn_ty);
-            cx.module.borrow_mut().functions[callee.fn_idx()]
-                .set_visibility(Visibility::Hidden);
             let mut builder = Builder::new_block(&cx, llfn, "entry");
             let args = args.iter().enumerate().map(|(i, _)| {
                 cx.get_param(llfn, i as c_uint)
