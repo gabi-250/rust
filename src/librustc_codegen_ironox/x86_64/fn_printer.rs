@@ -737,7 +737,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
 
     fn codegen_unreachable(&mut self, inst: &OxInstruction) -> CompiledInst {
         if let OxInstruction::Unreachable = inst {
-            CompiledInst::with_instructions(vec![MachineInst::UD2])
+            CompiledInst::with_instructions(vec![MachineInst::Ud2])
         } else {
             bug!("expected OxInstruction::Unreachable, found {:?}", inst);
         }
@@ -988,7 +988,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     fn codegen_resume(&mut self, inst: &OxInstruction) -> CompiledInst {
         if let OxInstruction::Resume(_) = inst {
             // FIXME: crash for now.
-            CompiledInst::with_instructions(vec![MachineInst::UD2])
+            CompiledInst::with_instructions(vec![MachineInst::Ud2])
         } else {
             bug!("expected OxInstruction::Resume, found {:?}", inst);
         }
@@ -998,7 +998,7 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let OxInstruction::LandingPad { .. } = inst {
             // FIXME: crash for now.
             let landing_pad = self.precompiled_result(inst);
-            CompiledInst::new(vec![MachineInst::UD2], landing_pad)
+            CompiledInst::new(vec![MachineInst::Ud2], landing_pad)
         } else {
             bug!("expected OxInstruction::LandingPad, found {:?}", inst);
         }
@@ -1257,8 +1257,8 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
     /// Return the machine code for the epilogue of this function.
     fn emit_epilogue() -> Vec<MachineInst> {
         vec![
-            MachineInst::LEAVE,
-            MachineInst::RET,
+            MachineInst::Leave,
+            MachineInst::Ret,
         ]
     }
 

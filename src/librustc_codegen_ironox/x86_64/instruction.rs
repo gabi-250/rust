@@ -6,42 +6,42 @@ use std::fmt;
 #[allow(unused)]
 #[derive(Clone, Debug)]
 pub enum MachineInst {
-    MOV(Operand, Operand),
-    AND(Operand, Operand),
-    ADD(Operand, Operand),
-    SUB(Operand, Operand),
-    MUL(Operand),
-    IMUL(Operand),
-    DIV(Operand),
-    IDIV(Operand),
-    XOR(Operand, Operand),
-    LEA(Operand, Operand),
-    CMP(Operand, Operand),
-    JMP(Operand),
-    JE(Operand),
-    JL(Operand),
-    NOT(Operand),
-    NEG(Operand),
-    SETO(Operand),
-    SETNO(Operand),
-    SETE(Operand),
-    SETNE(Operand),
-    SETA(Operand),
-    SETG(Operand),
-    SETAE(Operand),
-    SETGE(Operand),
-    SETB(Operand),
-    SETNB(Operand),
-    SETL(Operand),
-    SETBE(Operand),
-    SETLE(Operand),
-    CALL(Operand),
-    PUSH(Operand),
-    POP(Operand),
-    LEAVE,
-    RET,
-    UD2,
-    NOP,
+    Mov(Operand, Operand),
+    And(Operand, Operand),
+    Add(Operand, Operand),
+    Sub(Operand, Operand),
+    Mul(Operand),
+    IMul(Operand),
+    Div(Operand),
+    IDiv(Operand),
+    Xor(Operand, Operand),
+    Lea(Operand, Operand),
+    Cmp(Operand, Operand),
+    Jmp(Operand),
+    Je(Operand),
+    Jl(Operand),
+    Not(Operand),
+    Neg(Operand),
+    SetO(Operand),
+    SetNo(Operand),
+    SetE(Operand),
+    SetNe(Operand),
+    SetA(Operand),
+    SetG(Operand),
+    SetAe(Operand),
+    SetGe(Operand),
+    SetB(Operand),
+    SetNb(Operand),
+    SetL(Operand),
+    SetBe(Operand),
+    SetLe(Operand),
+    Call(Operand),
+    Push(Operand),
+    Pop(Operand),
+    Leave,
+    Ret,
+    Ud2,
+    Nop,
     Label(String),
     Directive(GasDirective),
 }
@@ -59,7 +59,7 @@ impl MachineInst {
         loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::MOV(op.into(), loc),
+            Operand::Loc(_) => MachineInst::Mov(op.into(), loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -67,7 +67,7 @@ impl MachineInst {
     pub fn lea<U: Into<Operand>, V: Into<Operand>>(op: U, loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::LEA(op.into(), loc),
+            Operand::Loc(_) => MachineInst::Lea(op.into(), loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -75,7 +75,7 @@ impl MachineInst {
     pub fn and<U: Into<Operand>, V: Into<Operand>>(op: U, loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::AND(op.into(), loc),
+            Operand::Loc(_) => MachineInst::And(op.into(), loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -83,7 +83,7 @@ impl MachineInst {
     pub fn add<U: Into<Operand>, V: Into<Operand>>(op: U, loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::ADD(op.into(), loc),
+            Operand::Loc(_) => MachineInst::Add(op.into(), loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -91,7 +91,7 @@ impl MachineInst {
     pub fn mul<V: Into<Operand>>(loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::MUL(loc),
+            Operand::Loc(_) => MachineInst::Mul(loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -99,7 +99,7 @@ impl MachineInst {
     pub fn imul<V: Into<Operand>>(loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::IMUL(loc),
+            Operand::Loc(_) => MachineInst::IMul(loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -107,7 +107,7 @@ impl MachineInst {
     pub fn div<V: Into<Operand>>(loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::DIV(loc),
+            Operand::Loc(_) => MachineInst::Div(loc),
             _ => bug!("destination has to be a location"),
         }
     }
@@ -115,153 +115,153 @@ impl MachineInst {
     pub fn idiv<V: Into<Operand>>(loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::IDIV(loc),
+            Operand::Loc(_) => MachineInst::IDiv(loc),
             _ => bug!("destination has to be a location"),
         }
     }
 
     pub fn xor<U: Into<Operand>, V: Into<Operand>>(op1: U, op2: V) -> MachineInst {
-        MachineInst::XOR(op1.into(), op2.into())
+        MachineInst::Xor(op1.into(), op2.into())
     }
 
     pub fn sub<U: Into<Operand>, V: Into<Operand>>(op: U, loc: V) -> MachineInst {
         let loc = loc.into();
         match loc {
-            Operand::Loc(_) => MachineInst::SUB(op.into(), loc),
+            Operand::Loc(_) => MachineInst::Sub(op.into(), loc),
             _ => bug!("destination has to be a location"),
         }
     }
 
     pub fn cmp<U: Into<Operand>, V: Into<Operand>>(op1: U, op2: V) -> MachineInst {
-        MachineInst::CMP(op1.into(), op2.into())
+        MachineInst::Cmp(op1.into(), op2.into())
     }
 
     pub fn jmp<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::JMP(op.into())
+        MachineInst::Jmp(op.into())
     }
 
     pub fn je<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::JE(op.into())
+        MachineInst::Je(op.into())
     }
 
     pub fn jl<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::JL(op.into())
+        MachineInst::Jl(op.into())
     }
 
     pub fn not<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::NOT(op.into())
+        MachineInst::Not(op.into())
     }
 
     pub fn neg<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::NEG(op.into())
+        MachineInst::Neg(op.into())
     }
 
     pub fn push<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::PUSH(op.into())
+        MachineInst::Push(op.into())
     }
 
     pub fn pop<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::POP(op.into())
+        MachineInst::Pop(op.into())
     }
 
     pub fn seto<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETO(op.into())
+        MachineInst::SetO(op.into())
     }
 
     pub fn setno<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETNO(op.into())
+        MachineInst::SetNo(op.into())
     }
 
     pub fn sete<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETE(op.into())
+        MachineInst::SetE(op.into())
     }
 
     pub fn setne<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETNE(op.into())
+        MachineInst::SetNe(op.into())
     }
 
     pub fn seta<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETA(op.into())
+        MachineInst::SetA(op.into())
     }
 
     pub fn setg<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETG(op.into())
+        MachineInst::SetG(op.into())
     }
 
     pub fn setae<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETAE(op.into())
+        MachineInst::SetAe(op.into())
     }
 
     pub fn setge<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETGE(op.into())
+        MachineInst::SetGe(op.into())
     }
 
     pub fn setb<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETB(op.into())
+        MachineInst::SetB(op.into())
     }
 
     pub fn setnb<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETNB(op.into())
+        MachineInst::SetNb(op.into())
     }
 
     pub fn setl<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETL(op.into())
+        MachineInst::SetL(op.into())
     }
 
     pub fn setbe<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETBE(op.into())
+        MachineInst::SetBe(op.into())
     }
 
     pub fn setle<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::SETL(op.into())
+        MachineInst::SetL(op.into())
     }
 
     pub fn call<U: Into<Operand>>(op: U) -> MachineInst {
-        MachineInst::CALL(op.into())
+        MachineInst::Call(op.into())
     }
 }
 
 impl fmt::Display for MachineInst {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-           MachineInst::MOV(ref op, ref loc) => write!(f, "\tmov {}, {}\n", op, loc),
-           MachineInst::AND(ref op, ref loc) => write!(f, "\tand {}, {}\n", op, loc),
-           MachineInst::ADD(ref op, ref loc) => write!(f, "\tadd {}, {}\n", op, loc),
-           MachineInst::SUB(ref op, ref loc) => write!(f, "\tsub {}, {}\n", op, loc),
-           MachineInst::MUL(ref loc) => write!(f, "\tmul {}\n", loc),
-           MachineInst::IMUL(ref loc) => write!(f, "\timul {}\n", loc),
-           MachineInst::DIV(ref loc) => write!(f, "\tdiv {}\n", loc),
-           MachineInst::IDIV(ref loc) => write!(f, "\tidiv {}\n", loc),
-           MachineInst::XOR(ref op, ref loc) => write!(f, "\txor {}, {}\n", op, loc),
-           MachineInst::LEA(ref op, ref loc) => write!(f, "\tlea {}, {}\n", op, loc),
-           MachineInst::CMP(ref op, ref loc) => write!(f, "\tcmp {}, {}\n", op, loc),
-           MachineInst::JMP(ref op) => write!(f, "\tjmp {}\n", op),
-           MachineInst::JE(ref op) => write!(f, "\tje {}\n", op),
-           MachineInst::JL(ref op) => write!(f, "\tjl {}\n", op),
-           MachineInst::NOT(ref op) => write!(f, "\tnot {}\n", op),
-           MachineInst::NEG(ref op) => write!(f, "\tneg {}\n", op),
-           MachineInst::SETO(ref op) => write!(f, "\tseto {}\n", op),
-           MachineInst::SETNO(ref op) => write!(f, "\tsetno {}\n", op),
-           MachineInst::SETE(ref op) => write!(f, "\tsete {}\n", op),
-           MachineInst::SETNE(ref op) => write!(f, "\tsetne {}\n", op),
-           MachineInst::SETA(ref op) => write!(f, "\tseta {}\n", op),
-           MachineInst::SETG(ref op) => write!(f, "\tsetg {}\n", op),
-           MachineInst::SETAE(ref op) => write!(f, "\tsetae {}\n", op),
-           MachineInst::SETGE(ref op) => write!(f, "\tsetge {}\n", op),
-           MachineInst::SETB(ref op) => write!(f, "\tsetb {}\n", op),
-           MachineInst::SETNB(ref op) => write!(f, "\tsetnb {}\n", op),
-           MachineInst::SETL(ref op) => write!(f, "\tsetl {}\n", op),
-           MachineInst::SETBE(ref op) => write!(f, "\tsetbe {}\n", op),
-           MachineInst::SETLE(ref op) => write!(f, "\tsetle {}\n", op),
-           MachineInst::CALL(ref op) => write!(f, "\tcall {}\n", op),
-           MachineInst::PUSH(ref op) => write!(f, "\tpush {}\n", op),
-           MachineInst::POP(ref op) => write!(f, "\tpop {}\n", op),
-           MachineInst::LEAVE => write!(f, "\tleave\n"),
-           MachineInst::RET => write!(f, "\tret\n"),
-           MachineInst::UD2 => write!(f, "\tud2\n"),
+           MachineInst::Mov(ref op, ref loc) => write!(f, "\tmov {}, {}\n", op, loc),
+           MachineInst::And(ref op, ref loc) => write!(f, "\tand {}, {}\n", op, loc),
+           MachineInst::Add(ref op, ref loc) => write!(f, "\tadd {}, {}\n", op, loc),
+           MachineInst::Sub(ref op, ref loc) => write!(f, "\tsub {}, {}\n", op, loc),
+           MachineInst::Mul(ref loc) => write!(f, "\tmul {}\n", loc),
+           MachineInst::IMul(ref loc) => write!(f, "\timul {}\n", loc),
+           MachineInst::Div(ref loc) => write!(f, "\tdiv {}\n", loc),
+           MachineInst::IDiv(ref loc) => write!(f, "\tidiv {}\n", loc),
+           MachineInst::Xor(ref op, ref loc) => write!(f, "\txor {}, {}\n", op, loc),
+           MachineInst::Lea(ref op, ref loc) => write!(f, "\tlea {}, {}\n", op, loc),
+           MachineInst::Cmp(ref op, ref loc) => write!(f, "\tcmp {}, {}\n", op, loc),
+           MachineInst::Jmp(ref op) => write!(f, "\tjmp {}\n", op),
+           MachineInst::Je(ref op) => write!(f, "\tje {}\n", op),
+           MachineInst::Jl(ref op) => write!(f, "\tjl {}\n", op),
+           MachineInst::Not(ref op) => write!(f, "\tnot {}\n", op),
+           MachineInst::Neg(ref op) => write!(f, "\tneg {}\n", op),
+           MachineInst::SetO(ref op) => write!(f, "\tseto {}\n", op),
+           MachineInst::SetNo(ref op) => write!(f, "\tsetno {}\n", op),
+           MachineInst::SetE(ref op) => write!(f, "\tsete {}\n", op),
+           MachineInst::SetNe(ref op) => write!(f, "\tsetne {}\n", op),
+           MachineInst::SetA(ref op) => write!(f, "\tseta {}\n", op),
+           MachineInst::SetG(ref op) => write!(f, "\tsetg {}\n", op),
+           MachineInst::SetAe(ref op) => write!(f, "\tsetae {}\n", op),
+           MachineInst::SetGe(ref op) => write!(f, "\tsetge {}\n", op),
+           MachineInst::SetB(ref op) => write!(f, "\tsetb {}\n", op),
+           MachineInst::SetNb(ref op) => write!(f, "\tsetnb {}\n", op),
+           MachineInst::SetL(ref op) => write!(f, "\tsetl {}\n", op),
+           MachineInst::SetBe(ref op) => write!(f, "\tsetbe {}\n", op),
+           MachineInst::SetLe(ref op) => write!(f, "\tsetle {}\n", op),
+           MachineInst::Call(ref op) => write!(f, "\tcall {}\n", op),
+           MachineInst::Push(ref op) => write!(f, "\tpush {}\n", op),
+           MachineInst::Pop(ref op) => write!(f, "\tpop {}\n", op),
+           MachineInst::Leave => write!(f, "\tleave\n"),
+           MachineInst::Ret => write!(f, "\tret\n"),
+           MachineInst::Ud2 => write!(f, "\tud2\n"),
            MachineInst::Label(ref s) => write!(f, "{}:\n", s),
            MachineInst::Directive(ref d) => write!(f, "\t{}\n", d),
-           MachineInst::NOP => write!(f, "\tnop\n"),
+           MachineInst::Nop => write!(f, "\tnop\n"),
         }
     }
 }
