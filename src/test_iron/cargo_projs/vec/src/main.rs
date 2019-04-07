@@ -7,7 +7,6 @@ fn main() {
     } else {
         false
     };
-    let hello = format!("hello {:?} {:?} {:?} {:?}",
-                        env::args().len(), v[0], v[env::args().len()], !one_arg);
-    println!("Hello, {:?}", hello);
+    println!("Hello, \"hello {:?} {:?} {:?} {:?}\"",
+             env::args().len(), v[0], v[env::args().len()], !one_arg);
 }
