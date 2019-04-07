@@ -977,7 +977,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             // Emit the call
             self.codegen_call(inst)
             // FIXME: skip the resume for now
-            //unimplemented!("Invoke {:?}, {:?}", then, catch);
         } else {
             bug!("expected OxInstruction::Invoke, found {:?}", inst);
         }
