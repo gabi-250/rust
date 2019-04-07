@@ -147,7 +147,6 @@ impl IntrinsicCallMethods<'tcx> for Builder<'a, 'll, 'tcx> {
                 Some(min_align)
             }
             _ => {
-                eprintln!("ignoring intrinsic: {}", name);
                 // FIXME: Do nothing.
                 None
             }

@@ -81,7 +81,6 @@ impl DeclareMethods<'tcx> for CodegenCx<'ll, 'tcx> {
         name: &str,
         ty: Type
     ) -> Option<Value> {
-        eprintln!("define global: {}", name);
         if self.get_defined_value(name).is_some() {
             None
         } else {
