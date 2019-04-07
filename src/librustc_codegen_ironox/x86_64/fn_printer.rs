@@ -677,8 +677,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
         if let OxInstruction::Ret(value) = inst {
             let mut asm = vec![];
             if let Some(val) = value {
-                asm.push(
-                    MachineInst::xor(Register::direct(RAX), Register::direct(RAX)));
                 let mut comp_inst = self.codegen_value(*val);
                 asm.append(&mut comp_inst.asm);
                 let result = comp_inst.result.unwrap();
