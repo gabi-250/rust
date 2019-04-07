@@ -515,7 +515,6 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
             match val_am {
                 AccessMode::Large(16) => {
                     let val_offset = val_result.rbp_offset();
-                    let ptr_am = ptr_result.access_mode();
                     let am_full = AccessMode::Full;
                     // Move two quad words from val to dst.
                     let reg =
@@ -524,23 +523,19 @@ impl FunctionPrinter<'a, 'll, 'tcx> {
                         Location::RbpOffset(val_offset, am_full));
                     let val_word2 = Operand::Loc(
                         Location::RbpOffset(val_offset + 8, am_full));
-                    // check if ptr result is a ptr?
+                    // Check if ptr.result is a ptr?
                     asm.extend(vec![
                         // Move the first word.
                         MachineInst::mov(ptr_result.clone(),
                                          Register::direct(RAX)),
                         MachineInst::mov(val_word1, reg),
-                        MachineInst::mov(reg, Register::indirect(RAX))
+                        MachineInst::mov(reg, Register::indirect(RAX)),
+                        // Move the second word.
+                        MachineInst::add(Operand::Immediate(8, am_full),
+                                         Register::direct(RAX)),
+                        MachineInst::mov(val_word2, reg),
+                        MachineInst::mov(reg, Register::indirect(RAX)),
                     ]);
-                    if let AccessMode::Large(16) = ptr_am {
-                        asm.extend(vec![
-                            // Move the second word.
-                            MachineInst::add(Operand::Immediate(8, am_full),
-                                             Register::direct(RAX)),
-                            MachineInst::mov(val_word2, reg),
-                            MachineInst::mov(reg, Register::indirect(RAX)),
-                        ]);
-                    }
                 },
                 AccessMode::Large(bytes) => {
                     unimplemented!("AccessMode::Large({})", bytes)
